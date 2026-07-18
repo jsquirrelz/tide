@@ -95,3 +95,10 @@ None - no external service configuration required.
 ---
 *Phase: 49-common-loop-contract-verdict-envelope-persistence-schema*
 *Completed: 2026-07-18*
+
+## Self-Check: PASSED
+
+- FOUND: .planning/phases/49-common-loop-contract-verdict-envelope-persistence-schema/49-04-SUMMARY.md
+- FOUND: 009fd14e (Task 1 commit)
+- FOUND: 9d77825b (Task 2 commit)
+- FOUND: 869bcca3 (SUMMARY commit)

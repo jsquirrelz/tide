@@ -42,7 +42,7 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 - [x] **EVAL-02**: Credproxy TLS trust is proven by a **live pass/fail spike** (`SSL_CERT_FILE` alone through the real `ChatAnthropic` construction path) before any evaluation logic depends on it, with an `http_client=`/`anthropic_client=` fallback planned as a real contingency (langchain#35843); dependencies are patch-exact pinned with a CI gate rejecting ranges
 - [ ] **EVAL-03**: One `gate_decision` verdict schema — `APPROVED | REPAIRABLE | BLOCKED` plus `findings[]` (dimension/severity/confidence/evidence/suggested_fix) and a summary — authored as a matched Go + Pydantic pair, handled **fail-closed** (empty/partial/unparseable → escalation, never APPROVED; a regression test covers empty-JSON, missing-verdict-field, and malformed shapes); individual evaluator commands honor the `evals/README.md` evaluation contract (exit `0`=pass / non-zero=fail, structured result when scores/confidence matter)
 - [ ] **EVAL-04**: Evaluator prompts render **orchestrator-side** as a `role="verifier"` Go template family (no Python port), and the **coverage-not-conservatism** split holds — the evaluator emits a finding for *every* deviation with severity + confidence tags, and gate policy (config) alone decides what blocks
-- [ ] **EVAL-05**: Findings persist under the size×locality rule — a ≤4 KB verdict+counts summary on `TerminationStub`, a small per-CRD status summary, and the **full findings artifact staged on the run branch** via the v1.0.7 git-artifact-store (`collectStageEnvelopes` extended) — never an etcd blob, never a new PVC path
+- [x] **EVAL-05**: Findings persist under the size×locality rule — a ≤4 KB verdict+counts summary on `TerminationStub`, a small per-CRD status summary, and the **full findings artifact staged on the run branch** via the v1.0.7 git-artifact-store (`collectStageEnvelopes` extended) — never an etcd blob, never a new PVC path
 
 ### Per-Level Escalation & Halt (ESC)
 
@@ -117,7 +117,7 @@ Locked at roadmap creation 2026-07-18 (`ROADMAP.md`): Phase 48 LangGraph evaluat
 | EVAL-02 | Phase 48 | Complete |
 | EVAL-03 | Phase 49 | Pending |
 | EVAL-04 | Phase 51 | Pending |
-| EVAL-05 | Phase 49 | Pending |
+| EVAL-05 | Phase 49 | Complete |
 | ESC-01 | Phase 52 | Pending |
 | ESC-02 | Phase 51 | Pending |
 | ESC-03 | Phase 51 | Pending |
