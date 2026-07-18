@@ -96,3 +96,41 @@ def envelope_in_dict() -> Callable[..., dict[str, Any]]:
         return envelope
 
     return _build
+
+
+@pytest.fixture
+def gate_decision_dict() -> Callable[..., dict[str, Any]]:
+    """Factory returning a valid GateDecision dict using the verbatim field
+    names pkg/dispatch/verdict.go defines (D-02 — the Python image
+    re-implements this JSON shape independently since it cannot import the
+    Go package).
+
+    Call with no arguments for a minimal-but-valid REPAIRABLE verdict with
+    one full finding, or pass keyword overrides to customize individual
+    top-level fields.
+    """
+
+    def _build(**overrides: Any) -> dict[str, Any]:
+        decision: dict[str, Any] = {
+            "verdict": "REPAIRABLE",
+            "summary": "One deviation found: a missing null check.",
+            "findings": [
+                {
+                    "dimension": "correctness",
+                    "severity": "blocker",
+                    "confidence": "high",
+                    "evidence": (
+                        "pkg/example/handler.go:42 dereferences req.User "
+                        "without a prior nil check"
+                    ),
+                    "suggestedFix": (
+                        "Add `if req.User == nil { return ErrMissingUser }` "
+                        "before the dereference at line 42"
+                    ),
+                }
+            ],
+        }
+        decision.update(overrides)
+        return decision
+
+    return _build
