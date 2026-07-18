@@ -20,6 +20,7 @@
 ## Phases
 
 **Phase Numbering:**
+
 - Integer phases (48, 49, 50...): Planned milestone work
 - Decimal phases (48.1, 48.2): Urgent insertions (marked with INSERTED)
 
@@ -35,79 +36,109 @@ Phase numbering continues from v1.0.8 (last phase was 47); v1.0.9 starts at Phas
 ## Phase Details
 
 ### Phase 48: LangGraph Evaluator Image + Credproxy-TLS Spike
+
 **Goal**: A minimal read-only Python/LangGraph evaluator image runs behind the unchanged `pkg/dispatch.Subagent` + envelope seam, and its credproxy TLS trust path is proven live — de-risking the new runtime's trust seam before any evaluation/verdict logic is built on top of it.
 **Depends on**: Phase 47 (v1.0.8, last shipped phase)
 **Requirements**: EVAL-01, EVAL-02
 **Success Criteria** (what must be TRUE):
+
   1. A minimal read-only Python/LangGraph container dispatches through the unchanged `pkg/dispatch.Subagent` + envelope seam, with git-read + bash gate-command tools only (no file-edit/commit/push tools, no checkpointer).
   2. A live pass/fail spike proves `SSL_CERT_FILE` alone (or the documented `http_client=`/`anthropic_client=` fallback) trusts credproxy's CA through the real `ChatAnthropic` construction path.
   3. An adversarial test attempting `git commit`/push against a fixture worktree fails at the mount/credential layer (ReadOnly worktree mount + omitted git-write/push credentials) — not merely by prompt refusal.
   4. Every Python dependency is patch-exact pinned, and a CI gate rejects any unpinned/range specifier.
+
 **Plans**: 5 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 48-01-PLAN.md — Python scaffolding: patch-exact pins + hash-locked lockfiles, pytest infra (Wave 0), `make verify-langgraph-pins` CI gate
 - [ ] 48-02-PLAN.md — Read-only jobspec variant: `ReadOnly bool` on BuildOptions + TestBuildJobSpec_Verifier_* static/credential-absence assertions (D-08/D-09a)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 48-03-PLAN.md — Verifier runtime: envelope wire-shape re-implementation, git_read + run_gate_command tools, create_agent loop + fail-closed entrypoint
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 48-04-PLAN.md — Image build (digest-pinned, --require-hashes) + release-matrix wiring + D-09b adversarial behavioral test (`make test-verifier-readonly`)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 48-05-PLAN.md — Live credproxy-TLS spike (plain ChatAnthropic, SSL_CERT_FILE alone) + recorded verdict artifact gating Phase 49 (checkpoint)
+
 **Research flag**: yes — the TLS spike outcome is genuinely unknown until executed live; the fallback contingency is designed against the MEASURED error at the 48-05 checkpoint (D-07 revised post-research: the `http_client=`/`anthropic_client=` hook does not exist at the pinned version — RESEARCH Pitfall A).
 
 ### Phase 49: Common Loop Contract + Verdict/Envelope/Persistence Schema
+
 **Goal**: The `LoopPolicy`/`LoopStatus` shared API types, the `gate_decision` verdict schema, and the findings size×locality persistence contract are locked as shared, reusable primitives — before any halt-condition or reconciler logic is written on top of them.
 **Depends on**: Phase 48
 **Requirements**: LOOP-01, LOOP-02, LOOP-03, EVAL-03, EVAL-05
 **Success Criteria** (what must be TRUE):
+
   1. `LoopPolicy` (MaxIterations/MaxDuration/BudgetCents/Autonomy/EvaluatorRef/EscalationPolicy) and `LoopStatus` (Iteration/ParentRunID/LastEvaluation/ExitReason/CostCents/Conditions) exist as shared Go API types embeddable in any domain CRD, with type-level doc-comments applying the five-element loop test (goal/candidate/evaluator-feedback/repeat-policy/bounded-exit) — no generic `Loop` controller exists.
   2. A `VerifyContext` pointer field on `EnvelopeIn` and a matched Go+Pydantic `GateDecision`/`Finding` pair (`APPROVED | REPAIRABLE | BLOCKED` + `findings[]` with dimension/severity/confidence/evidence/suggested_fix) round-trip through the envelope seam.
   3. An unparseable, empty, or partially-validated verdict is classified fail-closed (never collapses to APPROVED), proven by a regression test covering empty-JSON, missing-verdict-field, and malformed shapes.
   4. Findings persist under the size×locality rule — a ≤4KB summary on `TerminationStub`, a small per-CRD status summary, and the full findings artifact staged onto the run branch via the extended `collectStageEnvelopes` — never an etcd blob, never a new PVC path.
   5. A size test proves `LoopStatus` on any consuming CRD carries only the current-iteration summary + exit reason, never an accumulating iteration history.
+
 **Plans**: TBD
 
 ### Phase 50: Execution-Loop Hardening + Loop-Native Observability
+
 **Goal**: The in-Job execution loop (a pipeline stage, not a loop) produces machine-checkable run evidence and emits the loop-native trace/metric attributes the Task loop will consume — before the Task loop is built on top of it.
 **Depends on**: Phase 49
 **Requirements**: EXEC-01, EXEC-02, EXEC-03, EXEC-04, OBS-01, OBS-02
 **Success Criteria** (what must be TRUE):
+
   1. Every attempt carries a stable `loopRunID` + `attemptID` and emits a span per tool/action iteration.
   2. The result envelope carries an explicit terminal reason (`completed | cap_exceeded | blocked | tool_failure | invalid_output`) — never a silent default.
   3. The result envelope satisfies the run-evidence contract (`docs/templates/minimal-loop-project/evals/README.md`): Task+Spec IDs and locking commit, commands + evaluator versions executed, test/eval results, changed-file manifest, runtime/model/prompt version, cost/duration, terminal reason, bounded feedback — referenced, not re-derived.
   4. The envelope's completion field reports only that the agent *believes* the attempt is complete — no field or code path lets the Execution loop stamp Task correctness.
   5. Spans carry `loop.kind`/`loop.run_id`/`loop.parent_run_id`/`loop.iteration`/`loop.candidate_version`/`loop.exit_reason`/`evaluation.result`/`evaluation.version`/`human_intervention` plus cost/duration/token usage, and run IDs never appear in a Prometheus label — proven by a label-cardinality test.
+
 **Plans**: TBD
 
 ### Phase 51: The Task Loop
+
 **Goal**: `TaskReconciler` drives a real verification-driven quality loop — a locked, planner-authored verification contract dispatches an independent LangGraph evaluator against the real gate command, and a repairable failure produces a fresh, evidence-seeded attempt bounded by `maxIterations`, with concurrency/tracing/halt safety wired at the same dispatch sites (not deferred to a follow-up phase).
 **Depends on**: Phase 50
 **Requirements**: TASK-01, TASK-02, TASK-03, TASK-04, TASK-05, TASK-06, EVAL-04, ESC-02, ESC-03, ESC-04, OBS-03
 **Success Criteria** (what must be TRUE):
+
   1. `TaskSpec.verification` (planner-authored `commands`, `requiredArtifacts`, `evaluator`, `maxIterations`, `onExhaustion`, plus the resolved `GateCommand` field location) is immutable once locked (Draft→Locked→Superseded + version), and `git show <locking-sha>` reproduces exactly what was dispatched.
   2. A verification result classified REPAIRABLE creates a fresh attempt seeded with the original locked spec + a compact evidence packet (failures/diffs/test output) — never the prior agent's full context — while infra-retry (eviction/transient rerun of the same attempt) remains a distinct, preserved path.
   3. The evaluator dispatch (the LangGraph image, with its `SelfInstruments` vendor sentinel registered in this same phase) runs as a logically independent process from the implementation agent; a deterministic command failure in its findings always dominates — a Task can never pass on an LLM-judge APPROVED over a red gate command.
   4. The Task loop is bounded by `maxIterations` with `onExhaustion` routing to `ConditionVerifyHalt` (gating both planner and task tiers, mirroring `failure_halt.go` + the Phase 25 resume time-fence) as a halt class distinct from `Failed` wave semantics; its state is resumable across a controller restart; and a fresh attempt that edits fixtures/thresholds/the evaluator itself is flagged as a system escalation, never counted as a pass — the anti-gaming invariant is enforced, not documented.
   5. Evaluator dispatches count against the concurrency gate (extended `plannerInFlightCount` or a new `verifierInFlightCount`) and `LoopPolicy.BudgetCents` bounds cost via the existing reservation store — verified by a kind-cluster concurrent-dispatch test that stays under the sized cap.
+
 **Plans**: TBD
 **Research flag**: yes — two genuinely open calls gate this phase's plan: (1) where the per-level `GateCommand` ("pass criterion command") is declared in the CRD schema — a new `Plan.Spec`/`Project.Spec` field vs. a convention-based lookup, a real requirements decision with no existing source; (2) whether the LangGraph runtime needs a new `Vendor` sentinel (e.g. `"langgraph"`) in `pkg/dispatch.SelfInstruments`/`ResolveProvider(...).Vendor` or can reuse `"anthropic"` with a runtime discriminator — must be locked before this phase's `SelfInstruments` wiring.
 
 ### Phase 52: Per-Level LoopPolicy Parameterization
+
 **Goal**: The same verification contract runs at every level — Task, Plan/plan-check, Phase/Milestone/Project — purely as different `LoopPolicy` parameterizations, with gate policy resolved from loop level rather than hierarchy position. Falls out cleanly once the contract (Phase 49) and the Task loop (Phase 51) exist.
 **Depends on**: Phase 51
 **Requirements**: ESC-01
 **Success Criteria** (what must be TRUE):
+
   1. Plan/plan-check runs with `maxIterations:1` (its own counter, default 1, never shared with the Task loop's counter) against a goal-backward rubric (goal alignment, file-touch plausibility, dependency correctness, verification derivability) and applies severity-weighted stall detection before escalating.
   2. Phase/Milestone/Project run with `maxIterations:0` — any verify finding at these levels escalates straight to `requireApproval` rather than auto-repairing, because these levels close on their observable outcome, not task-completion.
   3. Gate policy is resolved from the loop-level field on `LoopPolicy`, not from CRD kind/hierarchy position — one resolver function serves all levels.
+
 **Plans**: TBD
 
 ### Phase 53: Chart Config + Dashboard Provenance Surfacing
+
 **Goal**: Operators configure the loop/verify tier through the existing chart-first precedence chain with a safe default posture, and the dashboard surfaces nested loop provenance plus a `VerifyHalt` state visually distinct from `Failed`.
 **Depends on**: Phase 52
 **Requirements**: CFG-01, CFG-02, OBS-04
 **Success Criteria** (what must be TRUE):
+
   1. A chart-first config surface (evaluator image/model + per-level `LoopPolicy` defaults) follows the existing `subagent.levels`/`resolveImage` precedence chain, with `charts/tide/values.yaml` remaining the FIXED contract (binary catches up to chart).
   2. A fresh install gets Task-loop auto-repair + Plan/Milestone/Project escalation enabled at milestone+project scope by default; an in-place `helm upgrade` on an existing install leaves the verify/loop tier off — proven by an upgrade-path test.
   3. The dashboard shows nested loop provenance (Project run → Task iteration → Execution attempt/tool spans) and renders `VerifyHalt` as a visually distinct state from `Failed`, with staged findings browsable through the existing gitfetch/artifacts API (no new endpoint).
+
 **Plans**: TBD
 **UI hint**: yes
 

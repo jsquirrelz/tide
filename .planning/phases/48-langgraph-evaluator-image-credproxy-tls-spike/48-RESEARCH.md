@@ -505,17 +505,17 @@ Without this, the Docker build context silently excludes the new image's entire 
 
 **All four numbered corrections in the Summary (Pitfalls A–D) are `[VERIFIED]` via direct primary-source reads in this session, not `[ASSUMED]`** — they do not need user confirmation as "assumptions," but the planner should treat them as supersede-and-replace corrections to the committed STACK.md/PITFALLS.md/CONTEXT.md text on these four specific points.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Exact shape of the D-06 spike's own harness (pytest vs. plain `python` entrypoint)**
    - What we know: `cmd/tide-spike/main.go` is the Go precedent (flag-driven, env-var-driven, fail-closed, never logs the token). D-06 says "standalone container spike," explicitly Claude's Discretion on driver mechanism.
    - What's unclear: whether the Python spike should live as a `pytest` test (integrates with `make test` conceptually) or a bare `python spike.py` script (closer parity with the Go precedent's flag/env style).
-   - Recommendation: bare `python` script with the same flag/env pattern as `cmd/tide-spike/main.go` (proxy endpoint, signed token via env, never logged, binary exit code) — keeps the TLS proof runnable standalone outside any test framework, matching D-06's "standalone container" framing more literally than a pytest wrapper would.
+   - RESOLVED: bare `python` script with the same flag/env pattern as `cmd/tide-spike/main.go` (proxy endpoint, signed token via env, never logged, binary exit code) — keeps the TLS proof runnable standalone outside any test framework, matching D-06's "standalone container" framing more literally than a pytest wrapper would. (Followed by Plan 48-05.)
 
 2. **Whether the read-only jobspec variant needs a `JobKindVerifier` const now, or stays a boolean flag on the existing `JobKindExecutor` shape**
    - What we know: `JobKind` currently has exactly two values (`executor`, `planner`), used for wall-clock floor + label derivation. Phase 51 will eventually want a `"verifier"` role label for real dispatch/observability.
    - What's unclear: whether introducing `JobKindVerifier` now (unused until Phase 51) is worth the forward-compatibility vs. keeping Phase 48's change to the smallest possible diff (a `ReadOnly bool` field only, label role stays `"executor"` for now).
-   - Recommendation: smallest diff for Phase 48 (boolean field only, per Pattern 2) — since D-08 explicitly says "not yet dispatched by any reconciler," introducing a whole new `JobKind` value with no consumer yet risks looking "done" in a way that invites premature wiring. Phase 51 can introduce `JobKindVerifier` when it actually needs the role label for dispatch/labels.
+   - RESOLVED: smallest diff for Phase 48 (boolean field only, per Pattern 2) — since D-08 explicitly says "not yet dispatched by any reconciler," introducing a whole new `JobKind` value with no consumer yet risks looking "done" in a way that invites premature wiring. Phase 51 can introduce `JobKindVerifier` when it actually needs the role label for dispatch/labels. (Followed by Plan 48-02.)
 
 ## Environment Availability
 
