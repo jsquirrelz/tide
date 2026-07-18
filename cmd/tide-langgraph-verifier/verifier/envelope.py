@@ -94,7 +94,13 @@ def read_envelope_in(path: str | os.PathLike[str]) -> EnvelopeIn:
     if got_kind != KIND_IN:
         raise EnvelopeError(f"unrecognized kind: expected {KIND_IN!r}, got {got_kind!r}")
 
-    provider = raw.get("provider") or {}
+    provider = raw.get("provider")
+    if provider is None:
+        provider = {}
+    elif not isinstance(provider, dict):
+        raise EnvelopeError(
+            f"read envelope {path!s}: 'provider' must be a JSON object, got {type(provider).__name__}"
+        )
 
     return EnvelopeIn(
         api_version=got_api_version,

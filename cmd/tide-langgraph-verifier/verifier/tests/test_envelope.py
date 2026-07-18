@@ -60,6 +60,21 @@ def test_read_envelope_in_missing_file_raises_missing_error(tmp_path: Path) -> N
         envelope.read_envelope_in(missing_path)
 
 
+@pytest.mark.parametrize("bad_provider", ["anthropic", 42, ["anthropic"]])
+def test_read_envelope_in_rejects_non_object_provider(
+    tmp_path: Path, envelope_in_dict, bad_provider
+) -> None:
+    """WR-01 regression: a non-object `provider` (string/number/array) must
+    raise EnvelopeError (the fail-closed path), never an uncaught
+    AttributeError that skips the structured termination stub."""
+    payload = envelope_in_dict(provider=bad_provider)
+    in_path = tmp_path / "in.json"
+    in_path.write_text(json.dumps(payload))
+
+    with pytest.raises(envelope.EnvelopeError, match="provider"):
+        envelope.read_envelope_in(in_path)
+
+
 def test_read_envelope_in_tolerates_unknown_fields(tmp_path: Path, envelope_in_dict) -> None:
     payload = envelope_in_dict(futureField="something-phase-49-adds")
     in_path = tmp_path / "in.json"
