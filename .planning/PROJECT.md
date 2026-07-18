@@ -8,6 +8,24 @@ A Kubernetes-native orchestrator that runs hierarchical agentic coding work as a
 
 **The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.** If everything else fails, TIDE-on-TIDE must work — that's what proves the paradigm and the implementation simultaneously, and it's the bar for "v1 ships."
 
+## Current Milestone: v1.0.9 — Slack Tide: In-Cluster Verify Tier + LangGraph Beachhead (SCOPING 2026-07-18)
+
+**Goal:** TIDE gains an in-cluster **verify tier** — a new read-only `verifier` subagent class, dispatched on a LangGraph specialist image behind the existing `pkg/dispatch.Subagent` seam, that checks work at three lifecycle seams (plan-check, level-verify, integration-check) and enforces a `gate_decision` the reconcilers honor. Makes a run's `Complete` stamp provable rather than hoped-for — and lands the first rung of the evidence-gated successor-runtime ladder.
+
+**Why now:** All five compiled-in templates are authoring/executing — nothing in-cluster checks, verifies, or reviews. The first external-repo run (2026-07-03) stamped `Complete` with a declared deliverable missing from the pushed branch, and the outcome prompt's pass criterion ("pytest green") was never executed in-cluster; the only verifier in the loop was the human operator diffing `filesTouched` by hand. v1.0.7 Phase 34 closed the mechanical, no-LLM completeness case (git-verified merge); Slack Tide ships the semantic tier. Sequenced deliberately **before** dogfood run #2 so the run executes with in-cluster verification watching it.
+
+**Target features:**
+- **plan-check** — post-plan-authoring, pre-task-dispatch: goal-backward "will these tasks achieve the level objective?" + declared-vs-plausible file-touch sanity. REJECT → bounded re-plan loop (re-dispatch the planner with findings appended, ≤ N attempts, then halt).
+- **level-verify** — after a level's children succeed, before Succeeded / boundary push: run the declared gate command in-worktree, confirm every declared deliverable exists on the run branch, confirm "do-not-touch" constraints held.
+- **integration-check** — milestone/project boundaries: do sibling outputs actually compose; does the full run branch build/test as a whole.
+- **Read-only LangGraph specialist image** — Python/LangGraph container behind `pkg/dispatch.Subagent` + the envelope contract; credproxy-gated, git-**read** + bash (execute the gate command), `with_structured_output` for the verdict (findings carry severity + confidence tags). Never commits, pushes, edits files, or authors child CRDs; no five-template parity port.
+- **`ConditionVerifyHalt`** — new project-level halt class mirroring BillingHalt/FailureHalt (including its resume/recovery discipline, per Phase 25's resume-ordering lessons). Wave-boundary failure semantics untouched: a BLOCKED verify is a new halt class, not a reinterpretation of task failure.
+- **Per-level stage-dispatch config** — verify stages configured per level like gates/models today; gate policy stays in config, never baked into the controller. Prompting is **coverage, not conservatism** — severity/confidence tags, filter downstream.
+
+**Architecture pillars (locked 2026-07-06 via `/gsd:explore`):** verify tier only (debug / review / research / learnings / tournament explicitly deferred); read-only LangGraph image behind the unchanged Subagent seam; the two failure paths above; dynamism lives inside the pod (LangGraph conditional loops) and at lifecycle seams (stage routing) — the execution DAG stays static and derived. Full framing: [milestones/vnext-specialist-verify-MILESTONE.md](milestones/vnext-specialist-verify-MILESTONE.md); strategy ladder: [notes/langgraph-successor-runtime-strategy.md](notes/langgraph-successor-runtime-strategy.md).
+
+**Open decisions → routed to research** (plan-phase settles the remainder): verifier prompt source (orchestrator-side Go template vs. in-image Python — leaning orchestrator-side); LangGraph / `langchain-anthropic` version pins (1.x moves fast); httpx honoring `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` (polyglot doc assumption A1); `with_structured_output` + `cache_control`/params passthrough; stage default posture (off / milestone+project-only / all levels); re-plan loop N (1 or 2; shared vs. own counter); `gate_decision` findings persistence (status condition + findings-artifact location, envelopes-as-artifacts size×locality rule).
+
 ## Last Released Milestone: v1.0.8 — Phoenix Rising: OpenInference Trace Emission + Self-Hosted Phoenix (SHIPPED 2026-07-17, tag `v1.0.8`)
 
 **Goal:** TIDE runs are observable in a self-hosted Arize Phoenix — the Milestone→Phase→Plan→Task dispatch chain emits real OpenTelemetry spans with OpenInference attributes (including full LLM input/output message arrays), and a documented Phoenix self-host recipe wires the chart's existing OTLP endpoint to consume them natively.
@@ -39,7 +57,7 @@ Two earliest milestones shipped:
 - **v1.0.0 — Self-Hosting MVP** (2026-06-11) — published: goreleaser binaries (5 platforms), 7 component images and both Helm charts on GHCR (`oci://ghcr.io/jsquirrelz/tide-charts`), rc-gated release pipeline with a $0 Docker-in-Docker external-operator dry-run. Live medium DoD proven on minikube (Project=Complete, real authored commits pushed to a per-run branch). All 82 v1 requirements delivered — [milestones/v1.0.0-REQUIREMENTS.md](milestones/v1.0.0-REQUIREMENTS.md).
 - **v1.0.1 — Orchestrator Trustworthiness + Telemetry Completion** (2026-06-13) — every dogfood run-1 finding fixed with a symptom-reproducing regression test: gate-semantics run-killer (approve-at-descent), reject/resume recovery, the image-resolution chain (closing the v1.0 stub-image bug), provider billing-400 project-wide halt, budget visibility with bounded overshoot, seven paper cuts, the telemetry foundation end-to-end, and the audit tech-debt subset. 28/28 requirements satisfied; milestone audit passed with zero blockers. [milestones/v1.0.1-REQUIREMENTS.md](milestones/v1.0.1-REQUIREMENTS.md).
 
-**Current focus:** **v1.0.8 Phoenix Rising RELEASED 2026-07-17 (tag `v1.0.8`).** All 6 phases (42–47) shipped + verified; PROOF-01 human-signed-off on a live 392-span five-level trace tree in a self-hosted Phoenix; published to GHCR (8 images + 2 OCI charts + 5 binaries, anon-public). Next: scope the next milestone — the LangGraph specialist-verify beachhead (vNext) and dynamic workflows at lifecycle seams are queued. The headline beyond remains full TIDE-on-TIDE.
+**Current focus:** **v1.0.9 "Slack Tide" SCOPING (started 2026-07-18)** — the in-cluster verify tier + LangGraph beachhead (see Current Milestone above). v1.0.8 Phoenix Rising RELEASED 2026-07-17 (tag `v1.0.8`): all 6 phases (42–47) shipped + verified, PROOF-01 human-signed-off on a live 392-span five-level trace tree, published to GHCR (8 images + 2 OCI charts + 5 binaries, anon-public). Slack Tide is the first rung of the successor-runtime ladder and lands before dogfood run #2; the headline beyond remains full TIDE-on-TIDE.
 
 Everything below this line reflects v1 planning state, preserved for reference.
 
@@ -190,4 +208,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-17 after the v1.0.8 Phoenix Rising RELEASE (tag `v1.0.8`; 6 phases / 32 plans; PROOF-01 human-signed-off; published to GHCR — 8 images + 2 OCI charts + 5 binaries). Next: scope the next milestone.*
+*Last updated: 2026-07-18 — started milestone v1.0.9 "Slack Tide" (in-cluster verify tier + LangGraph beachhead). Scope confirmed (all three stages, research-first, prompt-source deferred to research); requirements + roadmap pending. Prior: v1.0.8 Phoenix Rising RELEASE 2026-07-17.*
