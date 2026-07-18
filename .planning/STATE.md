@@ -1,7 +1,7 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.0.9
-milestone_name: Slack Tide — In-Cluster Verify Tier + LangGraph Beachhead
+milestone_name: Slack Tide — The Task Loop (Verification-Driven Quality Iteration)
 status: planning
 last_updated: "2026-07-18T05:48:10.232Z"
 last_activity: 2026-07-18
@@ -17,10 +17,10 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-07-17)
+See: .planning/PROJECT.md (updated 2026-07-18)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Between milestones — v1.0.8 "Phoenix Rising" RELEASED 2026-07-17 (tag v1.0.8, published to GHCR); next-milestone scoping pending.
+**Current focus:** v1.0.9 "Slack Tide" SCOPING — the **Task loop** (verification-driven quality iteration) + a shared loop contract, the first loop of the [five-loop model](notes/five-loop-model.md). Requirements defined; roadmap pending.
 
 ## Current Position
 
@@ -45,15 +45,19 @@ Last activity: 2026-07-18 — Milestone v1.0.9 started
 
 Decisions are logged in PROJECT.md Key Decisions table.
 
-**v1.0.8 binding constraints (from research + requirements + runtime-neutrality lock):**
+**v1.0.9 binding constraints (Task loop + five-loop model — see [notes/five-loop-model.md](notes/five-loop-model.md), research committed `f85ee3d`):**
 
-- Retroactive span synthesis only — spans are created and closed in the same `handleJobCompletion` call using `completedJob.Status.{StartTime,CompletionTime}`, never held open across a `Reconcile()` return.
-- Deterministic TraceID from `Project.UID`; span IDs mint fresh, after the fact, at each level's completion — no custom `IDGenerator`.
-- D-O5 payload-boundary decision (message-array inline-vs-`ArtifactPath`) is a real open design call, not a rubber stamp — resolved in Phase 44 with an explicit byte threshold, not a binary always-inline choice.
-- `events.jsonl` is deliberately unredacted at the source; the reporter's redaction pass (`internal/harness/redact.SecretPatterns`) is mandatory before any message content reaches a span (MSG-02).
-- Span creation has no natural idempotency (unlike Job `Create`) — gate span creation off the same state-transition edges that already gate Job creation, not in-memory "did I already do this" checks.
-- Phoenix is a separate `helm install`, never a TIDE chart subchart or bundled manifest (documented-install posture, TELEM-01 precedent) — no version coupling to Arize's near-daily chart releases.
-- Runtime-neutrality (locked 2026-07-15 in PROJECT.md): trace-context contract (manager-injected `traceparent`) is the durable seam; the events.jsonl parser is a per-runtime adapter behind the Subagent seam with a self-instrumenting capability flag (ADAPT-01); attribute/span-kind conventions follow OpenInference semconv exactly so Phoenix queries survive the future LangGraph migration.
+- **Verification closes a loop, not a gate.** One verification-driven loop parameterized per level by `LoopPolicy`: Task `maxIterations:N` (auto-repair, the core), Plan/plan-check `maxIterations:1` (re-plan), Phase/Milestone/Project `maxIterations:0` (escalate to `requireApproval`). Gate policy resolves from loop level + risk + confidence, not hierarchy position.
+- **Shared loop contract, not a generic Loop controller.** `LoopPolicy`/`LoopStatus` are shared API types embedded in domain CRDs. Minimal fields for the two v1.0.9 consumers (Task loop + plan-check); grow per loop. Five elements (goal, candidate, evaluator feedback, repeat policy, bounded exit) or it is a pipeline stage, not a loop.
+- **Iteration history lives in traces/artifacts, never CRD status** — etcd stays a state store, not an event DB. `LoopStatus` carries only the current-iteration summary + exit reason.
+- **infra-retry ≠ quality-iteration.** Eviction/transient rerun of the same attempt is preserved; the blind `maxAttemptsPerTask` quality-retry is replaced by evaluator-driven fresh attempts that receive the original spec + a compact evidence packet, not the prior agent's full context.
+- **The evaluator is logically independent** from the implementation agent (the read-only LangGraph image, a distinct runtime/process), and **a deterministic failure dominates an LLM judge's approval**. The Execution (in-Job) loop never stamps the Task correct.
+- **Fail-closed verdict handling** — empty/partial/unparseable `gate_decision` routes to escalation, never collapses to APPROVED (fail-open would reproduce the 2026-07-03 silent-`Complete` incident this milestone exists to fix).
+- **`ConditionVerifyHalt` mirrors `failure_halt.go` + Phase 25's resume time-fence, gates BOTH tiers** (a BLOCKED verify means the artifact tree is suspect), and is a **distinct halt class** — never a reinterpretation of `Failed` wave semantics.
+- **Read-only enforced structurally** (ReadOnly mount + credential omission, no manager-side child-CRD consumption path), not by prompt. Verifier prompts render orchestrator-side (Go template, no Python port).
+- **Cost/concurrency is the biggest multiplier yet** (attempts × evaluator × levels): `LoopPolicy.BudgetCents` + the reservation store + the Phase-32 concurrency gate (verifier pods MUST be counted, same phase as dispatch sites) bound it; `onExhaustion: requireApproval` is the human backstop.
+- **A1 correction:** httpx honors `SSL_CERT_FILE` only (`REQUESTS_CA_BUNDLE` is dead); the credproxy-TLS path through `ChatAnthropic` is a genuine build spike (`langchain#35843`), scheduled first with an `http_client=`/`anthropic_client=` fallback.
+- **Named future arc:** Product / System / Oversight loops are later milestones; `internal/eval` seeds the System loop, the existing gates seed Oversight enforcement (resolve gate policy from loop level/risk/confidence/history).
 
 ### Pending Todos
 
