@@ -57,7 +57,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 48-03-PLAN.md — Verifier runtime: envelope wire-shape re-implementation, git_read + run_gate_command tools, create_agent loop + fail-closed entrypoint
+- [x] 48-03-PLAN.md — Verifier runtime: envelope wire-shape re-implementation, git_read + run_gate_command tools, create_agent loop + fail-closed entrypoint
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -158,7 +158,7 @@ Phases execute in numeric order: 48 → 49 → 50 → 51 → 52 → 53
 | 31–33 (see archive) | v1.0.6 | 8/8 | Complete | 2026-06-29 |
 | 34–41 (see archive) | v1.0.7 | 51/51 | Complete | 2026-07-15 |
 | 42–47 (see archive) | v1.0.8 | 32/32 | Complete | 2026-07-17 |
-| 48. LangGraph Evaluator Image + Credproxy-TLS Spike | v1.0.9 | 2/5 | In Progress|  |
+| 48. LangGraph Evaluator Image + Credproxy-TLS Spike | v1.0.9 | 3/5 | In Progress|  |
 | 49. Common Loop Contract + Verdict/Envelope/Persistence Schema | v1.0.9 | 0/TBD | Not started | - |
 | 50. Execution-Loop Hardening + Loop-Native Observability | v1.0.9 | 0/TBD | Not started | - |
 | 51. The Task Loop | v1.0.9 | 0/TBD | Not started | - |
