@@ -182,7 +182,7 @@ spec:
     # v1.0.7-rc.1 dry-run gate failed exactly this way on a stale 1.0.0 pin).
     # TestExamplesSubagentImagePinsMatchChartAppVersion (test/integration/kind)
     # fails the build when this tag drifts from charts/tide/Chart.yaml.
-    image: ghcr.io/jsquirrelz/tide-stub-subagent:1.0.7
+    image: ghcr.io/jsquirrelz/tide-stub-subagent:1.0.8
     model: stub
 
   gates:
