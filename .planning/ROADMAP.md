@@ -82,7 +82,18 @@ Plans:
   4. Findings persist under the size×locality rule — a ≤4KB summary on `TerminationStub`, a small per-CRD status summary, and the full findings artifact staged onto the run branch via the extended `collectStageEnvelopes` — never an etcd blob, never a new PVC path.
   5. A size test proves `LoopStatus` on any consuming CRD carries only the current-iteration summary + exit reason, never an accumulating iteration history.
 
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 49-01-PLAN.md — `api/v1alpha3/loop_types.go`: `LoopPolicy`/`LoopStatus`/`EvaluationSummary` standalone types + five-element doc-comments (D-06) + LOOP-03 compile-time structural guard + synthetic-embedder proof; zero `make manifests` diff (LOOP-01/02/03)
+- [ ] 49-02-PLAN.md — `pkg/dispatch/verdict.go`: `Verdict`/`Finding`/`GateDecision` + fail-closed `ClassifyVerdict` + canonical golden fixture; `VerifyContext` on `EnvelopeIn`, `Verdict` on `EnvelopeOut`, bounded verdict summary on `TerminationStub` (EVAL-03 Go half, EVAL-05a)
+- [ ] 49-04-PLAN.md — `stageEnvelopeArtifacts` glob generalization (task-kind stages `findings.json`-only, planner `*.md` hard-fail preserved) + regression test; `collectStageEnvelopes` untouched (EVAL-05c)
+
+**Wave 2** *(blocked on 49-02 — the shared golden fixture + verdict JSON shape)*
+
+- [ ] 49-03-PLAN.md — Python parity: `verifier/verdict.py` pydantic `GateDecision`/`Finding` + mirrored `classify_verdict` reading the SAME golden fixture + `verify` extraction on `EnvelopeIn` + extended `write_termination_stub` (EVAL-03 Python half)
 
 ### Phase 50: Execution-Loop Hardening + Loop-Native Observability
 
@@ -159,7 +170,7 @@ Phases execute in numeric order: 48 → 49 → 50 → 51 → 52 → 53
 | 34–41 (see archive) | v1.0.7 | 51/51 | Complete | 2026-07-15 |
 | 42–47 (see archive) | v1.0.8 | 32/32 | Complete | 2026-07-17 |
 | 48. LangGraph Evaluator Image + Credproxy-TLS Spike | v1.0.9 | 5/5 | Complete   | 2026-07-18 |
-| 49. Common Loop Contract + Verdict/Envelope/Persistence Schema | v1.0.9 | 0/TBD | Not started | - |
+| 49. Common Loop Contract + Verdict/Envelope/Persistence Schema | v1.0.9 | 0/4 | Not started | - |
 | 50. Execution-Loop Hardening + Loop-Native Observability | v1.0.9 | 0/TBD | Not started | - |
 | 51. The Task Loop | v1.0.9 | 0/TBD | Not started | - |
 | 52. Per-Level LoopPolicy Parameterization | v1.0.9 | 0/TBD | Not started | - |
