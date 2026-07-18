@@ -315,6 +315,12 @@ jobs:
           - component: tide-import
             dockerfile: images/tide-import/Dockerfile
             context: .
+          # Phase 48 EVAL-01/02 — not yet chart-referenced (Phase 53 wires the
+          # chart); built/publishable here regardless so verify-chart-images-
+          # published (chart→matrix direction only) is unaffected.
+          - component: tide-langgraph-verifier
+            dockerfile: cmd/tide-langgraph-verifier/Dockerfile
+            context: .
     steps:
       - name: Clone the code
         uses: actions/checkout@v4

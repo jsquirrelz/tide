@@ -365,8 +365,8 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 	rm Dockerfile.cross
 
 .PHONY: docker-buildx-snapshot
-docker-buildx-snapshot: ## Phase 6 IMG-01 — local multi-arch snapshot build of all 7 component images (no push; IMAGE_TAG=$(IMAGE_TAG)).
-	@echo "Building all 7 component images for linux/amd64,linux/arm64 (no push; tag=$(IMAGE_TAG))..."
+docker-buildx-snapshot: ## Phase 6 IMG-01 — local multi-arch snapshot build of all 8 component images (no push; IMAGE_TAG=$(IMAGE_TAG)).
+	@echo "Building all 8 component images for linux/amd64,linux/arm64 (no push; tag=$(IMAGE_TAG))..."
 	$(CONTAINER_TOOL) buildx build --platform linux/amd64,linux/arm64 \
 		-t ghcr.io/jsquirrelz/tide-controller:$(IMAGE_TAG) -f ./Dockerfile .
 	$(CONTAINER_TOOL) buildx build --platform linux/amd64,linux/arm64 \
@@ -381,6 +381,12 @@ docker-buildx-snapshot: ## Phase 6 IMG-01 — local multi-arch snapshot build of
 		-t ghcr.io/jsquirrelz/tide-reporter:$(IMAGE_TAG) -f images/tide-reporter/Dockerfile .
 	$(CONTAINER_TOOL) buildx build --platform linux/amd64,linux/arm64 \
 		-t ghcr.io/jsquirrelz/tide-claude-subagent:$(IMAGE_TAG) -f images/claude-subagent/Dockerfile .
+	$(CONTAINER_TOOL) buildx build --platform linux/amd64,linux/arm64 \
+		-t ghcr.io/jsquirrelz/tide-langgraph-verifier:$(IMAGE_TAG) -f cmd/tide-langgraph-verifier/Dockerfile .
+
+.PHONY: docker-build-langgraph-verifier
+docker-build-langgraph-verifier: ## Phase 48 EVAL-01/02 — single-arch local build of tide-langgraph-verifier, tag :test (reused by make test-verifier-readonly and the D-06 spike).
+	$(CONTAINER_TOOL) build -t ghcr.io/jsquirrelz/tide-langgraph-verifier:test -f cmd/tide-langgraph-verifier/Dockerfile .
 
 .PHONY: build-installer
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
