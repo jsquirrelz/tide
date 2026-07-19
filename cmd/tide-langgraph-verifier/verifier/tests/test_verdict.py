@@ -339,6 +339,71 @@ def test_empty_commands_list_stays_fail_closed_never_approved(
     assert out["verdict"]["verdict"] != "APPROVED"
 
 
+def test_run_commands_out_of_band_records_timeout_as_nonzero(
+    monkeypatch, fixture_worktree: Path
+) -> None:
+    """ME-03: a gate command that exceeds GATE_COMMAND_TIMEOUT_SECONDS raises
+    subprocess.TimeoutExpired. The call site is OUTSIDE main()'s try/except, so
+    an uncaught timeout would abort main() with a traceback before a structured
+    verdict/stub is written. _run_commands_out_of_band must instead record the
+    timed-out command as a non-zero (124) so _assemble_verdict emits the
+    deterministic gate-command blocker finding."""
+    # Shrink the timeout so a trivially-hanging command trips it fast.
+    monkeypatch.setattr(entrypoint.tools, "GATE_COMMAND_TIMEOUT_SECONDS", 0.2)
+
+    results = entrypoint._run_commands_out_of_band(
+        ["true", "sleep 5"], str(fixture_worktree)
+    )
+
+    assert results == [("true", 0), ("sleep 5", 124)]
+
+    # And the timed-out command forces a non-APPROVED verdict with a
+    # gate-command blocker finding (structured, not a crash).
+    decision = entrypoint._assemble_verdict("gate_decision: APPROVED", results)
+    assert decision.verdict in (verdict.Verdict.REPAIRABLE, verdict.Verdict.BLOCKED)
+    gate_findings = [f for f in decision.findings if f.dimension == "gate-command"]
+    assert len(gate_findings) == 1
+    assert "exit_code=124" in gate_findings[0].evidence
+
+
+def test_timed_out_gate_command_writes_structured_verdict_not_crash(
+    tmp_path: Path, monkeypatch, fixture_worktree: Path, envelope_in_dict
+) -> None:
+    """ME-03 end-to-end: a hanging gate command drives main() to a clean exit
+    with a structured out.json + termination stub — not an unhandled
+    TimeoutExpired traceback that loses the deterministic finding."""
+    monkeypatch.setenv("TIDE_WORKTREE_DIR", str(fixture_worktree))
+    monkeypatch.setenv("TIDE_GATE_COMMAND", "pytest-leak-guard")
+    monkeypatch.setattr(entrypoint.tools, "GATE_COMMAND_TIMEOUT_SECONDS", 0.2)
+    in_path = tmp_path / "in.json"
+    in_path.write_text(
+        json.dumps(
+            envelope_in_dict(
+                provider={"vendor": "langgraph", "model": "claude-sonnet-4-6"},
+                verify={"gateCommand": "sleep 5", "commands": ["sleep 5"]},
+            )
+        )
+    )
+    stub_path = tmp_path / "termination-log"
+
+    exit_code = entrypoint.main(
+        in_path=str(in_path),
+        termination_message_path=str(stub_path),
+        build_model=lambda env: object(),
+        run_agent_fn=lambda model, prompt: _approved_llm_result(),
+    )
+
+    assert exit_code == 0  # the verifier process ran to completion, no traceback
+    out = json.loads((tmp_path / "out.json").read_text())
+    assert out["verdict"]["verdict"] in ("REPAIRABLE", "BLOCKED")
+    gate_findings = [f for f in out["verdict"]["findings"] if f["dimension"] == "gate-command"]
+    assert len(gate_findings) == 1
+    assert "exit_code=124" in gate_findings[0]["evidence"]
+
+    stub = json.loads(stub_path.read_text())
+    assert stub["gateDecision"] in ("REPAIRABLE", "BLOCKED")
+
+
 def test_tide_gate_command_env_set_from_canonical_gate_command_before_agent_runs(
     tmp_path: Path, monkeypatch, fixture_worktree: Path, envelope_in_dict
 ) -> None:

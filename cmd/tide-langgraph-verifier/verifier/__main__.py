@@ -87,16 +87,28 @@ def _run_commands_out_of_band(commands: list[str], worktree_dir: str) -> list[tu
     """
     results: list[tuple[str, int]] = []
     for command in commands:
-        proc = subprocess.run(  # noqa: S602 — command is an orchestrator-resolved, CEL-immutable-once-Locked VerificationSpec pass-criterion, never a model-supplied value
-            command,
-            shell=True,
-            cwd=worktree_dir,
-            capture_output=True,
-            text=True,
-            timeout=tools.GATE_COMMAND_TIMEOUT_SECONDS,
-            check=False,
-        )
-        results.append((command, proc.returncode))
+        try:
+            proc = subprocess.run(  # noqa: S602 — command is an orchestrator-resolved, CEL-immutable-once-Locked VerificationSpec pass-criterion, never a model-supplied value
+                command,
+                shell=True,
+                cwd=worktree_dir,
+                capture_output=True,
+                text=True,
+                timeout=tools.GATE_COMMAND_TIMEOUT_SECONDS,
+                check=False,
+            )
+            results.append((command, proc.returncode))
+        except subprocess.TimeoutExpired:
+            # ME-03: a hung/deadlocked gate command (a flaky/deadlocked test —
+            # common) is semantically a FAILING gate, not an unstructured crash.
+            # The call site is OUTSIDE main()'s try/except, so an uncaught
+            # TimeoutExpired would abort main() with a traceback before
+            # write_envelope_out/write_termination_stub run — losing the
+            # deterministic gate-command finding entirely. Record it as a
+            # non-zero (124, the conventional timeout exit code) so
+            # _assemble_verdict emits the gate-command blocker finding and forces
+            # REPAIRABLE/BLOCKED, preserving the structured verdict + stub.
+            results.append((command, 124))
     return results
 
 
