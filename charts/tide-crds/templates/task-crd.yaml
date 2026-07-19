@@ -213,6 +213,91 @@ spec:
                   Empty for Tasks authored before Phase 20 or where the parent planner
                   emitted no SharedContext; omitempty keeps older CRD objects small.
                 type: string
+              verification:
+                description: |-
+                  Verification declares the planner-authored, immutable-once-locked
+                  pass-criteria contract for this Task (Phase 51 TASK-01). Mirrors the
+                  Gates precedence-doc pattern: Task-scoped only in this phase; the
+                  identical VerificationSpec shape generalizes to Plan.Spec/
+                  Project.Spec with a Task > Plan > Project precedence in Phase 52.
+                properties:
+                  commands:
+                    description: |-
+                      Commands lists additional acceptance-signal commands beyond
+                      GateCommand. Plan 06 resolves this list onto the transported
+                      VerifyContext.Commands list; the Plan 02 verifier executes EACH
+                      command out-of-band (exit codes parsed, any non-zero dominates any
+                      LLM APPROVED — TASK-04). Not decorative.
+                    items:
+                      type: string
+                    type: array
+                  evaluator:
+                    description: |-
+                      Evaluator names the evaluator config this verification contract
+                      resolves against (same-namespace name ref, plain string — not
+                      corev1.LocalObjectReference).
+                    type: string
+                  gateCommand:
+                    description: |-
+                      GateCommand is the single canonical primary pass-criterion command —
+                      resolves onto pkg/dispatch.VerifyContext.GateCommand at verifier
+                      dispatch time (Plan 06). This is planner-authored data EXECUTED FOR
+                      REAL downstream, NOT decorative/status text: the independent verifier
+                      runs it and parses the exit code (TASK-04); a non-zero exit dominates
+                      any LLM judge's APPROVED verdict.
+                    type: string
+                  maxIterations:
+                    description: |-
+                      MaxIterations bounds the Task loop's repeat policy: the maximum
+                      number of evaluator-driven fresh attempts the loop may dispatch
+                      before halting (D-07/TASK-05).
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  onExhaustion:
+                    description: |-
+                      OnExhaustion declares the bounded exit path once MaxIterations is
+                      reached without an APPROVED evaluation. In Phase 51 BOTH enum values
+                      resolve IDENTICALLY to ConditionVerifyHalt + await `tide resume` —
+                      per-value differentiation (a future LoopPolicy.EscalationPolicy) is
+                      Phase 52 scope. Declared-but-uniform-now, never unenforced: both
+                      values halt dispatch today.
+                    enum:
+                    - escalate
+                    - requireApproval
+                    type: string
+                  phase:
+                    description: |-
+                      Phase is the lifecycle state governing immutability: Draft is freely
+                      editable, Locked is immutable except for a Locked->Superseded
+                      transition (which mints a new version to carry further edits),
+                      Superseded is a terminal historical record. Transition rules are
+                      skipped on CREATE (no oldSelf) — a Draft-at-create is unconstrained.
+                    enum:
+                    - Draft
+                    - Locked
+                    - Superseded
+                    type: string
+                  requiredArtifacts:
+                    description: |-
+                      RequiredArtifacts lists workspace-relative paths the verifier
+                      confirms exist.
+                    items:
+                      type: string
+                    type: array
+                  version:
+                    description: |-
+                      Version is the monotonic version number, incremented each time a
+                      Locked contract is superseded by a new Draft.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                type: object
+                x-kubernetes-validations:
+                - message: verification is immutable once Locked; supersede to a new
+                    version to change it
+                  rule: oldSelf.phase != 'Locked' || self == oldSelf || self.phase ==
+                    'Superseded'
             required:
             - declaredOutputPaths
             - filesTouched
@@ -288,6 +373,152 @@ spec:
                 x-kubernetes-list-type: map
               exitCode:
                 type: integer
+              lockedSHA:
+                description: |-
+                  LockedSHA is the commit SHA of spec.verification at the moment it was
+                  last transitioned to Locked — a runtime OBSERVATION recorded at
+                  dispatch, not the governing enum (which lives on
+                  spec.verification.phase/version per RESEARCH Pitfall 2 / Open
+                  Question 1). `git show <lockedSHA>` reproduces exactly the contract a
+                  dispatched attempt ran against (TASK-01 repudiation guard).
+                type: string
+              loopStatus:
+                description: |-
+                  LoopStatus carries the Task loop's current-iteration summary + exit
+                  reason only (Phase 51 D-07/LOOP-03 — no accumulating iteration
+                  history; see TestLoopStatus_NoForbiddenFields). Re-derivable across a
+                  restart from Attempt above + the completed-set, never a cache of
+                  iteration history.
+                properties:
+                  conditions:
+                    items:
+                      description: Condition contains details for one aspect of the
+                        current state of this API Resource.
+                      properties:
+                        lastTransitionTime:
+                          description: |-
+                            lastTransitionTime is the last time the condition transitioned from one status to another.
+                            This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                          format: date-time
+                          type: string
+                        message:
+                          description: |-
+                            message is a human readable message indicating details about the transition.
+                            This may be an empty string.
+                          maxLength: 32768
+                          type: string
+                        observedGeneration:
+                          description: |-
+                            observedGeneration represents the .metadata.generation that the condition was set based upon.
+                            For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                            with respect to the current state of the instance.
+                          format: int64
+                          minimum: 0
+                          type: integer
+                        reason:
+                          description: |-
+                            reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                            Producers of specific condition types may define expected values and meanings for this field,
+                            and whether the values are considered a guaranteed API.
+                            The value should be a CamelCase string.
+                            This field may not be empty.
+                          maxLength: 1024
+                          minLength: 1
+                          pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                          type: string
+                        status:
+                          description: status of the condition, one of True, False,
+                            Unknown.
+                          enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                          type: string
+                        type:
+                          description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                          maxLength: 316
+                          pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                          type: string
+                      required:
+                      - lastTransitionTime
+                      - message
+                      - reason
+                      - status
+                      - type
+                      type: object
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - type
+                    x-kubernetes-list-type: map
+                  costCents:
+                    description: |-
+                      CostCents is the cumulative spend (USD cents) across all iterations
+                      of this loop so far, checked against LoopPolicy.BudgetCents.
+                    format: int64
+                    minimum: 0
+                    type: integer
+                  exitReason:
+                    description: |-
+                      ExitReason records the bounded exit/escalation outcome once the loop
+                      has stopped iterating (empty while the loop is still active).
+                    enum:
+                    - approved
+                    - iterationsExhausted
+                    - durationExhausted
+                    - budgetExhausted
+                    - escalated
+                    type: string
+                  iteration:
+                    description: |-
+                      Iteration is the current attempt number (1-indexed once dispatched;
+                      0 before the loop's first iteration).
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  lastEvaluation:
+                    description: |-
+                      LastEvaluation is the bounded verdict summary from the most recent
+                      evaluator/environment feedback — current-iteration only, never a
+                      slice/history of past evaluations (LOOP-03).
+                    properties:
+                      completedAt:
+                        description: CompletedAt is when the evaluator produced this
+                          verdict.
+                        format: date-time
+                        type: string
+                      decision:
+                        description: |-
+                          Decision is the locally-scoped verdict string ("APPROVED",
+                          "REPAIRABLE", or "BLOCKED") — never the imported pkg/dispatch.GateDecision
+                          type, per the two-homes design note above.
+                        enum:
+                        - APPROVED
+                        - REPAIRABLE
+                        - BLOCKED
+                        type: string
+                      findingsCount:
+                        description: |-
+                          FindingsCount is the total number of findings the evaluator reported,
+                          without the findings[] array itself.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      highSeverityCount:
+                        description: |-
+                          HighSeverityCount is the number of findings at the highest severity
+                          tier the evaluator reported.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                    type: object
+                  parentRunID:
+                    description: |-
+                      ParentRunID identifies the run that produced the mutable candidate
+                      this LoopStatus is evaluating, correlating LoopStatus back to the
+                      trace/artifact history where iteration-by-iteration detail lives
+                      (LOOP-03 — that detail is never duplicated into `.status`).
+                    type: string
+                type: object
               phase:
                 type: string
               startedAt:
