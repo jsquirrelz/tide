@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0.9
 milestone_name: Slack Tide — The Task Loop (Verification-Driven Quality Iteration)
 status: executing
-stopped_at: Completed 50-03-PLAN.md
-last_updated: "2026-07-19T04:24:20.227Z"
+stopped_at: Completed 50-04-PLAN.md
+last_updated: "2026-07-19T04:56:03.468Z"
 last_activity: 2026-07-19
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 16
-  completed_plans: 12
+  completed_plans: 13
   percent: 33
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 ## Current Position
 
 Phase: 50 (execution-loop-hardening-loop-native-observability) — EXECUTING
-Plan: 4 of 7
+Plan: 5 of 7
 Status: Ready to execute
 Last activity: 2026-07-19
 
-Progress: [████████░░] 75%
+Progress: [████████░░] 81%
 
 ## Performance Metrics
 
@@ -86,6 +86,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 50]: [Phase 50-02] loop.*/evaluation.*/human_intervention keys are deliberately NOT tide.-prefixed (cross-vendor loop-native convention Phase 51's LangGraph evaluator reuses); doc comment documents the deviation from the file's tide.* idiom explicitly
 - [Phase 50]: [Phase 50-03] Phase 50 adds NO new Prometheus metric — guard-hardening only (RESEARCH Open Question 3 resolved); loop-outcome metrics wait for Phase 51's real EvaluationSummary.Decision/LoopStatus.ExitReason consumer
 - [Phase 50]: [Phase 50-03] The analyzer's forbiddenLabels map and wave_label_test.go's forbiddenRuntimeLabels slice are intentionally NOT shared via import — hand-synced by design so a bug in one guard layer cannot silently disable the other
+- [Phase 50]: [Phase 50-04] runtimeVersionProbe execs claude --version directly via exec.CommandContext, not through anthropic.Anthropic's execFunc test seam, to avoid overwriting existing tests' captured-args assertions
+- [Phase 50]: [Phase 50-04] cap_exceeded test drives harness.CheckCaps via InputTokens not Iterations — ParseStream never populates Usage.Iterations for any real stream-json transcript (pre-existing gap outside plan scope)
+- [Phase 50]: [Phase 50-04] cmd/claude-subagent's failEnvelope/failOut now take the full EnvelopeIn (not just TaskUID) so LoopRunID/AttemptID echo naturally at every call site with a real envelope
 
 ### Pending Todos
 
@@ -127,11 +130,12 @@ Tech-debt still carried forward: W-2 FailureHalt/gate-order divergences (todos a
 | Phase 50 P01 | 14min | 2 tasks | 6 files |
 | Phase 50 P02 | 1min | 2 tasks | 2 files |
 | Phase 50 P03 | 7min | 2 tasks | 5 files |
+| Phase 50 P04 | 17min | 3 tasks | 9 files |
 
 ## Session Continuity
 
-Last session: 2026-07-19T04:24:20.210Z
-Stopped at: Completed 50-03-PLAN.md
+Last session: 2026-07-19T04:56:03.451Z
+Stopped at: Completed 50-04-PLAN.md
 Resume file: None
 
 ## Operator Next Steps

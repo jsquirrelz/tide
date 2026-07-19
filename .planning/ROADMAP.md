@@ -119,7 +119,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 50-04-PLAN.md — Executor write-site population: three real write sites set TerminalReason per mapping table, CheckCaps wired (in-pod cap_exceeded), bounded RunEvidence assembly, AST fail-closed guard (Wave 2)
+- [x] 50-04-PLAN.md — Executor write-site population: three real write sites set TerminalReason per mapping table, CheckCaps wired (in-pod cap_exceeded), bounded RunEvidence assembly, AST fail-closed guard (Wave 2)
 - [ ] 50-05-PLAN.md — Python envelope mirror: envelope.py + test_envelope.py parity against the shared golden fixture (Wave 2)
 - [ ] 50-06-PLAN.md — Controller identity stamping (buildEnvelopeIn), cap_exceeded synthesis for DeadlineExceeded-killed Jobs, AGENT-span loop.* attributes (Wave 2)
 
@@ -188,7 +188,7 @@ Phases execute in numeric order: 48 → 49 → 50 → 51 → 52 → 53
 | 42–47 (see archive) | v1.0.8 | 32/32 | Complete | 2026-07-17 |
 | 48. LangGraph Evaluator Image + Credproxy-TLS Spike | v1.0.9 | 5/5 | Complete   | 2026-07-18 |
 | 49. Common Loop Contract + Verdict/Envelope/Persistence Schema | v1.0.9 | 4/4 | Complete    | 2026-07-18 |
-| 50. Execution-Loop Hardening + Loop-Native Observability | v1.0.9 | 3/7 | In Progress|  |
+| 50. Execution-Loop Hardening + Loop-Native Observability | v1.0.9 | 4/7 | In Progress|  |
 | 51. The Task Loop | v1.0.9 | 0/TBD | Not started | - |
 | 52. Per-Level LoopPolicy Parameterization | v1.0.9 | 0/TBD | Not started | - |
 | 53. Chart Config + Dashboard Provenance Surfacing | v1.0.9 | 0/TBD | Not started | - |
