@@ -44,3 +44,13 @@ func TestSelfInstruments_UnknownVendorDefaultsFalse(t *testing.T) {
 		t.Error(`SelfInstruments("") = true, want false`)
 	}
 }
+
+// TestSelfInstruments_LangGraphTrue pins Phase 51 D-02: the LangGraph
+// verifier image self-instruments via openinference-instrumentation-langchain
+// in-process, so the reporter must skip events.jsonl synthesis for it — the
+// first vendor to flip this predicate to true.
+func TestSelfInstruments_LangGraphTrue(t *testing.T) {
+	if !SelfInstruments("langgraph") {
+		t.Error(`SelfInstruments("langgraph") = false, want true (self-instruments via openinference-instrumentation-langchain)`)
+	}
+}
