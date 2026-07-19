@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0.9
 milestone_name: Slack Tide — The Task Loop (Verification-Driven Quality Iteration)
 status: executing
-stopped_at: Completed 51-07-PLAN.md
-last_updated: "2026-07-19T15:21:33.774Z"
+stopped_at: 51-08 Task 1 complete (kind concurrency spec, 5dfed19c); Task 2 checkpoint OPEN — awaiting operator billable live-run approval + VerifierImage wiring fix
+last_updated: "2026-07-19T15:41:21.771Z"
 last_activity: 2026-07-19
 progress:
   total_phases: 6
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 
 Phase: 51 (The Task Loop) — EXECUTING
 Plan: 8 of 8
-Status: Ready to execute
+Status: Task 1 complete (kind concurrency spec, 5dfed19c); Task 2 OPEN — checkpoint:human-verify, billable live run, NOT executed (see Blockers/Concerns)
 Last activity: 2026-07-19
 
-Progress: [██████████] 96%
+Progress: [█████████░] 96% (23/24 plans; 51-08 Task 2 not yet counted complete)
 
 ## Performance Metrics
 
@@ -120,6 +120,7 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 51-07]: EvidencePacketPath transports through the existing VerifyContext on an executor-role envelope (buildEnvelopeIn gained a trailing param) rather than a new schema field -- pkg/dispatch/envelope.go's stale Verify doc comment corrected
 - [Phase 51-07]: stageEvidencePacket's PVC write is best-effort/non-blocking -- the returned deterministic path never depends on the write succeeding, mirroring PromptPath's controller-sets-reference/executor-validates-at-read precedent
 - [Phase 51-07]: Task 1 (verdict tree/haltVerify/span) and Task 2 (repairOrHalt/anti-gaming/evidence packet) landed in one commit -- handleVerifierCompletion and repairOrHalt have a genuine two-way call dependency, mirrors 51-01/51-06 precedent
+- [Phase 51]: Plan 51-08 kind concurrency spec is verdict-agnostic and does not re-assert the in-process ReservationStore no-leak invariant (verifier Jobs carry no estimated-cost label; already proven by envtest)
 
 ### Pending Todos
 
@@ -132,6 +133,7 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - **Cross-pod clock skew (Pitfall 5) remains unverified** — single-node kind can't surface child-span-outside-parent-window rendering; documented as a known limitation at Phase 47 close, revisit on a multi-node cluster.
 - **Two genuinely open calls gate Phase 51's plan** (not resolved by research): (1) `GateCommand` schema location — a new `Plan.Spec`/`Project.Spec` field vs. convention-based lookup; (2) LangGraph `Vendor` sentinel — new literal (e.g. `"langgraph"`) vs. reusing `"anthropic"` with a runtime discriminator. Both must be decided during `/gsd:plan-phase 51`, not discovered mid-execution.
 - **Phase 48 blocked on 48-05 Task 2 (human checkpoint)**: the retained TLS spike harness (`make spike-langgraph-tls`) is built and committed (`3880852`), but the live measurement — one real, billable `max_tokens=1` `ChatAnthropic.invoke()` through credproxy — has not been run. Requires the operator to run `make spike-langgraph-tls` (needs `~/.tide/anthropic.key`) and record PASS/FAIL in `48-TLS-SPIKE-VERDICT.md`. Phase 49 must not start until this verdict is no longer `PENDING`.
+- Plan 51-08 open: Task 1 (kind concurrency spec, commit 5dfed19c) complete; Task 2 (live billable Task-loop proof on kind) is a checkpoint:human-verify — NOT executed. Prerequisite gap discovered: TaskReconcilerDeps.VerifierImage is unwired in cmd/manager/main.go (every sibling image field is wired from a flag/env var; this one is not), so dispatchVerifier's Job Create will fail against a real cluster until closed. Requires operator approval for a billable live run plus the VerifierImage wiring fix. See 51-08-SUMMARY.md's CHECKPOINT REACHED section for the full runbook. v1.0.9 stays open until this resolves.
 
 ### Roadmap Evolution
 
@@ -172,12 +174,13 @@ Tech-debt still carried forward: W-2 FailureHalt/gate-order divergences (todos a
 | Phase 51 P05 | 17min | 2 tasks | 6 files |
 | Phase 51 P06 | 48min | 2 tasks | 6 files |
 | Phase 51 P07 | 65min | 2 tasks | 5 files |
+| Phase 51 P08 | 40min | 1 tasks | 1 files |
 
 ## Session Continuity
 
-Last session: 2026-07-19T15:21:33.760Z
-Stopped at: Completed 51-07-PLAN.md
-Resume file: None
+Last session: 2026-07-19T15:41:21.756Z
+Stopped at: 51-08 Task 1 complete (kind concurrency spec, 5dfed19c); Task 2 checkpoint OPEN — awaiting operator billable live-run approval + VerifierImage wiring fix
+Resume file: .planning/phases/51-the-task-loop/51-08-SUMMARY.md
 
 ## Operator Next Steps
 

@@ -164,7 +164,7 @@ Plans:
 
 **Wave 5** *(blocked on 51-06/07)*
 
-- [ ] 51-08-PLAN.md — ESC-04 kind concurrent-dispatch test + live Task-loop proof (human-verify checkpoint)
+- [ ] 51-08-PLAN.md — ESC-04 kind concurrent-dispatch test + live Task-loop proof (human-verify checkpoint) — Task 1 DONE (kind spec, `5dfed19c`); Task 2 OPEN (billable live-run checkpoint, not executed — see STATE.md Blockers/Concerns)
 
 **Research flag**: yes — two genuinely open calls gate this phase's plan: (1) where the per-level `GateCommand` ("pass criterion command") is declared in the CRD schema — a new `Plan.Spec`/`Project.Spec` field vs. a convention-based lookup, a real requirements decision with no existing source; (2) whether the LangGraph runtime needs a new `Vendor` sentinel (e.g. `"langgraph"`) in `pkg/dispatch.SelfInstruments`/`ResolveProvider(...).Vendor` or can reuse `"anthropic"` with a runtime discriminator — must be locked before this phase's `SelfInstruments` wiring.
 
