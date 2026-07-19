@@ -95,7 +95,7 @@ func ChangedFileManifest(worktreeDir string, max int) ([]pkgdispatch.ChangedFile
 	}
 
 	var all []pkgdispatch.ChangedFile
-	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(string(out), "\n"), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
