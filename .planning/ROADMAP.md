@@ -140,7 +140,32 @@ Plans:
   4. The Task loop is bounded by `maxIterations` with `onExhaustion` routing to `ConditionVerifyHalt` (gating both planner and task tiers, mirroring `failure_halt.go` + the Phase 25 resume time-fence) as a halt class distinct from `Failed` wave semantics; its state is resumable across a controller restart; and a fresh attempt that edits fixtures/thresholds/the evaluator itself is flagged as a system escalation, never counted as a pass — the anti-gaming invariant is enforced, not documented.
   5. Evaluator dispatches count against the concurrency gate (extended `plannerInFlightCount` or a new `verifierInFlightCount`) and `LoopPolicy.BudgetCents` bounds cost via the existing reservation store — verified by a kind-cluster concurrent-dispatch test that stays under the sized cap.
 
-**Plans**: TBD
+**Plans**: 8 plans (5 waves)
+
+Plans:
+**Wave 1**
+
+- [ ] 51-01-PLAN.md — CRD schema: VerificationSpec + CEL immutability + LoopStatus/lockedSHA + VerifyHalt vocabulary
+- [ ] 51-02-PLAN.md — "langgraph" vendor sentinel + verifier-image verdict assembly & deterministic dominance
+- [ ] 51-03-PLAN.md — task_verifier.tmpl (coverage-not-conservatism) + EvaluatorInvocation/EVALUATOR-span primitives
+- [ ] 51-04-PLAN.md — podjob verifier Job build: JobKindVerifier + VerifierJobName + TIDE_GATE_COMMAND + RW envelopes/ mount split
+
+**Wave 2** *(blocked on 51-01)*
+
+- [ ] 51-05-PLAN.md — verify_halt.go clone + dispatch-hold chain unification (folds the two dispatch-gate todos)
+
+**Wave 3** *(blocked on 51-01/02/03/04/05)*
+
+- [ ] 51-06-PLAN.md — verifier dispatch path: Verifying sub-state + VerifyContext envelope + verifierInFlightCount cap + BudgetCents + lockedSHA
+
+**Wave 4** *(blocked on 51-06)*
+
+- [ ] 51-07-PLAN.md — verdict consumption + fresh-attempt/anti-gaming/halt + LoopStatus resume + EVALUATOR span call site
+
+**Wave 5** *(blocked on 51-06/07)*
+
+- [ ] 51-08-PLAN.md — ESC-04 kind concurrent-dispatch test + live Task-loop proof (human-verify checkpoint)
+
 **Research flag**: yes — two genuinely open calls gate this phase's plan: (1) where the per-level `GateCommand` ("pass criterion command") is declared in the CRD schema — a new `Plan.Spec`/`Project.Spec` field vs. a convention-based lookup, a real requirements decision with no existing source; (2) whether the LangGraph runtime needs a new `Vendor` sentinel (e.g. `"langgraph"`) in `pkg/dispatch.SelfInstruments`/`ResolveProvider(...).Vendor` or can reuse `"anthropic"` with a runtime discriminator — must be locked before this phase's `SelfInstruments` wiring.
 
 ### Phase 52: Per-Level LoopPolicy Parameterization
@@ -189,6 +214,6 @@ Phases execute in numeric order: 48 → 49 → 50 → 51 → 52 → 53
 | 48. LangGraph Evaluator Image + Credproxy-TLS Spike | v1.0.9 | 5/5 | Complete   | 2026-07-18 |
 | 49. Common Loop Contract + Verdict/Envelope/Persistence Schema | v1.0.9 | 4/4 | Complete    | 2026-07-18 |
 | 50. Execution-Loop Hardening + Loop-Native Observability | v1.0.9 | 7/7 | Complete    | 2026-07-19 |
-| 51. The Task Loop | v1.0.9 | 0/TBD | Not started | - |
+| 51. The Task Loop | v1.0.9 | 0/8 | Planned | - |
 | 52. Per-Level LoopPolicy Parameterization | v1.0.9 | 0/TBD | Not started | - |
 | 53. Chart Config + Dashboard Provenance Surfacing | v1.0.9 | 0/TBD | Not started | - |
