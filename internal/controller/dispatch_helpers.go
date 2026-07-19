@@ -57,6 +57,7 @@ import (
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/dispatch"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
+	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/internal/reporter"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
@@ -504,6 +505,49 @@ func plannerInFlightCount(ctx context.Context, c client.Client, watchNamespace s
 		// is terminating — so it must not hold a cap slot. A stalled-GC Job would
 		// otherwise linger non-terminal and throttle dispatch across all namespaces
 		// (global cap). Skip it; count only live, non-terminal planner Jobs.
+		if jobs.Items[i].DeletionTimestamp != nil {
+			continue
+		}
+		if !isJobTerminal(&jobs.Items[i]) {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// verifierInFlightCount returns the count of non-terminal verifier Jobs
+// (label tideproject.k8s/role=verifier, tideproject.k8s/project=projectName)
+// in namespace ns, EXCLUDING the Job named excludeJobName. Mirrors
+// gitWriterInFlightCount's shape (the excludeJobName self-exclusion variant,
+// NOT plannerInFlightCount, per 51-PATTERNS.md Analog A) — the verifier
+// dispatch/consume sub-state-machine re-observes its own deterministic Job
+// name (podjob.VerifierJobName) on every reconcile, so it must not count
+// that same Job as "another" verifier in flight (Pitfall 7 self-exclusion).
+//
+// D-10 (ESC-04): verifier pods are a DISTINCT, separately-sized pool —
+// deliberately never folded into plannerInFlightCount. Project-scoped (not
+// global) matching the git-writer precedent, so one Project's verifier
+// fan-out cannot starve another Project's cap headroom.
+//
+// Same DeletionTimestamp + isJobTerminal exclusions as plannerInFlightCount /
+// gitWriterInFlightCount: a Job on its way out (GC-pending) must not hold a
+// cap slot, and only non-terminal Jobs count.
+func verifierInFlightCount(ctx context.Context, c client.Client, ns, projectName, excludeJobName string) (int, error) {
+	var jobs batchv1.JobList
+	if err := c.List(ctx, &jobs,
+		client.InNamespace(ns),
+		client.MatchingLabels{
+			"tideproject.k8s/role": "verifier",
+			owner.LabelProject:     projectName,
+		},
+	); err != nil {
+		return 0, err
+	}
+	n := 0
+	for i := range jobs.Items {
+		if jobs.Items[i].Name == excludeJobName {
+			continue
+		}
 		if jobs.Items[i].DeletionTimestamp != nil {
 			continue
 		}

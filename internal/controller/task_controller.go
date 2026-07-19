@@ -135,6 +135,13 @@ type TaskReconcilerDeps struct {
 	// auth-enabled collector the manager uses (Phase 47 PHX-02/D-08); empty =
 	// no headers env, mirrors OTLPEndpoint.
 	OTLPHeadersSecret string
+
+	// VerifierImage is the image ref for the tide-langgraph-verifier subagent
+	// container (Phase 51 TASK-04/RESEARCH A5), mirroring HelmProviderDefaults'
+	// role for the executor/planner Image resolution. A dev-head default is
+	// wired at Manager startup; the chart-configurable surface (CFG-01) is
+	// Phase 53 — this field only needs to exist and reach BuildJobSpec today.
+	VerifierImage string
 }
 
 // TaskReconciler reconciles a Task object at Standard depth (D-C1).
