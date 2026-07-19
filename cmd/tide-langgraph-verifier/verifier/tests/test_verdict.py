@@ -10,11 +10,13 @@ test_envelope.py per this plan's files_modified scope.
 from __future__ import annotations
 
 import json
+import os
 import threading
 from pathlib import Path
 
 import pytest
 
+from verifier import __main__ as entrypoint
 from verifier import envelope, verdict
 
 
@@ -214,3 +216,175 @@ def test_write_termination_stub_truncates_huge_reason_strictly_under_cap(
     # Strictly under, not <= : the one-byte parity fix with Go's < 4096.
     assert len(data) < envelope.TERMINATION_STUB_MAX_BYTES
     assert len(data) != envelope.TERMINATION_STUB_MAX_BYTES
+
+
+# ---------------------------------------------------------------------------
+# T-51-02: deterministic out-of-band gate-command dominance (Phase 51 D-06).
+# ---------------------------------------------------------------------------
+
+
+def _approved_llm_result(summary: str = "LLM says fine") -> str:
+    return json.dumps({"verdict": "APPROVED", "summary": summary, "findings": []})
+
+
+def test_gate_command_dominance_forces_non_approved_on_red_command(
+    tmp_path: Path, monkeypatch, fixture_worktree: Path, envelope_in_dict
+) -> None:
+    """T-51-02, the milestone's raison d'être: a red gate on ONE of several
+    resolved pass-criterion commands ALWAYS dominates an LLM APPROVED,
+    proven by injecting a fake LLM that unconditionally returns APPROVED
+    alongside one real failing shell command among several passing ones."""
+    monkeypatch.setenv("TIDE_WORKTREE_DIR", str(fixture_worktree))
+    in_path = tmp_path / "in.json"
+    in_path.write_text(
+        json.dumps(
+            envelope_in_dict(
+                provider={"vendor": "langgraph", "model": "claude-sonnet-4-6"},
+                verify={"gateCommand": "true", "commands": ["true", "false", "true"]},
+            )
+        )
+    )
+    stub_path = tmp_path / "termination-log"
+
+    exit_code = entrypoint.main(
+        in_path=str(in_path),
+        termination_message_path=str(stub_path),
+        build_model=lambda env: object(),
+        run_agent_fn=lambda model, prompt: _approved_llm_result(),
+    )
+
+    assert exit_code == 0  # the verifier process itself ran to completion
+    out = json.loads((tmp_path / "out.json").read_text())
+    assert out["verdict"]["verdict"] in ("REPAIRABLE", "BLOCKED")
+    gate_findings = [f for f in out["verdict"]["findings"] if f["dimension"] == "gate-command"]
+    assert len(gate_findings) == 1
+    assert gate_findings[0]["severity"] == "blocker"
+    assert "exit_code=1" in gate_findings[0]["evidence"]
+
+    stub = json.loads(stub_path.read_text())
+    assert stub["gateDecision"] in ("REPAIRABLE", "BLOCKED")
+    assert stub["highSeverityCount"] == 1
+
+
+def test_gate_command_all_green_plus_llm_approved_stays_approved(
+    tmp_path: Path, monkeypatch, fixture_worktree: Path, envelope_in_dict
+) -> None:
+    """The counterpart to the dominance case: when every resolved command
+    exits zero AND the LLM judge returns APPROVED, the assembled verdict
+    stays APPROVED — dominance only ever pulls a verdict down, never up."""
+    monkeypatch.setenv("TIDE_WORKTREE_DIR", str(fixture_worktree))
+    in_path = tmp_path / "in.json"
+    in_path.write_text(
+        json.dumps(
+            envelope_in_dict(
+                provider={"vendor": "langgraph", "model": "claude-sonnet-4-6"},
+                verify={"gateCommand": "true", "commands": ["true", "true"]},
+            )
+        )
+    )
+    stub_path = tmp_path / "termination-log"
+
+    exit_code = entrypoint.main(
+        in_path=str(in_path),
+        termination_message_path=str(stub_path),
+        build_model=lambda env: object(),
+        run_agent_fn=lambda model, prompt: _approved_llm_result("all clear"),
+    )
+
+    assert exit_code == 0
+    out = json.loads((tmp_path / "out.json").read_text())
+    assert out["verdict"]["verdict"] == "APPROVED"
+    assert out["verdict"]["findings"] == []
+
+    stub = json.loads(stub_path.read_text())
+    assert stub["gateDecision"] == "APPROVED"
+    assert stub["highSeverityCount"] == 0
+
+
+def test_empty_commands_list_stays_fail_closed_never_approved(
+    tmp_path: Path, monkeypatch, fixture_worktree: Path, envelope_in_dict
+) -> None:
+    """Empty/absent env.verify.commands (no authored pass-criteria) stays
+    fail-closed — no gate ran, so the verdict can never be APPROVED, even
+    when the LLM judge says APPROVED (mirrors tools.py's
+    fail-closed-if-empty discipline)."""
+    monkeypatch.setenv("TIDE_WORKTREE_DIR", str(fixture_worktree))
+    in_path = tmp_path / "in.json"
+    in_path.write_text(
+        json.dumps(
+            envelope_in_dict(
+                provider={"vendor": "langgraph", "model": "claude-sonnet-4-6"},
+                verify={"gateCommand": "", "commands": []},
+            )
+        )
+    )
+    stub_path = tmp_path / "termination-log"
+
+    exit_code = entrypoint.main(
+        in_path=str(in_path),
+        termination_message_path=str(stub_path),
+        build_model=lambda env: object(),
+        run_agent_fn=lambda model, prompt: _approved_llm_result("nothing to check"),
+    )
+
+    assert exit_code == 0
+    out = json.loads((tmp_path / "out.json").read_text())
+    assert out["verdict"]["verdict"] != "APPROVED"
+
+
+def test_tide_gate_command_env_set_from_canonical_gate_command_before_agent_runs(
+    tmp_path: Path, monkeypatch, fixture_worktree: Path, envelope_in_dict
+) -> None:
+    """TIDE_GATE_COMMAND is set from env.verify.gateCommand (the canonical
+    primary) before the agent runs, so the LLM's run_gate_command tool still
+    functions as advisory narration."""
+    monkeypatch.setenv("TIDE_WORKTREE_DIR", str(fixture_worktree))
+    monkeypatch.delenv("TIDE_GATE_COMMAND", raising=False)
+    in_path = tmp_path / "in.json"
+    in_path.write_text(
+        json.dumps(
+            envelope_in_dict(
+                provider={"vendor": "langgraph", "model": "claude-sonnet-4-6"},
+                verify={"gateCommand": "make test", "commands": ["true"]},
+            )
+        )
+    )
+    stub_path = tmp_path / "termination-log"
+    seen: dict[str, str] = {}
+
+    def _spy_run_agent(model, prompt) -> str:  # noqa: ARG001
+        seen["gate_command_env"] = os.environ.get("TIDE_GATE_COMMAND", "")
+        return _approved_llm_result()
+
+    entrypoint.main(
+        in_path=str(in_path),
+        termination_message_path=str(stub_path),
+        build_model=lambda env: object(),
+        run_agent_fn=_spy_run_agent,
+    )
+
+    assert seen["gate_command_env"] == "make test"
+
+
+def test_main_rejects_langgraph_verify_dispatch_from_wrong_vendor(
+    tmp_path: Path, envelope_in_dict
+) -> None:
+    """D-02: the image now refuses any vendor other than "langgraph" —
+    including "anthropic", the prior sentinel — at startup, before any
+    gate-command work happens."""
+    in_path = tmp_path / "in.json"
+    in_path.write_text(
+        json.dumps(
+            envelope_in_dict(
+                provider={"vendor": "anthropic", "model": "claude-sonnet-4-6"},
+                verify={"gateCommand": "true", "commands": ["true"]},
+            )
+        )
+    )
+    stub_path = tmp_path / "termination-log"
+
+    exit_code = entrypoint.main(in_path=str(in_path), termination_message_path=str(stub_path))
+
+    assert exit_code != 0
+    stub = json.loads(stub_path.read_text())
+    assert "vendor" in stub["reason"]
