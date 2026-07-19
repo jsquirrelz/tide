@@ -76,8 +76,16 @@ type TaskDev struct {
 // Version fields live HERE on spec — not on TaskStatus — because a CEL
 // x-kubernetes-validations transition rule reading oldSelf can only see the
 // prior state of its own spec subtree; a spec-level rule cannot reference
-// status. Only the observed LockedSHA (the commit a dispatched attempt
-// actually ran against) lives on TaskStatus.
+// status. Only the observed LockedSHA (a coarse dispatch-time anchor) lives on
+// TaskStatus.
+//
+// Scope of the CEL rule below (LO-04): it enforces the CORE invariant — a
+// Locked contract cannot be silently mutated while staying Locked. It does NOT
+// enforce version monotonicity (the `version > oldSelf.version` bump is
+// documented but unchecked), and it permits changing the pass-criteria fields
+// in the SAME update that flips phase to 'Superseded' (no content-freeze across
+// the Locked->Superseded transition). Those are edge gaps in the supersede
+// lifecycle, not the core no-silent-mutation guarantee.
 //
 // +kubebuilder:validation:XValidation:rule="oldSelf.phase != 'Locked' || self == oldSelf || self.phase == 'Superseded'",message="verification is immutable once Locked; supersede to a new version to change it"
 type VerificationSpec struct {
@@ -321,12 +329,14 @@ type TaskStatus struct {
 	// +optional
 	LoopStatus LoopStatus `json:"loopStatus,omitempty"`
 
-	// LockedSHA is the commit SHA of spec.verification at the moment it was
-	// last transitioned to Locked — a runtime OBSERVATION recorded at
-	// dispatch, not the governing enum (which lives on
-	// spec.verification.phase/version per RESEARCH Pitfall 2 / Open
-	// Question 1). `git show <lockedSHA>` reproduces exactly the contract a
-	// dispatched attempt ran against (TASK-01 repudiation guard).
+	// LockedSHA is a COARSE temporal anchor recorded at dispatch: the run
+	// branch's LastPushedSHA at the moment a contract-bearing attempt was
+	// dispatched (LO-03). It is NOT the commit at which spec.verification
+	// transitioned to Locked, and — because the verification contract lives in
+	// the CRD (spec.verification.phase/version per RESEARCH Pitfall 2 / Open
+	// Question 1), not in git — `git show <lockedSHA>` does not by itself
+	// reproduce the contract. It is a best-effort provenance anchor, not a
+	// literal TASK-01 git-show reproduction guarantee.
 	// +optional
 	LockedSHA string `json:"lockedSHA,omitempty"`
 

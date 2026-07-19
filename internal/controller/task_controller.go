@@ -1520,12 +1520,14 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 			Message:            "Executor completed; dispatching an independent verifier against the locked verification contract",
 			LastTransitionTime: metav1.Now(),
 		})
-		// TASK-01: stamp the reproducibility anchor — `git show <lockedSHA>`
-		// must reproduce exactly the contract this attempt is dispatched
-		// against. LastPushedSHA is the most recent commit landed on the
-		// per-Project run branch, the closest available observation to "the
-		// commit spec.verification was Locked at" (no finer-grained
-		// per-Lock commit SHA is tracked anywhere in the codebase today).
+		// TASK-01 (LO-03): stamp a COARSE provenance anchor. LastPushedSHA is
+		// the most recent commit landed on the per-Project run branch — the
+		// closest available observation to "the commit spec.verification was
+		// Locked at" (no finer-grained per-Lock commit SHA is tracked anywhere
+		// in the codebase today). It is NOT the lock-commit, and because the
+		// contract lives in the CRD (not git), `git show <lockedSHA>` does not
+		// by itself reproduce the dispatched contract — a best-effort temporal
+		// anchor, not a literal git-show reproduction guarantee.
 		task.Status.LockedSHA = project.Status.Git.LastPushedSHA
 		// BL-01/LO-02: persist the executor's bounded changed-file manifest so
 		// the repairOrHalt anti-gaming belt-and-suspenders (TASK-06) and the

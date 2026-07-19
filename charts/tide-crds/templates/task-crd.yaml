@@ -417,12 +417,14 @@ spec:
                 type: object
               lockedSHA:
                 description: |-
-                  LockedSHA is the commit SHA of spec.verification at the moment it was
-                  last transitioned to Locked — a runtime OBSERVATION recorded at
-                  dispatch, not the governing enum (which lives on
-                  spec.verification.phase/version per RESEARCH Pitfall 2 / Open
-                  Question 1). `git show <lockedSHA>` reproduces exactly the contract a
-                  dispatched attempt ran against (TASK-01 repudiation guard).
+                  LockedSHA is a COARSE temporal anchor recorded at dispatch: the run
+                  branch's LastPushedSHA at the moment a contract-bearing attempt was
+                  dispatched (LO-03). It is NOT the commit at which spec.verification
+                  transitioned to Locked, and — because the verification contract lives in
+                  the CRD (spec.verification.phase/version per RESEARCH Pitfall 2 / Open
+                  Question 1), not in git — `git show <lockedSHA>` does not by itself
+                  reproduce the contract. It is a best-effort provenance anchor, not a
+                  literal TASK-01 git-show reproduction guarantee.
                 type: string
               loopStatus:
                 description: |-
