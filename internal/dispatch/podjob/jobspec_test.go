@@ -111,6 +111,18 @@ func buildPlannerTestOptions() BuildOptions {
 	}
 }
 
+// buildVerifierTestOptions constructs BuildOptions for JobKindVerifier
+// dispatch tests (Phase 51 TASK-04/ESC-04) — same Task/Project fixture as
+// the executor options, ReadOnly:true (the verifier's structural read-only
+// contract), plus a GateCommand.
+func buildVerifierTestOptions() BuildOptions {
+	opts := buildTestOptions()
+	opts.Kind = JobKindVerifier
+	opts.ReadOnly = true
+	opts.GateCommand = "make test-int"
+	return opts
+}
+
 // buildNoSecretTestOptions constructs executor BuildOptions for a Project with NO
 // ProviderSecretRef — the $0 acceptance / stub path (cascade-13). credproxy must be
 // absent in this configuration.
@@ -1026,6 +1038,169 @@ func TestBuildJobSpec_TraceparentEnvPresentWhenSet(t *testing.T) {
 				t.Errorf("%s: TRACEPARENT = %q; want %q", name, gotVal, traceParent)
 			}
 		})
+	}
+}
+
+// ---- Phase 51 TASK-04/ESC-04: JobKindVerifier dispatch wiring ----
+
+// TestBuildJobSpec_Verifier_NameUsesVerifierJobName verifies that
+// Kind=JobKindVerifier produces the deterministic tide-verifier-<uid>-<attempt>
+// name (VerifierJobName), grep-distinct from the executor's
+// tide-task-<uid>-<attempt> form — Plan 06 only needs to set opts.Kind for
+// this to take effect (caller-ready).
+func TestBuildJobSpec_Verifier_NameUsesVerifierJobName(t *testing.T) {
+	opts := buildVerifierTestOptions()
+	job := BuildJobSpec(opts)
+	want := VerifierJobName(opts.Task.UID, opts.Attempt)
+	if job.Name != want {
+		t.Errorf("verifier job.Name = %q; want %q", job.Name, want)
+	}
+	if job.Name == JobName(opts.Task.UID, opts.Attempt) {
+		t.Error("verifier job.Name collides with the executor's JobName form")
+	}
+}
+
+// TestBuildJobSpec_Verifier_RoleLabelIsVerifier verifies ESC-04: a verifier
+// Job carries tideproject.k8s/role=verifier (distinct from executor/planner),
+// the label-selector target Plan 06's verifierInFlightCount counts against.
+func TestBuildJobSpec_Verifier_RoleLabelIsVerifier(t *testing.T) {
+	opts := buildVerifierTestOptions()
+	job := BuildJobSpec(opts)
+	if got := job.Labels["tideproject.k8s/role"]; got != "verifier" {
+		t.Errorf("verifier job label role = %q; want \"verifier\"", got)
+	}
+	if got := job.Labels["tideproject.k8s/task-uid"]; got != string(opts.Task.UID) {
+		t.Errorf("verifier job label task-uid = %q; want %q", got, opts.Task.UID)
+	}
+}
+
+// TestBuildJobSpec_Verifier_UsesVerifyCapsFloor verifies that a verifier Job
+// with nil/zero caps applies verifierCapsFloorSeconds (shorter than the
+// executor floor per TASK-04), not the executor's 1200s floor.
+func TestBuildJobSpec_Verifier_UsesVerifyCapsFloor(t *testing.T) {
+	opts := buildVerifierTestOptions()
+	opts.Caps = nil
+	job := BuildJobSpec(opts)
+	want := int64(verifierCapsFloorSeconds) + DefaultWallClockGraceSeconds
+	if job.Spec.ActiveDeadlineSeconds == nil {
+		t.Fatal("verifier job.Spec.ActiveDeadlineSeconds is nil")
+	}
+	if *job.Spec.ActiveDeadlineSeconds != want {
+		t.Errorf("verifier ActiveDeadlineSeconds = %d; want %d (verify floor + grace)",
+			*job.Spec.ActiveDeadlineSeconds, want)
+	}
+}
+
+// ---- Phase 51 TASK-04: TIDE_GATE_COMMAND env transport ----
+
+// TestBuildJobSpec_GateCommandEnvPresentWhenSet verifies that a non-empty
+// BuildOptions.GateCommand stamps TIDE_GATE_COMMAND on the subagent
+// container with the exact value (mirrors the PricingOverridesJSON/
+// TraceParent conditional-append shape). GateCommand carries ONLY the
+// canonical single gateCommand for the LLM's run_gate_command tool — the
+// full pass-criteria list travels via the envelope (VerifyContext.Commands),
+// not this env var.
+func TestBuildJobSpec_GateCommandEnvPresentWhenSet(t *testing.T) {
+	opts := buildVerifierTestOptions()
+	job := BuildJobSpec(opts)
+	containers := job.Spec.Template.Spec.Containers
+	if len(containers) == 0 {
+		t.Fatal("no containers in pod spec")
+	}
+	subagent := containers[0]
+	var found bool
+	var gotVal string
+	for _, e := range subagent.Env {
+		if e.Name == "TIDE_GATE_COMMAND" {
+			found = true
+			gotVal = e.Value
+		}
+	}
+	if !found {
+		t.Fatal("subagent missing TIDE_GATE_COMMAND env var when GateCommand is set")
+	}
+	if gotVal != opts.GateCommand {
+		t.Errorf("TIDE_GATE_COMMAND = %q; want %q", gotVal, opts.GateCommand)
+	}
+}
+
+// TestBuildJobSpec_GateCommandEnvAbsentWhenEmpty verifies that an empty
+// BuildOptions.GateCommand does NOT stamp TIDE_GATE_COMMAND — non-verifier
+// dispatches never carry it.
+func TestBuildJobSpec_GateCommandEnvAbsentWhenEmpty(t *testing.T) {
+	opts := buildTestOptions() // GateCommand is zero value = ""
+	if opts.GateCommand != "" {
+		t.Fatal("test fixture invariant broken: expected empty GateCommand")
+	}
+	job := BuildJobSpec(opts)
+	for _, e := range job.Spec.Template.Spec.Containers[0].Env {
+		if e.Name == "TIDE_GATE_COMMAND" {
+			t.Error("subagent should NOT carry TIDE_GATE_COMMAND when GateCommand is empty")
+		}
+	}
+}
+
+// ---- Phase 51 TASK-04: RW envelopes/ subPath mount (out.json write-back) ----
+
+// TestBuildJobSpec_Verifier_RWEnvelopesSubPathMount verifies the jobspec.go
+// :199-204 forward-note resolution: under the ReadOnly verifier variant, the
+// subagent gets a SECOND VolumeMount of the SAME project-workspace volume,
+// scoped via subPath to envelopes/<uid>/ and read-write, so out.json can be
+// written even though /workspace itself stays ReadOnly.
+func TestBuildJobSpec_Verifier_RWEnvelopesSubPathMount(t *testing.T) {
+	opts := buildVerifierTestOptions()
+	job := BuildJobSpec(opts)
+	subagent := job.Spec.Template.Spec.Containers[0]
+
+	wantMountPath := "/workspace/envelopes/" + string(opts.Task.UID)
+	wantSubPath := opts.ProjectUID + "/workspace/envelopes/" + string(opts.Task.UID)
+
+	var found bool
+	for _, vm := range subagent.VolumeMounts {
+		if vm.Name == VolumeProjectWorkspace && vm.MountPath == wantMountPath {
+			found = true
+			if vm.ReadOnly {
+				t.Error("envelopes RW mount ReadOnly = true; want false (out.json write-back)")
+			}
+			if vm.SubPath != wantSubPath {
+				t.Errorf("envelopes RW mount SubPath = %q; want %q", vm.SubPath, wantSubPath)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("subagent missing RW envelopes/ mount at %q", wantMountPath)
+	}
+
+	// The primary /workspace mount must still be ReadOnly (RO worktree preserved).
+	var primaryFound bool
+	for _, vm := range subagent.VolumeMounts {
+		if vm.Name == VolumeProjectWorkspace && vm.MountPath == "/workspace" {
+			primaryFound = true
+			if !vm.ReadOnly {
+				t.Error("primary /workspace mount ReadOnly = false; want true (RO worktree preserved)")
+			}
+		}
+	}
+	if !primaryFound {
+		t.Fatal("subagent missing primary /workspace mount")
+	}
+
+	validatePodSpecVolumeMountRefs(t, job.Spec.Template.Spec)
+}
+
+// TestBuildJobSpec_Verifier_RWEnvelopesMountAbsentWhenNotReadOnly verifies
+// the RW envelopes/ mount is scoped to the ReadOnly variant only — the
+// normal RW executor path already has full /workspace write access and
+// does not need a second overlapping mount.
+func TestBuildJobSpec_Verifier_RWEnvelopesMountAbsentWhenNotReadOnly(t *testing.T) {
+	opts := buildTestOptions() // ReadOnly unset == false
+	job := BuildJobSpec(opts)
+	subagent := job.Spec.Template.Spec.Containers[0]
+	wantMountPath := "/workspace/envelopes/" + string(opts.Task.UID)
+	for _, vm := range subagent.VolumeMounts {
+		if vm.MountPath == wantMountPath {
+			t.Errorf("unexpected envelopes RW mount %q present when ReadOnly=false", wantMountPath)
+		}
 	}
 }
 
