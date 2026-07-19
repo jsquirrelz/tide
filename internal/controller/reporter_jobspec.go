@@ -177,6 +177,23 @@ type ReporterOptions struct {
 	// as a native attribute.STRINGSLICE via otelai.Tags, never JSON-encoded
 	// (Pitfall 4). Empty slice omits the Arg entirely.
 	Tags []string
+
+	// AttemptID (50 D-01/D-05) is the Execution-loop attempt identity
+	// ({taskUID}-{attempt}, matching podjob.JobName's tuple) — stamped as
+	// loop.run_id context on every reporter-emitted LLM span so Phoenix
+	// groups each tool/action iteration under its attempt. Carried as an
+	// --attempt-id Arg, not Env, per this file's 100% Args-based convention
+	// (Pitfall 3). Empty string omits the Arg entirely (no attribute
+	// stamped, never a fabricated empty value).
+	AttemptID string
+
+	// LoopRunID (50 D-01/D-05) is the parent Task-loop run (taskUID), stable
+	// across all repair attempts of one Task — accepted for signature
+	// symmetry with AttemptID and future use, not yet stamped onto any
+	// per-call LLM span attribute this phase. Carried as a --loop-run-id
+	// Arg, not Env, per this file's 100% Args-based convention. Empty
+	// string omits the Arg entirely.
+	LoopRunID string
 }
 
 // BuildReporterJob constructs the K8s batchv1.Job that runs the in-namespace
@@ -303,6 +320,15 @@ func BuildReporterJob(
 		// Reporter splits on comma; tag values are level/gate/profile enums
 		// — no commas possible in practice.
 		args = append(args, "--tags="+strings.Join(opts.Tags, ","))
+	}
+	// 50 D-01/D-05: attempt-id/loop-run-id ride the same Args-only precedent
+	// as session/metadata/tags above — absent when empty, never a
+	// fabricated empty value.
+	if opts.AttemptID != "" {
+		args = append(args, "--attempt-id="+opts.AttemptID)
+	}
+	if opts.LoopRunID != "" {
+		args = append(args, "--loop-run-id="+opts.LoopRunID)
 	}
 
 	// Phase 44 D-06/T-44-04: reporter container Env — empty unless the

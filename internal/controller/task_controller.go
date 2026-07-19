@@ -1132,6 +1132,13 @@ func (r *TaskReconciler) spawnTaskTraceReporterIfNeeded(ctx context.Context, tas
 			SessionID:         string(project.UID),
 			MetadataJSON:      enrichmentMD,
 			Tags:              enrichmentTags,
+			// 50 D-01/D-05: the same {taskUID}-{attempt}/taskUID tuple
+			// buildEnvelopeIn stamped onto EnvelopeIn at dispatch time and
+			// synthesizePlannerSpan stamped onto the Task AGENT span (50-06)
+			// — byte-identical derivation so the AGENT span and its
+			// reporter's LLM spans correlate under the same attempt.
+			AttemptID: fmt.Sprintf("%s-%d", task.UID, task.Status.Attempt),
+			LoopRunID: string(task.UID),
 		}, r.Scheme)
 	if cErr := r.Create(ctx, traceOnlyJob); cErr != nil {
 		if !apierrors.IsAlreadyExists(cErr) {

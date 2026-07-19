@@ -462,6 +462,54 @@ func TestBuildReporterJob_TagsArg(t *testing.T) {
 	})
 }
 
+// TestBuildReporterJob_AttemptIDLoopRunIDArgs asserts BuildReporterJob
+// carries --attempt-id=<value> and --loop-run-id=<value> in the container
+// Args (not Env — 50 D-01/D-05) when ReporterOptions.AttemptID/LoopRunID are
+// set, and omits BOTH entirely when empty (absent when empty, never a
+// fabricated empty value).
+func TestBuildReporterJob_AttemptIDLoopRunIDArgs(t *testing.T) {
+	project := &tideprojectv1alpha3.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: "proj", Namespace: "ns-s", UID: "project-uid-21"},
+	}
+	parent := &tideprojectv1alpha3.Milestone{
+		ObjectMeta: metav1.ObjectMeta{Name: "ms-19", Namespace: "ns-s", UID: "parent-uid-21"},
+	}
+	scheme := newTestScheme()
+
+	t.Run("present when set", func(t *testing.T) {
+		opts := controller.ReporterOptions{
+			ReporterImage: "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev",
+			AttemptID:     "task-uid-abc-2",
+			LoopRunID:     "task-uid-abc",
+		}
+		job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-21", "Milestone", opts, scheme)
+		args := job.Spec.Template.Spec.Containers[0].Args
+		wantArgs := []string{"--attempt-id=task-uid-abc-2", "--loop-run-id=task-uid-abc"}
+		for _, want := range wantArgs {
+			found := false
+			for _, a := range args {
+				if a == want {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("expected arg %q not present in %v", want, args)
+			}
+		}
+	})
+
+	t.Run("absent when empty", func(t *testing.T) {
+		opts := controller.ReporterOptions{ReporterImage: "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev"}
+		job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-21", "Milestone", opts, scheme)
+		args := job.Spec.Template.Spec.Containers[0].Args
+		for _, a := range args {
+			if strings.HasPrefix(a, "--attempt-id") || strings.HasPrefix(a, "--loop-run-id") {
+				t.Errorf("did not expect an --attempt-id/--loop-run-id arg when AttemptID/LoopRunID are empty, got %v", args)
+			}
+		}
+	})
+}
+
 // TestBuildReporterJob_OwnerRef asserts owner ref is set to the parent (not necessarily the project).
 func TestBuildReporterJob_OwnerRef(t *testing.T) {
 	project := &tideprojectv1alpha3.Project{
