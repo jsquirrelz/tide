@@ -180,6 +180,11 @@ test-int-kind-prep: ## Build manager + stub-subagent + credproxy + tide-push + t
 	# Job pod ImagePullBackoffs and the imported run never stages envelopes at new-UID paths.
 	$(CONTAINER_TOOL) build -t ghcr.io/jsquirrelz/tide-import:test -f images/tide-import/Dockerfile .
 	$(CONTAINER_TOOL) build -t controller:test -f Dockerfile .
+	# Phase 51 (ESC-04/TASK-04): build the read-only tide-langgraph-verifier image
+	# the TaskReconciler's dispatchVerifier creates the gate-command evaluator Job
+	# with. Without it, verifier Jobs ImagePullBackoff and contract-bearing Tasks
+	# strand in Verifying (the harness sets TIDE_VERIFIER_IMAGE=...:test post-install).
+	$(CONTAINER_TOOL) build -t ghcr.io/jsquirrelz/tide-langgraph-verifier:test -f cmd/tide-langgraph-verifier/Dockerfile .
 	# SC-5 (medium_http_test.go): build the two Layer-B fixture images the spec
 	# references by their :1.0.0 tag — tide-demo-init bootstraps the bare repo on
 	# demo-remote-pvc, tide-git-http-server serves it over in-cluster http://.
@@ -205,6 +210,9 @@ test-int-kind-prep: ## Build manager + stub-subagent + credproxy + tide-push + t
 	# (helm sets TIDE_IMPORT_IMAGE=...tide-import:test via images.tideImport.tag override).
 	$(KIND) load docker-image ghcr.io/jsquirrelz/tide-import:test --name tide-test
 	$(KIND) load docker-image controller:test --name tide-test
+	# Phase 51: preload the verifier image so dispatchVerifier's Jobs run (paired
+	# with the harness post-install TIDE_VERIFIER_IMAGE=...:test env patch).
+	$(KIND) load docker-image ghcr.io/jsquirrelz/tide-langgraph-verifier:test --name tide-test
 	# SC-5: load the medium_http fixture images so loadRequiredImage finds them.
 	$(KIND) load docker-image ghcr.io/jsquirrelz/tide-demo-init:1.0.0 --name tide-test
 	$(KIND) load docker-image ghcr.io/jsquirrelz/tide-git-http-server:1.0.0 --name tide-test
