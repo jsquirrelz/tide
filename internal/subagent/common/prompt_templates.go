@@ -32,6 +32,21 @@ import (
 //go:embed templates/*.tmpl
 var templateFS embed.FS
 
+// PromptTemplateVersion is the compiled-in prompt-template version stamped
+// onto [pkgdispatch.RunEvidence.PromptVersion] (Phase 50 D-03/EXEC-03). It is
+// a single package-level version covering every template in this package —
+// NOT per-template — matching the repo's explicit-compiled-const idiom
+// (e.g. highSeverityFindingToken in pkg/dispatch/envelope.go) over an
+// auto-derived content hash.
+//
+// MAINTENANCE RULE (applies to every template file in templates/*.tmpl, not
+// just one): bump this const in the SAME commit as any prompt-template
+// content change. PromptVersion is a run-evidence field consumed for
+// cross-attempt evidence comparison (EXEC-03); a stale value silently
+// corrupts that comparison by claiming two attempts ran the same prompt when
+// they did not.
+const PromptTemplateVersion = "v1"
+
 // LoadPromptTemplate returns the compiled-in Go text/template for the given
 // (role, level) tuple. v1 ships five templates — one per orchestrator-dispatched
 // planner/executor level (project, milestone, phase, plan, task):

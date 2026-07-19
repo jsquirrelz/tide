@@ -50,6 +50,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jsquirrelz/tide/internal/harness"
 	"github.com/jsquirrelz/tide/internal/subagent/common"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
@@ -356,6 +357,22 @@ func (a *Anthropic) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdisp
 		usage.PricingFallbackModel = in.Provider.Model
 	}
 
+	// D-03/EXEC-03: assemble the bounded RunEvidence core on the base literal
+	// below. Model is echoed from EnvelopeIn.Provider.Model (never
+	// re-derived); PromptVersion is the compiled-in package const;
+	// RuntimeVersion is a best-effort `claude --version` probe (empty on any
+	// failure — the probe never fails or materially delays Run(), no
+	// retry); Commands is the exact argv of the main claude invocation
+	// (cmd.Args, already constructed above) joined as one entry — argv
+	// carries no secrets, the API key rides env, never argv. .Bounded() is
+	// applied before assignment (T-50-01).
+	evidence := pkgdispatch.RunEvidence{
+		Model:          in.Provider.Model,
+		PromptVersion:  common.PromptTemplateVersion,
+		RuntimeVersion: runtimeVersionProbe(ctx, a.opts.ClaudeBinary),
+		Commands:       []string{strings.Join(cmd.Args, " ")},
+	}.Bounded()
+
 	out := pkgdispatch.EnvelopeOut{
 		APIVersion:  pkgdispatch.APIVersionV1Alpha1,
 		Kind:        pkgdispatch.KindTaskEnvelopeOut,
@@ -363,6 +380,17 @@ func (a *Anthropic) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdisp
 		Result:      resultText,
 		Usage:       usage,
 		CompletedAt: time.Now().UTC(),
+		// D-02/EXEC-02: the base literal always sets an explicit
+		// TerminalReason — the optimistic "completed" default that every
+		// failure branch below downgrades. This is what makes "never a
+		// silent default" hold: there is no code path between here and any
+		// return that leaves TerminalReason at its invalid zero value.
+		TerminalReason: pkgdispatch.TerminalReasonCompleted,
+		// D-01/EXEC-01: echoed verbatim from EnvelopeIn — the executor never
+		// mints its own loopRunID/attemptID.
+		LoopRunID:   in.LoopRunID,
+		AttemptID:   in.AttemptID,
+		RunEvidence: &evidence,
 	}
 
 	if waitErr != nil {
@@ -373,6 +401,23 @@ func (a *Anthropic) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdisp
 			out.ExitCode = exitErr.ExitCode()
 		}
 		out.Reason = fmt.Sprintf("claude exit %d: %s", out.ExitCode, truncate(stderrBuf.String(), 256))
+		out.TerminalReason = pkgdispatch.TerminalReasonToolFailure
+		return out, nil
+	}
+
+	// In-pod cap enforcement (RESEARCH Open Question 1, in-pod half):
+	// checked AFTER waitErr so a genuine tool crash keeps tool_failure, not
+	// cap_exceeded. An iteration/token cap violation downgrades the base
+	// "completed" literal to cap_exceeded and skips child-CRD parsing — a
+	// capped run's structural output is suspect. Wall-clock caps are NOT
+	// checked here: ActiveDeadlineSeconds SIGKILLs the Pod before this code
+	// ever runs, so that half is a controller-side synthesis (Plan 50-06).
+	if capErr := harness.CheckCaps(in.Caps, usage); capErr != nil {
+		if out.ExitCode == 0 {
+			out.ExitCode = 1
+		}
+		out.Reason = "cap-hit: " + capErr.Error()
+		out.TerminalReason = pkgdispatch.TerminalReasonCapExceeded
 		return out, nil
 	}
 
@@ -397,6 +442,7 @@ func (a *Anthropic) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdisp
 			// marks the parent Failed rather than retrying a clean dispatch.
 			out.ExitCode = 1
 			out.Reason = fmt.Sprintf("read child CRDs: %s", truncate(readErr.Error(), 256))
+			out.TerminalReason = pkgdispatch.TerminalReasonInvalidOutput
 			return out, nil
 		}
 		out.ChildCRDs = children
@@ -412,6 +458,26 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "...(truncated)"
+}
+
+// runtimeVersionProbe execs `<claudeBinary> --version` once and returns its
+// trimmed stdout, for [pkgdispatch.RunEvidence.RuntimeVersion] (D-03,
+// EXEC-03) — the always-current CLI version, so RunEvidence never drifts
+// silently from a compiled-in pin as the image's CLI is upgraded.
+//
+// Best-effort by construction: on any failure (binary missing, non-zero
+// exit, context cancellation) this returns "" — the probe MUST NEVER fail
+// or materially delay Run(). No retry; ctx is inherited from the caller so
+// a cancelled Run() cancels the probe too, rather than blocking on it.
+// Callers rely on [pkgdispatch.RunEvidence.Bounded] to truncate the result
+// to [pkgdispatch.MaxRunEvidenceVersionBytes] — this helper does not bound
+// its own output.
+func runtimeVersionProbe(ctx context.Context, claudeBinary string) string {
+	out, err := exec.CommandContext(ctx, claudeBinary, "--version").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // childKindAllowlist is the runner-side T-308 mitigation mirror of the

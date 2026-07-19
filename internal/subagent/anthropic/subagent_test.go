@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jsquirrelz/tide/internal/subagent/common"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
@@ -205,6 +206,108 @@ func TestRun_ExecFailure(t *testing.T) {
 	}
 	if out.Reason == "" {
 		t.Error("expected non-empty Reason on exec failure")
+	}
+}
+
+// TestRun_TerminalReason_Completed asserts the D-02/D-03/D-01 success-path
+// contract (Task 1 Test 1): TerminalReason is "completed", LoopRunID/AttemptID
+// are echoed verbatim from EnvelopeIn, and RunEvidence.Model/PromptVersion are
+// populated from EnvelopeIn.Provider.Model and the compiled-in
+// common.PromptTemplateVersion (never re-derived).
+func TestRun_TerminalReason_Completed(t *testing.T) {
+	tmp := t.TempDir()
+	a := newFakeExecAnthropic(t, tmp, fixtureStreamJSON)
+	in := envelopeFixture("uid-terminal-completed")
+	in.LoopRunID = "loop-run-abc"
+	in.AttemptID = "loop-run-abc-1"
+
+	out, err := a.Run(context.Background(), in)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.TerminalReason != pkgdispatch.TerminalReasonCompleted {
+		t.Errorf("TerminalReason: got %q, want %q", out.TerminalReason, pkgdispatch.TerminalReasonCompleted)
+	}
+	if out.LoopRunID != in.LoopRunID {
+		t.Errorf("LoopRunID: got %q, want %q (echoed from EnvelopeIn)", out.LoopRunID, in.LoopRunID)
+	}
+	if out.AttemptID != in.AttemptID {
+		t.Errorf("AttemptID: got %q, want %q (echoed from EnvelopeIn)", out.AttemptID, in.AttemptID)
+	}
+	if out.RunEvidence == nil {
+		t.Fatal("RunEvidence: got nil, want populated")
+	}
+	if out.RunEvidence.Model != in.Provider.Model {
+		t.Errorf("RunEvidence.Model: got %q, want %q (echoed, never re-derived)",
+			out.RunEvidence.Model, in.Provider.Model)
+	}
+	if out.RunEvidence.PromptVersion != common.PromptTemplateVersion {
+		t.Errorf("RunEvidence.PromptVersion: got %q, want %q", out.RunEvidence.PromptVersion, common.PromptTemplateVersion)
+	}
+	if len(out.RunEvidence.Commands) != 1 || out.RunEvidence.Commands[0] == "" {
+		t.Errorf("RunEvidence.Commands: got %v, want exactly one non-empty argv entry", out.RunEvidence.Commands)
+	}
+}
+
+// TestRun_TerminalReason_ToolFailure asserts the waitErr branch (Task 1
+// Test 2) downgrades the base "completed" literal to tool_failure when the
+// claude CLI process exits non-zero.
+func TestRun_TerminalReason_ToolFailure(t *testing.T) {
+	tmp := t.TempDir()
+	a := New(Options{
+		ClaudeBinary:  "/nonexistent/claude", // unused — overridden below
+		WorkspaceRoot: tmp,
+	})
+	a.execFunc = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "false")
+	}
+
+	in := envelopeFixture("uid-terminal-tool-failure")
+	out, err := a.Run(context.Background(), in)
+	if err != nil {
+		t.Fatalf("Run returned dispatch-level error for task-level fail: %v", err)
+	}
+	if out.TerminalReason != pkgdispatch.TerminalReasonToolFailure {
+		t.Errorf("TerminalReason: got %q, want %q", out.TerminalReason, pkgdispatch.TerminalReasonToolFailure)
+	}
+	if out.ExitCode == 0 {
+		t.Error("ExitCode: got 0, want non-zero on tool failure")
+	}
+}
+
+// TestRun_TerminalReason_CapExceeded asserts the newly-wired harness.CheckCaps
+// call (Task 1 Test 3 / RESEARCH Open Question 1 in-pod half): when the
+// dispatch's Caps are exceeded by the actual usage the run reports,
+// TerminalReason downgrades to cap_exceeded, ExitCode becomes 1, and Reason
+// carries a "cap-hit" prefix. Driven via the input-tokens dimension (the
+// fixture stream reports input_tokens=100) rather than Iterations: ParseStream
+// never populates Usage.Iterations for any real Claude Code stream-json
+// transcript (pre-existing gap, out of this plan's scope — see 50-04-SUMMARY),
+// so an Iterations-cap trigger is not reachable through the public Run() path
+// with the current stream-json fixture; input-tokens exercises the identical
+// harness.CheckCaps wiring end-to-end.
+func TestRun_TerminalReason_CapExceeded(t *testing.T) {
+	tmp := t.TempDir()
+	a := newFakeExecAnthropic(t, tmp, fixtureStreamJSON)
+	in := envelopeFixture("uid-terminal-cap-exceeded")
+	in.Caps = pkgdispatch.Caps{InputTokens: 5} // fixture reports InputTokens=100
+
+	out, err := a.Run(context.Background(), in)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.ExitCode != 1 {
+		t.Errorf("ExitCode: got %d, want 1", out.ExitCode)
+	}
+	if out.TerminalReason != pkgdispatch.TerminalReasonCapExceeded {
+		t.Errorf("TerminalReason: got %q, want %q", out.TerminalReason, pkgdispatch.TerminalReasonCapExceeded)
+	}
+	if !strings.Contains(out.Reason, "cap-hit") {
+		t.Errorf("Reason: got %q, want it to contain %q", out.Reason, "cap-hit")
+	}
+	if len(out.ChildCRDs) != 0 {
+		t.Errorf("ChildCRDs: got %v, want none (a capped run's structural output is suspect — parsing is skipped)",
+			out.ChildCRDs)
 	}
 }
 

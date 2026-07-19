@@ -201,3 +201,65 @@ func TestCommitWorktreeModifiedFile(t *testing.T) {
 		t.Error("hash: got ZeroHash, want a real commit SHA")
 	}
 }
+
+// TestChangedFileManifest asserts that ChangedFileManifest reports the
+// name-status manifest of the worktree's HEAD commit (the commit
+// CommitWorktree just created), and that max bounds the returned entries
+// while ChangedFileTotal (the second return value) always reflects the
+// pre-truncation count.
+func TestChangedFileManifest(t *testing.T) {
+	dir := t.TempDir()
+	initWorktreeRepo(t, dir)
+
+	for _, name := range []string{"a.go", "b.go", "c.go"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("package main\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	hash, isEmpty, err := CommitWorktree(dir, "task-manifest-01")
+	if err != nil {
+		t.Fatalf("CommitWorktree: %v", err)
+	}
+	if isEmpty || hash == plumbing.ZeroHash {
+		t.Fatalf("CommitWorktree: got isEmpty=%v hash=%v, want a real commit", isEmpty, hash)
+	}
+
+	t.Run("unbounded", func(t *testing.T) {
+		files, total, err := ChangedFileManifest(dir, 10)
+		if err != nil {
+			t.Fatalf("ChangedFileManifest: %v", err)
+		}
+		if total != 3 {
+			t.Errorf("total: got %d, want 3", total)
+		}
+		if len(files) != 3 {
+			t.Fatalf("len(files): got %d, want 3", len(files))
+		}
+		gotPaths := map[string]bool{}
+		for _, f := range files {
+			gotPaths[f.Path] = true
+			if f.Status != "A" {
+				t.Errorf("Status for %s: got %q, want %q (all files are new adds)", f.Path, f.Status, "A")
+			}
+		}
+		for _, want := range []string{"a.go", "b.go", "c.go"} {
+			if !gotPaths[want] {
+				t.Errorf("manifest missing expected path %q; got %v", want, files)
+			}
+		}
+	})
+
+	t.Run("bounded_by_max", func(t *testing.T) {
+		files, total, err := ChangedFileManifest(dir, 2)
+		if err != nil {
+			t.Fatalf("ChangedFileManifest: %v", err)
+		}
+		if total != 3 {
+			t.Errorf("total: got %d, want 3 (pre-truncation count survives bounding)", total)
+		}
+		if len(files) != 2 {
+			t.Errorf("len(files): got %d, want 2 (bounded by max)", len(files))
+		}
+	})
+}

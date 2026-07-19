@@ -23,6 +23,7 @@ import (
 
 	"github.com/go-git/go-git/v5/plumbing"
 
+	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
@@ -75,4 +76,45 @@ func CommitWorktree(worktreeDir, taskUID string) (plumbing.Hash, bool, error) {
 		return plumbing.ZeroHash, false, fmt.Errorf("CommitWorktree: rev-parse HEAD: %w", err)
 	}
 	return plumbing.NewHash(strings.TrimSpace(string(headOut))), false, nil
+}
+
+// ChangedFileManifest returns the bounded git `--name-status` manifest for
+// worktreeDir's HEAD commit (the commit [CommitWorktree] just created), plus
+// the pre-truncation total count. At most max entries are returned; the
+// caller passes the returned total into [pkgdispatch.RunEvidence.ChangedFileTotal]
+// so callers can observe truncation even when ChangedFiles itself was cut.
+//
+// Rename lines ("R100  old  new") use the new path — the manifest reports
+// current file identity, not history. Only path + status letter are
+// returned, never a diff (T-50-01: the manifest must stay small by
+// construction, never carry content).
+func ChangedFileManifest(worktreeDir string, max int) ([]pkgdispatch.ChangedFile, int, error) {
+	out, err := exec.Command("git", "-C", worktreeDir, "show", "--name-status", "--format=").Output()
+	if err != nil {
+		return nil, 0, fmt.Errorf("ChangedFileManifest: git show --name-status: %w", err)
+	}
+
+	var all []pkgdispatch.ChangedFile
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		// Rename/copy lines are "R100\told\tnew" (or M/A/D "M\tpath") — the
+		// last field is always the current path.
+		all = append(all, pkgdispatch.ChangedFile{
+			Status: fields[0],
+			Path:   fields[len(fields)-1],
+		})
+	}
+
+	total := len(all)
+	if max > 0 && len(all) > max {
+		all = all[:max]
+	}
+	return all, total, nil
 }
