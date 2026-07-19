@@ -196,13 +196,23 @@ type BuildOptions struct {
 	// pins this as a regression test so a future refactor cannot silently
 	// re-introduce them.
 	//
-	// Forward-note (Phase 51 dispatch-wiring scope, not this phase's): when
-	// dispatch wires this variant, the envelope write-back path
-	// (/workspace/envelopes/<uid>/out.json) will need a separate read-write
-	// envelopes/ subPath mount of the same volume — out.json cannot be
-	// written through a ReadOnly mount. Resolving that mount split is
-	// explicitly Phase 51's job; nothing dispatches this ReadOnly variant yet.
+	// Resolved (Phase 51 TASK-04): when ReadOnly is true, BuildJobSpec adds a
+	// SECOND VolumeMount of the same project-workspace volume, scoped via
+	// subPath to envelopes/<uid>/ and read-write, mounted at
+	// /workspace/envelopes/<uid> — so out.json can be written even though
+	// /workspace itself stays ReadOnly.
 	ReadOnly bool
+
+	// GateCommand carries the canonical single gateCommand from the locked
+	// VerificationSpec (Phase 51 TASK-04) for the verifier LLM's
+	// run_gate_command tool. The FULL authored pass-criteria list the
+	// verifier executes out-of-band travels via the envelope
+	// (VerifyContext.Commands, written to the PVC by Plan 06), NOT this env
+	// var — do not pack a list into it. Non-empty → TIDE_GATE_COMMAND is
+	// stamped on the subagent container (mirrors the
+	// PricingOverridesJSON/TraceParent conditional-append shape). Empty →
+	// env var absent (non-verifier dispatches never carry it).
+	GateCommand string
 }
 
 // BuildJobSpec returns a complete *batchv1.Job for executor or planner dispatch
@@ -272,6 +282,17 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 			// this label (keyed by parentUID) so the shared reader finds them.
 			labels["tideproject.k8s/task-uid"] = parentUID
 		}
+	case JobKindVerifier:
+		// Phase 51 TASK-04/ESC-04: the verifier dispatches per-Task, same as
+		// the executor, but with its own deterministic name + role label so
+		// it never collides with — and is separately countable from — the
+		// executor Job for the same Task/attempt.
+		if opts.Task != nil {
+			parentUID = string(opts.Task.UID)
+		}
+		jobName = VerifierJobName(opts.Task.UID, opts.Attempt)
+		labels["tideproject.k8s/task-uid"] = string(opts.Task.UID)
+		labels["tideproject.k8s/role"] = "verifier"
 	default: // JobKindExecutor (and legacy callers with Kind=="")
 		if opts.Task != nil {
 			parentUID = string(opts.Task.UID)
@@ -431,6 +452,21 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 			Name:      VolumeVerifierScratch,
 			MountPath: "/scratch",
 		})
+		// Phase 51 TASK-04 (resolves the former :199-204 forward-note): a
+		// SECOND VolumeMount of the SAME project-workspace volume, scoped via
+		// subPath to envelopes/<uid>/ under the existing per-Project subPath
+		// and mounted read-write at the matching nested path — out.json
+		// cannot be written through the ReadOnly /workspace mount above, but
+		// a narrower, independently-mounted subPath can. This does NOT widen
+		// the RO worktree contract: only the envelopes/<uid>/ subtree is
+		// writable, matching where the manager already reads
+		// out.json from (doc.go's /workspaces/{project-uid}/workspace/
+		// envelopes/{task-uid}/out.json).
+		subagentMounts = append(subagentMounts, corev1.VolumeMount{
+			Name:      VolumeProjectWorkspace,
+			MountPath: "/workspace/envelopes/" + envelopeUID,
+			SubPath:   subPath + "/envelopes/" + envelopeUID,
+		})
 		// WR-02 fix: /scratch is the SOLE writable path under
 		// ReadOnlyRootFilesystem — redirect TMPDIR/HOME there so
 		// httpx/anthropic/langchain (which routinely write to /tmp and
@@ -448,6 +484,15 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 		subagentEnv = append(subagentEnv, corev1.EnvVar{
 			Name:  "TIDE_PRICING_OVERRIDES_JSON",
 			Value: opts.PricingOverridesJSON,
+		})
+	}
+	// Phase 51 TASK-04: stamp TIDE_GATE_COMMAND only when the caller has set
+	// the canonical single gateCommand (verifier dispatches; Plan 06 sets
+	// this from the locked VerificationSpec). Absent on non-verify dispatches.
+	if opts.GateCommand != "" {
+		subagentEnv = append(subagentEnv, corev1.EnvVar{
+			Name:  "TIDE_GATE_COMMAND",
+			Value: opts.GateCommand,
 		})
 	}
 	// Phase 43 PROP-01: stamp TRACEPARENT only when the immediate parent's span ID

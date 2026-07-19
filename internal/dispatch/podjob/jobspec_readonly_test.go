@@ -34,7 +34,11 @@ const verifierScratchVolumeName = VolumeVerifierScratch
 const testGitCredsSecretName = "git-push-creds-secret"
 
 // TestBuildJobSpec_Verifier_WorkspaceMountReadOnly verifies D-08: with
-// ReadOnly:true, the subagent's /workspace mount is ReadOnly.
+// ReadOnly:true, the subagent's PRIMARY /workspace mount is ReadOnly. Scoped
+// by MountPath (not just Name) because Phase 51 TASK-04 adds a SECOND
+// VolumeMount of the same VolumeProjectWorkspace volume (the RW
+// envelopes/<uid>/ subPath mount at /workspace/envelopes/<uid>) — see
+// TestBuildJobSpec_Verifier_RWEnvelopesSubPathMount in jobspec_test.go.
 func TestBuildJobSpec_Verifier_WorkspaceMountReadOnly(t *testing.T) {
 	opts := buildTestOptions()
 	opts.ReadOnly = true
@@ -46,7 +50,7 @@ func TestBuildJobSpec_Verifier_WorkspaceMountReadOnly(t *testing.T) {
 	subagent := containers[0]
 	var found bool
 	for _, vm := range subagent.VolumeMounts {
-		if vm.Name == VolumeProjectWorkspace {
+		if vm.Name == VolumeProjectWorkspace && vm.MountPath == "/workspace" {
 			found = true
 			if !vm.ReadOnly {
 				t.Errorf("subagent %q volumeMount ReadOnly = false; want true when opts.ReadOnly", VolumeProjectWorkspace)
@@ -54,7 +58,7 @@ func TestBuildJobSpec_Verifier_WorkspaceMountReadOnly(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("subagent container missing volumeMount %q", VolumeProjectWorkspace)
+		t.Fatalf("subagent container missing primary volumeMount %q at /workspace", VolumeProjectWorkspace)
 	}
 }
 
