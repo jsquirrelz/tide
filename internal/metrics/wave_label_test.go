@@ -46,6 +46,12 @@ import (
 // that must all carry exactly the {project, phase, plan, wave} label set (D-10).
 // Each entry is (metricName, withLabelValuesFn) — calling WithLabelValues with
 // 4 args panics on arity mismatch, making the call itself the arity assertion.
+//
+// Phase 50 decision (OBS-02 / D-06 / RESEARCH Open Question 3): this table
+// stays UNCHANGED this phase — no loop-scoped Prometheus metric ships until
+// Phase 51 has a real consumer (EvaluationSummary.Decision /
+// LoopStatus.ExitReason). Run-native detail lives in traces, not metrics
+// (LOOP-03); metrics stay aggregate with bounded enum labels only.
 var telem03labelChecks = []struct {
 	name   string
 	seedFn func()
@@ -77,7 +83,9 @@ var telem03labelChecks = []struct {
 //  1. Each of the seven TELEM-03 metrics accepts exactly four label values
 //     {project, phase, plan, wave} — calling WithLabelValues(4 args) will panic
 //     at runtime if arity is wrong, so a successful call IS the test.
-//  2. The registry source must not carry a "task" label literal (Pitfall 17).
+//  2. The registry source must not carry any of the D-06 forbidden labels
+//     (task, run_id, loop_run_id, run, attempt, attempt_id, trace_id,
+//     task_uid, uid — OBS-02 / Pitfall 17).
 func TestWaveLabel(t *testing.T) {
 	t.Run("TELEM-03 metrics accept exactly {project,phase,plan,wave} labels", func(t *testing.T) {
 		for _, tc := range telem03labelChecks {
@@ -117,19 +125,34 @@ func TestWaveLabel(t *testing.T) {
 		}
 	})
 
-	t.Run("registry.go carries no task label (Pitfall 17)", func(t *testing.T) {
+	t.Run("registry.go carries none of the D-06 forbidden labels (OBS-02 / Pitfall 17)", func(t *testing.T) {
 		root := findMetricsRepoRoot(t)
 		data, err := os.ReadFile(filepath.Join(root, "internal", "metrics", "registry.go"))
 		if err != nil {
 			t.Fatalf("read registry.go: %v", err)
 		}
 		src := string(data)
-		// Allow "task" to appear in comments but reject quoted "task" in label slices.
-		// The check is: no `"task"` literal anywhere in registry.go (same as the
-		// existing TestRegistry_NoTaskLabel, but duplicated here for the SCHEMA-02
-		// lock so -run TestWaveLabel also catches this).
-		if strings.Contains(src, `"task"`) {
-			t.Errorf(`registry.go contains literal "task" — Pitfall 17 violation; no task-scoped metric label permitted`)
+		// forbiddenRuntimeLabels is the runtime half of the dual cardinality
+		// guard (OBS-02 / D-06). It MUST be kept in sync by hand with
+		// tools/analyzers/metriccardinality/analyzer.go's forbiddenLabels set
+		// — that file's go-vet-time static analyzer is the other half. Both
+		// lists exist independently (the analyzer's set is intentionally not
+		// imported here) so a bug in one guard cannot silently disable the
+		// other.
+		//
+		// "uid" also matches as a substring of "task_uid" — that is
+		// acceptable (both are forbidden); this check is deliberately
+		// conservative and scoped only to the guarded registry.go file.
+		forbiddenRuntimeLabels := []string{
+			"task", "run_id", "loop_run_id", "run", "attempt",
+			"attempt_id", "trace_id", "task_uid", "uid",
+		}
+		for _, label := range forbiddenRuntimeLabels {
+			quoted := `"` + label + `"`
+			if strings.Contains(src, quoted) {
+				t.Errorf("registry.go contains literal %s — OBS-02/D-06 (Pitfall 17) violation; "+
+					"no run-ID-shaped metric label permitted", quoted)
+			}
 		}
 	})
 }
