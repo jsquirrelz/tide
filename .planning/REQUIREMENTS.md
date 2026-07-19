@@ -30,11 +30,11 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 ### Task Loop (TASK) — the core
 
 - [x] **TASK-01**: `TaskSpec` gains a verification contract embodying the committed TASK-template shape — **planner-authored** acceptance-signal `commands` (executed for real by the evaluator, exit codes parsed, never self-reported), `requiredArtifacts`, `evaluator` (type), constraints/prohibited-changes, `maxIterations`, `onExhaustion` — and the contract is **immutable once locked** (Draft→Locked→Superseded + version): a run references the locking commit so `git show <sha>` reproduces exactly what was dispatched, and a fresh attempt re-uses that locked spec
-- [ ] **TASK-02**: A verification result classified **repairable** creates a FRESH attempt seeded with the original spec + a **compact evidence packet** (the relevant failures/diffs/test output) — never the previous agent's entire context
-- [ ] **TASK-03**: **Infrastructure-retry** (rerun the same attempt after eviction/transient failure) is distinct from **quality-iteration** (a new attempt with evaluator feedback): the eviction-retry path is preserved and the blind `maxAttemptsPerTask` quality-retry is superseded by evaluator-driven attempts
+- [x] **TASK-02**: A verification result classified **repairable** creates a FRESH attempt seeded with the original spec + a **compact evidence packet** (the relevant failures/diffs/test output) — never the previous agent's entire context
+- [x] **TASK-03**: **Infrastructure-retry** (rerun the same attempt after eviction/transient failure) is distinct from **quality-iteration** (a new attempt with evaluator feedback): the eviction-retry path is preserved and the blind `maxAttemptsPerTask` quality-retry is superseded by evaluator-driven attempts
 - [x] **TASK-04**: The evaluator is **logically independent** of the implementation agent (a distinct runtime/process — the LangGraph image), and a **deterministic security, compile, or test failure dominates** any probabilistic LLM-judge approval (a red gate can never be overridden by a judge)
 - [x] **TASK-05**: The Task loop is bounded by `maxIterations` with `onExhaustion` → escalate / `requireApproval` (never unbounded), and its iteration/cost/budget state is re-derivable and **resumable across a controller restart**
-- [ ] **TASK-06**: The Task contract's escalation is **three-tier** — *fresh attempt* (repairable failures return to the Task loop), *system escalation* (a recurring cross-attempt pattern — notably an attempt that edits fixtures/thresholds/the evaluator itself instead of the code — is flagged as systemic, never counted as a pass), *human decision* (spec/architecture/risk changes → `requireApproval`); the **anti-gaming invariant** "do not weaken or delete an evaluator to make a Task pass" is enforced, not merely documented
+- [x] **TASK-06**: The Task contract's escalation is **three-tier** — *fresh attempt* (repairable failures return to the Task loop), *system escalation* (a recurring cross-attempt pattern — notably an attempt that edits fixtures/thresholds/the evaluator itself instead of the code — is flagged as systemic, never counted as a pass), *human decision* (spec/architecture/risk changes → `requireApproval`); the **anti-gaming invariant** "do not weaken or delete an evaluator to make a Task pass" is enforced, not merely documented
 
 ### Evaluator Image & Verdict (EVAL)
 
@@ -108,11 +108,11 @@ Locked at roadmap creation 2026-07-18 (`ROADMAP.md`): Phase 48 LangGraph evaluat
 | EXEC-03 | Phase 50 | Complete |
 | EXEC-04 | Phase 50 | Complete |
 | TASK-01 | Phase 51 | Complete |
-| TASK-02 | Phase 51 | Pending |
-| TASK-03 | Phase 51 | Pending |
+| TASK-02 | Phase 51 | Complete |
+| TASK-03 | Phase 51 | Complete |
 | TASK-04 | Phase 51 | Complete |
 | TASK-05 | Phase 51 | Complete |
-| TASK-06 | Phase 51 | Pending |
+| TASK-06 | Phase 51 | Complete |
 | EVAL-01 | Phase 48 | Complete |
 | EVAL-02 | Phase 48 | Complete |
 | EVAL-03 | Phase 49 | Complete |
