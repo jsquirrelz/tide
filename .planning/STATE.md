@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0.9
 milestone_name: Slack Tide — The Task Loop (Verification-Driven Quality Iteration)
 status: executing
-stopped_at: Completed 50-01-PLAN.md
-last_updated: "2026-07-19T04:07:47.798Z"
+stopped_at: Completed 50-02-PLAN.md
+last_updated: "2026-07-19T04:14:24.530Z"
 last_activity: 2026-07-19
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 16
-  completed_plans: 10
+  completed_plans: 11
   percent: 33
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 ## Current Position
 
 Phase: 50 (execution-loop-hardening-loop-native-observability) — EXECUTING
-Plan: 2 of 7
+Plan: 3 of 7
 Status: Ready to execute
 Last activity: 2026-07-19
 
-Progress: [██████░░░░] 63%
+Progress: [███████░░░] 69%
 
 ## Performance Metrics
 
@@ -82,6 +82,8 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 50]: [Phase 50-01] TerminalReason.Completed is belief-only (EXEC-04); doc comment states this explicitly on the const, not just the type
 - [Phase 50]: [Phase 50-01] EnvelopeOut.TerminalReason carries no omitempty so an unset reason stays visible as "" on the wire, never silently hidden
 - [Phase 50]: [Phase 50-01] RunEvidence.Bounded() truncates ChangedFiles/Commands/version fields per plan spec; EvaluatorVersions left unbounded (Phase-51-populated, empty today, not in plan's Bounded() contract)
+- [Phase 50]: [Phase 50-02] LoopAttributes' returned-order is kind/run_id/iteration (always) then parent_run_id/candidate_version/exit_reason (conditional) — matches the plan's action-text prose, not the const-declaration order
+- [Phase 50]: [Phase 50-02] loop.*/evaluation.*/human_intervention keys are deliberately NOT tide.-prefixed (cross-vendor loop-native convention Phase 51's LangGraph evaluator reuses); doc comment documents the deviation from the file's tide.* idiom explicitly
 
 ### Pending Todos
 
@@ -121,11 +123,12 @@ Tech-debt still carried forward: W-2 FailureHalt/gate-order divergences (todos a
 | Phase 49 P04 | 8s | 2 tasks | 2 files |
 | Phase 49 P03 | 3min | 2 tasks | 4 files |
 | Phase 50 P01 | 14min | 2 tasks | 6 files |
+| Phase 50 P02 | 1min | 2 tasks | 2 files |
 
 ## Session Continuity
 
-Last session: 2026-07-19T04:07:47.782Z
-Stopped at: Completed 50-01-PLAN.md
+Last session: 2026-07-19T04:14:24.511Z
+Stopped at: Completed 50-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps

@@ -53,7 +53,7 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### Loop-Native Observability (OBS)
 
-- [ ] **OBS-01**: Spans carry `loop.kind`, `loop.run_id`, `loop.parent_run_id`, `loop.iteration`, `loop.candidate_version`, `loop.exit_reason`, `evaluation.result`, `evaluation.version`, and `human_intervention`, plus cost/duration/token usage
+- [x] **OBS-01**: Spans carry `loop.kind`, `loop.run_id`, `loop.parent_run_id`, `loop.iteration`, `loop.candidate_version`, `loop.exit_reason`, `evaluation.result`, `evaluation.version`, and `human_intervention`, plus cost/duration/token usage
 - [ ] **OBS-02**: Run IDs stay **out of Prometheus labels** (traces + structured logs only); metrics use bounded labels (loop kind, exit reason, evaluator type, risk tier)
 - [ ] **OBS-03**: The LangGraph evaluator's vendor registers in `pkg/dispatch.SelfInstruments` (reporter skips `events.jsonl` span synthesis) in the **same phase** as its dispatch sites, and it emits a distinct OpenInference `EVALUATOR`-kind span parented as a **sibling** to the checked level's `AGENT` span — no double-emission into the v1.0.8 trace tree
 - [ ] **OBS-04**: The dashboard shows nested loop provenance (Project run → Task iteration → Execution attempt/tool spans) and surfaces `VerifyHalt` as a visually **distinct** state from `Failed`, with the staged findings browsable through the existing gitfetch/artifacts API (no new endpoint)
@@ -122,7 +122,7 @@ Locked at roadmap creation 2026-07-18 (`ROADMAP.md`): Phase 48 LangGraph evaluat
 | ESC-02 | Phase 51 | Pending |
 | ESC-03 | Phase 51 | Pending |
 | ESC-04 | Phase 51 | Pending |
-| OBS-01 | Phase 50 | Pending |
+| OBS-01 | Phase 50 | Complete |
 | OBS-02 | Phase 50 | Pending |
 | OBS-03 | Phase 51 | Pending |
 | OBS-04 | Phase 53 | Pending |
