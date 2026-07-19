@@ -52,3 +52,20 @@ func JobName(taskUID types.UID, attempt int) string {
 func PlannerJobName(level, parentUID string, attempt int) string {
 	return fmt.Sprintf("tide-%s-%s-%d", level, parentUID, attempt)
 }
+
+// VerifierJobName returns the deterministic Job name for a Task's nth
+// verifier dispatch attempt (Phase 51 TASK-04/ESC-04).
+//
+// Format: "tide-verifier-{taskUID}-{attempt}".
+//
+// Distinct from JobName's "tide-task-{taskUID}-{attempt}" executor form so
+// the two Jobs never collide even when dispatched for the same Task UID +
+// attempt — the verifier runs as a logically independent process from the
+// implementation agent (TASK-04). Same idempotency-dedup-key contract as
+// JobName: AlreadyExists on duplicate Create == successful idempotent
+// dispatch (SUB-03). The name is also the deterministic re-read target and,
+// via BuildJobSpec's role=verifier label, the selector Plan 06's
+// verifierInFlightCount (ESC-04) counts in-flight verifier Jobs against.
+func VerifierJobName(taskUID types.UID, attempt int) string {
+	return fmt.Sprintf("tide-verifier-%s-%d", taskUID, attempt)
+}

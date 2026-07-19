@@ -35,6 +35,7 @@ type JobKind string
 const (
 	JobKindExecutor JobKind = "executor" // Phase 2 task dispatch — 1200s floor
 	JobKindPlanner  JobKind = "planner"  // Phase 3 planner dispatch — 1800s floor
+	JobKindVerifier JobKind = "verifier" // Phase 51 verifier dispatch — 900s floor (TASK-04)
 )
 
 // executorCapsFloorSeconds is the minimum wall-clock budget applied to
@@ -79,18 +80,34 @@ const executorCapsFloorSeconds int32 = 1200
 // no other change is needed.
 const plannerCapsFloorSeconds int32 = 1800
 
+// verifierCapsFloorSeconds is the minimum wall-clock budget applied to
+// verifier Jobs (Task-loop evaluator dispatch) when caps is nil or
+// caps.WallClockSeconds <= 0. Phase 51 TASK-04: the verifier runs a
+// read-only LangGraph evaluator that executes the locked gate command(s)
+// out-of-band (a real test/build invocation) and makes one LLM judge pass
+// over the resulting evidence — no code-authoring tool loop like the
+// executor's — so the floor is deliberately shorter than
+// executorCapsFloorSeconds while still giving the gate command(s) + judge
+// round-trip real headroom. Claude's Discretion (51-04-PLAN.md); re-raise if
+// a live run shows verifier Jobs hitting DeadlineExceeded, mirroring how
+// executorCapsFloorSeconds and plannerCapsFloorSeconds were each raised
+// after a real run surfaced kills.
+const verifierCapsFloorSeconds int32 = 900
+
 // DefaultCaps returns a *Caps with the Kind-appropriate wall-clock floor
 // applied. If caps is non-nil and WallClockSeconds > 0, returns caps unchanged
 // (no allocation; operator-set values are always honored regardless of Kind).
 // Otherwise returns a NEW *Caps with WallClockSeconds set to executorCapsFloorSeconds
-// (kind=JobKindExecutor) or plannerCapsFloorSeconds (kind=JobKindPlanner) and
-// any non-zero fields from the input preserved (Iterations, InputTokens,
-// OutputTokens — operator-set caps on other dimensions are NOT clobbered).
+// (kind=JobKindExecutor), plannerCapsFloorSeconds (kind=JobKindPlanner), or
+// verifierCapsFloorSeconds (kind=JobKindVerifier) and any non-zero fields
+// from the input preserved (Iterations, InputTokens, OutputTokens —
+// operator-set caps on other dimensions are NOT clobbered).
 //
 // Used by:
 //   - internal/controller/task_controller.go (token mint — credproxy.Sign validity, JobKindExecutor)
 //   - internal/dispatch/podjob/jobspec.go    (activeDeadlineSeconds derivation, Kind from BuildOptions)
 //   - internal/controller/milestone_controller.go / phase / plan (planner dispatch via Plan 04.1-05, JobKindPlanner)
+//   - Plan 06's verifier dispatch site (JobKindVerifier; this plan only builds the surface)
 //
 // A nil-caps unit test (caps_test.go) asserts that both consumers' derived
 // deadlines match within DefaultWallClockGraceSeconds for EACH Kind, which the
@@ -101,8 +118,11 @@ func DefaultCaps(caps *tidev1alpha3.Caps, kind JobKind) *tidev1alpha3.Caps {
 		return caps
 	}
 	floor := executorCapsFloorSeconds
-	if kind == JobKindPlanner {
+	switch kind {
+	case JobKindPlanner:
 		floor = plannerCapsFloorSeconds
+	case JobKindVerifier:
+		floor = verifierCapsFloorSeconds
 	}
 	out := tidev1alpha3.Caps{
 		WallClockSeconds: floor,
