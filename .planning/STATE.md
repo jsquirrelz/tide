@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0.9
 milestone_name: Slack Tide — The Task Loop (Verification-Driven Quality Iteration)
 status: executing
-stopped_at: Completed 50-05-PLAN.md
-last_updated: "2026-07-19T05:08:09.703Z"
+stopped_at: Completed 50-06-PLAN.md
+last_updated: "2026-07-19T05:26:42.217Z"
 last_activity: 2026-07-19
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 16
-  completed_plans: 14
+  completed_plans: 15
   percent: 33
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 ## Current Position
 
 Phase: 50 (execution-loop-hardening-loop-native-observability) — EXECUTING
-Plan: 6 of 7
+Plan: 7 of 7
 Status: Ready to execute
 Last activity: 2026-07-19
 
-Progress: [█████████░] 88%
+Progress: [█████████░] 94%
 
 ## Performance Metrics
 
@@ -92,6 +92,8 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 50-05]: ENVELOPE_OUT_GOLDEN_FIXTURE imports verdict.py's private _repo_root() helper directly rather than duplicating it, per the plan's explicit reuse instruction
 - [Phase 50-05]: Task 1 TDD RED used git checkout -- to revert envelope.py to pre-change state, producing a genuine failing-assertion RED rather than a build-error RED
 - [Phase 50-05]: run_evidence bounding stays Go-side only this phase; the Python writer joins whatever dict the caller passes, matching D-03's scope note that full evidence population is Phase 51
+- [Phase 50]: [Phase 50-06] synthesizeNoEnvelopeOut maps ONLY JobFailed reason DeadlineExceeded to cap_exceeded (fail-closed, never guessed) — the sole controller-side producer for wall-clock kills since a SIGKILLed pod never writes out.json
+- [Phase 50]: [Phase 50-06] synthesizePlannerSpan gates otelai.LoopAttributes on out.AttemptID != "" — planner-level dispatches (unstamped this phase) correctly carry zero loop.* attributes rather than fabricated empties
 
 ### Pending Todos
 
@@ -135,11 +137,12 @@ Tech-debt still carried forward: W-2 FailureHalt/gate-order divergences (todos a
 | Phase 50 P03 | 7min | 2 tasks | 5 files |
 | Phase 50 P04 | 17min | 3 tasks | 9 files |
 | Phase 50 P05 | 3min | 2 tasks | 2 files |
+| Phase 50 P06 | 10min | 3 tasks | 4 files |
 
 ## Session Continuity
 
-Last session: 2026-07-19T05:08:09.683Z
-Stopped at: Completed 50-05-PLAN.md
+Last session: 2026-07-19T05:26:42.198Z
+Stopped at: Completed 50-06-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
