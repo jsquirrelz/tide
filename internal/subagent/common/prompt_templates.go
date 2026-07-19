@@ -45,17 +45,19 @@ var templateFS embed.FS
 // cross-attempt evidence comparison (EXEC-03); a stale value silently
 // corrupts that comparison by claiming two attempts ran the same prompt when
 // they did not.
-const PromptTemplateVersion = "v1"
+const PromptTemplateVersion = "v2"
 
 // LoadPromptTemplate returns the compiled-in Go text/template for the given
-// (role, level) tuple. v1 ships five templates — one per orchestrator-dispatched
-// planner/executor level (project, milestone, phase, plan, task):
+// (role, level) tuple. v2 (Phase 51 EVAL-04) ships six templates — one per
+// orchestrator-dispatched planner/executor/verifier level (project,
+// milestone, phase, plan, task, plus task's verifier):
 //
 //   - role="planner",  level="project"    → templates/project_planner.tmpl
 //   - role="planner",  level="milestone"  → templates/milestone_planner.tmpl
 //   - role="planner",  level="phase"      → templates/phase_planner.tmpl
 //   - role="planner",  level="plan"       → templates/plan_planner.tmpl
 //   - role="executor", level="task"       → templates/task_executor.tmpl
+//   - role="verifier", level="task"       → templates/task_verifier.tmpl
 //
 // The project-level planner authors the Milestone from Project.Spec.outcome —
 // mirroring the stub-subagent's case "project" project→Milestone authoring

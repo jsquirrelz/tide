@@ -25,12 +25,13 @@ import (
 )
 
 // TestLoadPromptTemplate_HappyPath verifies that LoadPromptTemplate returns a
-// non-nil *template.Template for each of the five shipped {level,role} combos
+// non-nil *template.Template for each of the six shipped {level,role} combos
 // and that the template renders against a populated EnvelopeIn without error
 // and produces non-empty output.
 //
-// Table-driven across all five (level, role) combinations: project/milestone/
-// phase/plan planners plus the task executor. Matches plan 03-05 Task 1 Test 6.
+// Table-driven across all six (level, role) combinations: project/milestone/
+// phase/plan planners, the task executor, plus the task verifier (Phase 51
+// EVAL-04). Matches plan 03-05 Task 1 Test 6.
 func TestLoadPromptTemplate_HappyPath(t *testing.T) {
 	tests := []struct {
 		role  string
@@ -41,6 +42,7 @@ func TestLoadPromptTemplate_HappyPath(t *testing.T) {
 		{role: "planner", level: "phase"},
 		{role: "planner", level: "plan"},
 		{role: "executor", level: "task"},
+		{role: "verifier", level: "task"},
 	}
 
 	for _, tc := range tests {
@@ -64,6 +66,9 @@ func TestLoadPromptTemplate_HappyPath(t *testing.T) {
 					Vendor: "anthropic",
 					Model:  "claude-sonnet-4-6",
 				},
+				Verify: &pkgdispatch.VerifyContext{
+					GateCommand: "make test",
+				},
 			}
 
 			var buf bytes.Buffer
@@ -74,6 +79,65 @@ func TestLoadPromptTemplate_HappyPath(t *testing.T) {
 				t.Error("rendered template is empty")
 			}
 		})
+	}
+}
+
+// TestLoadPromptTemplate_Verifier_CoverageNotConservatism asserts the
+// EVAL-04 content directive: task_verifier.tmpl instructs the evaluator to
+// report a finding for every deviation with severity + confidence tags
+// (coverage), and never tells it to be conservative or to report only
+// high-severity findings — the Opus-4.8 tuning note this template exists to
+// satisfy (see 51-CONTEXT.md D-12).
+func TestLoadPromptTemplate_Verifier_CoverageNotConservatism(t *testing.T) {
+	tmpl, err := LoadPromptTemplate("verifier", "task")
+	if err != nil {
+		t.Fatalf("LoadPromptTemplate(verifier, task): %v", err)
+	}
+
+	in := pkgdispatch.EnvelopeIn{
+		APIVersion: pkgdispatch.APIVersionV1Alpha1,
+		Kind:       pkgdispatch.KindTaskEnvelopeIn,
+		TaskUID:    "uid-verifier-fixture",
+		Role:       "verifier",
+		Level:      "task",
+		Prompt:     "fixture prompt",
+		Provider: pkgdispatch.ProviderSpec{
+			Vendor: "anthropic",
+			Model:  "claude-sonnet-4-6",
+		},
+		Verify: &pkgdispatch.VerifyContext{
+			GateCommand:       "make test",
+			RequiredArtifacts: []string{"artifacts/out.txt"},
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, in); err != nil {
+		t.Fatalf("template.Execute: %v", err)
+	}
+	rendered := buf.String()
+
+	for _, phrase := range []string{"every deviation", "severity", "confidence"} {
+		if !strings.Contains(strings.ToLower(rendered), phrase) {
+			t.Errorf("task_verifier.tmpl missing coverage directive phrase %q; rendered:\n%s", phrase, rendered)
+		}
+	}
+
+	lower := strings.ToLower(rendered)
+	for _, forbidden := range []string{"conservative", "only high-severity", "only high severity"} {
+		if strings.Contains(lower, forbidden) {
+			t.Errorf("task_verifier.tmpl contains forbidden conservatism directive %q (Opus-4.8 tuning note: drops real low-severity findings)", forbidden)
+		}
+	}
+}
+
+// TestPromptTemplateVersion_BumpedForVerifier asserts PromptTemplateVersion
+// was co-bumped with the task_verifier.tmpl addition (the file's own
+// MAINTENANCE RULE) — a stale version would silently corrupt cross-attempt
+// run-evidence comparison (EXEC-03).
+func TestPromptTemplateVersion_BumpedForVerifier(t *testing.T) {
+	if PromptTemplateVersion == "v1" {
+		t.Errorf("PromptTemplateVersion is still %q; must be bumped in the same commit as task_verifier.tmpl (MAINTENANCE RULE)", PromptTemplateVersion)
 	}
 }
 
