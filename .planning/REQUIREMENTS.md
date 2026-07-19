@@ -47,7 +47,7 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 ### Per-Level Escalation & Halt (ESC)
 
 - [ ] **ESC-01**: The same verification contract runs at every level, parameterized by `LoopPolicy` — **Task** `maxIterations:N` (auto-repair); **Plan/plan-check** `maxIterations:1` (goal-backward rubric — goal alignment, file-touch plausibility, dependency correctness, verification derivability — → re-plan with its **own** counter default 1 and **severity-weighted** stall detection); **Phase/Milestone/Project** `maxIterations:0` (escalate, because a level closes on its **observable outcome**, not on task-completion — the Slice-template principle) — gate policy resolved from **loop level**, not hierarchy position
-- [ ] **ESC-02**: `ConditionVerifyHalt` mirrors `failure_halt.go` file-for-file **including Phase 25's resume time-fence**, gates **both** the planner tier (`checkDispatchHolds`) and the task tier (`TaskReconciler.gateChecks`), and enforces `onExhaustion: requireApproval` through the existing gate machinery
+- [x] **ESC-02**: `ConditionVerifyHalt` mirrors `failure_halt.go` file-for-file **including Phase 25's resume time-fence**, gates **both** the planner tier (`checkDispatchHolds`) and the task tier (`TaskReconciler.gateChecks`), and enforces `onExhaustion: requireApproval` through the existing gate machinery
 - [x] **ESC-03**: A BLOCKED / exhausted verify is a **distinct halt class**, never a reinterpretation of `Failed` wave semantics — a regression test asserts the checked level's phase, wave siblings, and conservative-profile propagation are untouched by a VerifyHalt
 - [x] **ESC-04**: Evaluator dispatches are **counted against the concurrency gate** (extend `plannerInFlightCount` or add a dedicated `verifierInFlightCount`, Phase-32 shape) in the **same phase** as the dispatch sites, and `LoopPolicy.BudgetCents` bounds cost through the existing reservation store — preventing a repeat of the run-2b D3 single-node OOM
 
@@ -119,7 +119,7 @@ Locked at roadmap creation 2026-07-18 (`ROADMAP.md`): Phase 48 LangGraph evaluat
 | EVAL-04 | Phase 51 | Complete |
 | EVAL-05 | Phase 49 | Complete |
 | ESC-01 | Phase 52 | Pending |
-| ESC-02 | Phase 51 | Pending |
+| ESC-02 | Phase 51 | Complete |
 | ESC-03 | Phase 51 | Complete |
 | ESC-04 | Phase 51 | Complete |
 | OBS-01 | Phase 50 | Complete |

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0.9
 milestone_name: Slack Tide — The Task Loop (Verification-Driven Quality Iteration)
 status: executing
-stopped_at: Completed 51-04-PLAN.md
-last_updated: "2026-07-19T13:08:15.334Z"
+stopped_at: Completed 51-05-PLAN.md
+last_updated: "2026-07-19T13:36:05.750Z"
 last_activity: 2026-07-19
 progress:
   total_phases: 6
   completed_phases: 3
   total_plans: 24
-  completed_plans: 20
+  completed_plans: 21
   percent: 50
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 ## Current Position
 
 Phase: 51 (The Task Loop) — EXECUTING
-Plan: 5 of 8
+Plan: 6 of 8
 Status: Ready to execute
 Last activity: 2026-07-19
 
-Progress: [████████░░] 83%
+Progress: [█████████░] 88%
 
 ## Performance Metrics
 
@@ -110,6 +110,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 51]: [Phase 51-04]: TIDE_GATE_COMMAND injection gated on GateCommand != empty only, not on Kind/ReadOnly — mirrors the unconditional-except-non-empty PricingOverridesJSON/TraceParent shape; only Plan 06 is expected to set it
 - [Phase 51]: [Phase 51-04]: BuildJobSpec's Kind switch gained an explicit case JobKindVerifier (name+role=verifier label) so Plan 06 only needs to set opts.Kind — without it a verifier dispatch would silently fall into the executor default branch
 - [Phase 51]: [Phase 51-04]: the RW envelopes/<uid>/ subPath mount is gated on opts.ReadOnly alone (not Kind) — matches how /scratch and ReadOnlyRootFilesystem are already scoped to the general read-only-dispatch variant
+- [Phase 51]: [Phase 51-05]: setVerifyHaltIfNeeded has no FailureProfile-style gate -- the loop-exhaustion trigger lives entirely at the Plan 07 call site, matching the 4-arg signature setVerifyHaltIfNeeded(ctx,c,project,taskCompletedAt) documented in 51-07-PLAN.md
+- [Phase 51]: [Phase 51-05]: task-only BUDGET-03 headroom hold and the legacy BudgetExceeded phase fallback stay applied by gateChecks AFTER delegating to checkDispatchHolds -- neither has a planner-tier counterpart in the shared chain
+- [Phase 51]: [Phase 51-05]: no VerifyHalt-at-terminal hook added to gateChecks Step 1 -- the real exhaustion trigger fires from the verifier-completion branch Plan 06/07 add, a different code path than the Failed-phase terminal short-circuit
 
 ### Pending Todos
 
@@ -159,11 +162,12 @@ Tech-debt still carried forward: W-2 FailureHalt/gate-order divergences (todos a
 | Phase 51 P02 | 13min | 2 tasks | 8 files |
 | Phase 51 P03 | 7min | 3 tasks | 7 files |
 | Phase 51 P04 | 5min | 2 tasks | 7 files |
+| Phase 51 P05 | 17min | 2 tasks | 6 files |
 
 ## Session Continuity
 
-Last session: 2026-07-19T13:08:15.319Z
-Stopped at: Completed 51-04-PLAN.md
+Last session: 2026-07-19T13:36:05.736Z
+Stopped at: Completed 51-05-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
