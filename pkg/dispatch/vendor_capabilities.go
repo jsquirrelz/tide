@@ -37,6 +37,8 @@ package dispatch
 // ProviderSpec.Vendor's doc comment.
 func SelfInstruments(vendor string) bool {
 	switch vendor {
+	case "langgraph":
+		return true // self-instruments via openinference-instrumentation-langchain; reporter skips events.jsonl synthesis
 	case "anthropic", "openai", "google", "xai", "opencode":
 		return false // CLI/wrapper-shimmed — no in-process OTel SDK
 	default:

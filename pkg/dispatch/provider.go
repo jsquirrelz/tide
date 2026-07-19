@@ -36,7 +36,8 @@ package dispatch
 type ProviderSpec struct {
 	// Vendor is the provider sentinel string the subagent image checks at
 	// startup. Canonical values: "anthropic", "openai", "google", "xai",
-	// "opencode". Required (no omitempty) — every dispatch declares a vendor.
+	// "opencode", "langgraph". Required (no omitempty) — every dispatch
+	// declares a vendor.
 	Vendor string `json:"vendor"`
 
 	// Model is the per-vendor model identifier passed to the provider CLI or
