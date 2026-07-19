@@ -390,3 +390,99 @@ func MetadataJSON(encoded string) attribute.KeyValue {
 func Tags(tags ...string) attribute.KeyValue {
 	return attribute.StringSlice(semconv.TagTags, tags)
 }
+
+// Loop-native span attributes (OBS-01, Phase 50 D-05): loop.kind, loop.run_id,
+// loop.parent_run_id, loop.iteration, loop.candidate_version, loop.exit_reason,
+// evaluation.result, evaluation.version, and human_intervention.
+//
+// These nine keys are DELIBERATELY NOT tide.-prefixed, unlike every other
+// custom key in this file (see the "only tide.* literals may remain
+// hand-rolled" doc comment above the tide.* const block). The loop.* and
+// evaluation.* families, and human_intervention, are the loop-native,
+// cross-vendor convention from the five-loop model
+// (.planning/notes/five-loop-model.md): Phase 51's LangGraph evaluator — a
+// non-TIDE-branded process — emits spans using these SAME literal strings, so
+// a tide. prefix would be semantically wrong for a convention meant to be
+// shared across implementations, not owned by TIDE. Do not "fix" these into
+// the tide namespace.
+//
+// Population contract per key — do not populate ahead of the owning phase:
+//   - loop.kind / loop.run_id / loop.parent_run_id / loop.iteration /
+//     loop.candidate_version / loop.exit_reason are populated by Phase 50
+//     (the Execution loop, this phase).
+//   - evaluation.result / evaluation.version / human_intervention are DEFINED
+//     here for trace-schema stability but populated ONLY by Phase 51's
+//     evaluator / Task loop. Phase 50 code must never fake-populate them.
+const (
+	keyLoopKind          = "loop.kind"
+	keyLoopRunID         = "loop.run_id"
+	keyLoopParentRunID   = "loop.parent_run_id"
+	keyLoopIteration     = "loop.iteration"
+	keyLoopCandidateVer  = "loop.candidate_version"
+	keyLoopExitReason    = "loop.exit_reason"
+	keyEvaluationResult  = "evaluation.result"
+	keyEvaluationVersion = "evaluation.version"
+	keyHumanIntervention = "human_intervention"
+)
+
+// LoopKindExecution is the sole loop.kind value Phase 50 emits — the in-Job
+// Execution loop's AGENT span. Phase 51 adds evaluator/task loop kinds.
+const LoopKindExecution = "execution"
+
+// LoopAttributes returns the loop.* attributes identifying a single
+// Execution-loop run (OBS-01, D-05). Primary home is the AGENT-kind span —
+// one call per completed attempt.
+//
+// Always includes loop.kind, loop.run_id, and loop.iteration. Appends
+// loop.parent_run_id, loop.candidate_version, and loop.exit_reason ONLY when
+// non-empty — mirroring the sessionID/metadataJSON/tags "absent when empty,
+// never a fabricated empty value" enrichment discipline (46 OBS-02/OBS-03).
+// Callers gate the call itself on a non-empty runID.
+func LoopAttributes(kind, runID, parentRunID string, iteration int, candidateVersion, exitReason string) []attribute.KeyValue {
+	out := []attribute.KeyValue{
+		attribute.String(keyLoopKind, kind),
+		attribute.String(keyLoopRunID, runID),
+		attribute.Int(keyLoopIteration, iteration),
+	}
+	if parentRunID != "" {
+		out = append(out, attribute.String(keyLoopParentRunID, parentRunID))
+	}
+	if candidateVersion != "" {
+		out = append(out, attribute.String(keyLoopCandidateVer, candidateVersion))
+	}
+	if exitReason != "" {
+		out = append(out, attribute.String(keyLoopExitReason, exitReason))
+	}
+	return out
+}
+
+// LoopRunID returns the loop.run_id attribute alone — the correlating subset
+// stamped on per-call LLM spans (D-05) so Phoenix groups each tool/action
+// iteration under its Execution-loop attempt.
+func LoopRunID(id string) attribute.KeyValue {
+	return attribute.String(keyLoopRunID, id)
+}
+
+// LoopIteration returns the loop.iteration attribute alone — the sibling of
+// LoopRunID for the same per-call LLM-span correlating subset (D-05).
+func LoopIteration(n int) attribute.KeyValue {
+	return attribute.Int(keyLoopIteration, n)
+}
+
+// EvaluationAttributes returns the evaluation.result and evaluation.version
+// attributes. Defined here for trace-schema stability ahead of its consumer
+// — the first caller is Phase 51's EVALUATOR span (OBS-03). No Phase 50 code
+// calls this.
+func EvaluationAttributes(result, version string) []attribute.KeyValue {
+	return []attribute.KeyValue{
+		attribute.String(keyEvaluationResult, result),
+		attribute.String(keyEvaluationVersion, version),
+	}
+}
+
+// HumanIntervention returns the single human_intervention marker attribute,
+// mirroring EnvelopeDegraded's bare-bool marker shape. Defined here for
+// trace-schema stability; the first caller is Phase 51.
+func HumanIntervention() attribute.KeyValue {
+	return attribute.Bool(keyHumanIntervention, true)
+}
