@@ -1173,6 +1173,54 @@ func (r *TaskReconciler) stampTaskTraceReporterSpawnedUID(ctx context.Context, t
 	}
 }
 
+// synthesizeNoEnvelopeOut builds a synthetic terminal EnvelopeOut for the
+// EnvelopeReadFailed path (50-06 Task 2, RESEARCH Pitfall 2 / Open Question
+// 1 — controller half): the pod terminated (most commonly SIGKILLed by
+// ActiveDeadlineSeconds) without ever writing out.json, so there is no real
+// envelope to read. Extracted as a small pure function — no reconciler
+// plumbing — for direct unit testing.
+//
+// Span identity must survive envelope loss: LoopRunID/AttemptID are always
+// set from task.UID + task.Status.Attempt — the SAME tuple buildEnvelopeIn
+// (D-01) stamped at dispatch time — so the AGENT span emitted from this
+// synthetic envelope still carries loop.run_id/loop.parent_run_id even when
+// the pod never produced a real envelope.
+//
+// TerminalReason classification is fail-closed: this is the ONLY producer of
+// TerminalReasonCapExceeded for a wall-clock kill anywhere in the codebase —
+// the SIGKILLed pod never gets a chance to classify itself. It maps ONLY the
+// Job's JobFailed condition Reason "DeadlineExceeded" (the ActiveDeadlineSeconds
+// kill) to cap_exceeded; every other failure reason leaves TerminalReason
+// unset rather than guessing (mirrors ClassifyVerdict's fail-closed
+// discipline — an unclassified envelope-less death stays visibly
+// unclassified). The in-pod producer for iteration/token caps is
+// harness.CheckCaps (Plan 50-04); this function covers only the
+// no-envelope/wall-clock case.
+func synthesizeNoEnvelopeOut(task *tideprojectv1alpha3.Task, completedJob *batchv1.Job) pkgdispatch.EnvelopeOut {
+	out := pkgdispatch.EnvelopeOut{
+		APIVersion:  pkgdispatch.APIVersionV1Alpha1,
+		Kind:        pkgdispatch.KindTaskEnvelopeOut,
+		TaskUID:     string(task.UID),
+		LoopRunID:   string(task.UID),
+		AttemptID:   fmt.Sprintf("%s-%d", task.UID, task.Status.Attempt),
+		CompletedAt: time.Now().UTC(),
+	}
+
+	if completedJob == nil {
+		return out
+	}
+	for _, c := range completedJob.Status.Conditions {
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
+			if c.Reason == "DeadlineExceeded" {
+				out.TerminalReason = pkgdispatch.TerminalReasonCapExceeded
+				out.Reason = "wall-clock cap exceeded (ActiveDeadlineSeconds): pod was SIGKILLed before it could write out.json"
+			}
+			break
+		}
+	}
+	return out
+}
+
 // handleJobCompletion reads the EnvelopeOut, validates output paths, rolls up
 // budget, and patches Task.Status to the terminal state.
 //
@@ -1194,14 +1242,30 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 	// Read the EnvelopeOut from the PVC-backed reader (Blocker #2/#3 path).
 	out, err := r.Deps.EnvReader.ReadOut(ctx, string(project.UID), string(task.UID))
 	if err != nil {
+		// 50-06 Task 2: synthesize a terminal envelope so span identity
+		// (LoopRunID/AttemptID) survives envelope loss and, for a wall-clock
+		// (ActiveDeadlineSeconds) Job kill, TerminalReason is classified as
+		// cap_exceeded — the only place that classification can ever happen,
+		// since the SIGKILLed pod never wrote out.json.
+		synthOut := synthesizeNoEnvelopeOut(task, completedJob)
+
 		// TRACE-01/D-07: EnvelopeReadFailed is the only Task terminal path
 		// reachable with envReadOK=false — the degraded-envelope span (Option B,
 		// 43-05-PLAN.md call site 1). Emitted BEFORE the terminal status patch
 		// below (span-loss-averse ordering).
-		sampled := r.emitTaskSpanOnce(ctx, task, project, completedJob, pkgdispatch.EnvelopeOut{}, false)
+		sampled := r.emitTaskSpanOnce(ctx, task, project, completedJob, synthOut, false)
 		// MSG-01/D-05: failed Tasks are the highest-value debugging trace —
 		// spawn the trace-only reporter here too, not just on the success path.
 		r.spawnTaskTraceReporterIfNeeded(ctx, task, project, completedJob, sampled)
+
+		// The condition Reason stays exactly "EnvelopeReadFailed" — wave
+		// semantics and every consumer keying on that Reason are untouched
+		// (scope fence). Only the Message gains the cap diagnostic, when
+		// synthesizeNoEnvelopeOut classified this as a wall-clock kill.
+		message := err.Error()
+		if synthOut.TerminalReason == pkgdispatch.TerminalReasonCapExceeded {
+			message = synthOut.Reason + ": " + message
+		}
 
 		patch := client.MergeFrom(task.DeepCopy())
 		task.Status.Phase = tideprojectv1alpha3.LevelPhaseFailed
@@ -1209,7 +1273,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 			Type:               tideprojectv1alpha3.ConditionFailed,
 			Status:             metav1.ConditionTrue,
 			Reason:             "EnvelopeReadFailed",
-			Message:            err.Error(),
+			Message:            message,
 			LastTransitionTime: metav1.Now(),
 		})
 		if patchErr := r.Status().Patch(ctx, task, patch); patchErr != nil {
