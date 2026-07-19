@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0.9
 milestone_name: Slack Tide — The Task Loop (Verification-Driven Quality Iteration)
 status: executing
-stopped_at: Completed 51-05-PLAN.md
-last_updated: "2026-07-19T13:36:05.750Z"
+stopped_at: Completed 51-06-PLAN.md
+last_updated: "2026-07-19T14:29:21.910Z"
 last_activity: 2026-07-19
 progress:
   total_phases: 6
   completed_phases: 3
   total_plans: 24
-  completed_plans: 21
+  completed_plans: 22
   percent: 50
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 ## Current Position
 
 Phase: 51 (The Task Loop) — EXECUTING
-Plan: 6 of 8
+Plan: 7 of 8
 Status: Ready to execute
 Last activity: 2026-07-19
 
-Progress: [█████████░] 88%
+Progress: [█████████░] 92%
 
 ## Performance Metrics
 
@@ -113,6 +113,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 51]: [Phase 51-05]: setVerifyHaltIfNeeded has no FailureProfile-style gate -- the loop-exhaustion trigger lives entirely at the Plan 07 call site, matching the 4-arg signature setVerifyHaltIfNeeded(ctx,c,project,taskCompletedAt) documented in 51-07-PLAN.md
 - [Phase 51]: [Phase 51-05]: task-only BUDGET-03 headroom hold and the legacy BudgetExceeded phase fallback stay applied by gateChecks AFTER delegating to checkDispatchHolds -- neither has a planner-tier counterpart in the shared chain
 - [Phase 51]: [Phase 51-05]: no VerifyHalt-at-terminal hook added to gateChecks Step 1 -- the real exhaustion trigger fires from the verifier-completion branch Plan 06/07 add, a different code path than the Failed-phase terminal short-circuit
+- [Phase 51]: [Phase 51-06] hasVerificationContract requires GateCommand!="" AND Phase=="Locked" (AND, not GateCommand alone) -- preserves TASK-01's git-show reproducibility guarantee since a Draft contract is still mutable
+- [Phase 51]: [Phase 51-06] task.Status.LockedSHA stamps project.Status.Git.LastPushedSHA at verifier-dispatch time -- closest available git-commit observation to when spec.verification was Locked
+- [Phase 51]: [Phase 51-06] No pool.Pool semaphore wired for the verifier tier this phase -- verifierInFlightCount's count-based List check is the sole ESC-04 enforcement point (defaultVerifierConcurrencyCap=2); cmd/manager/main.go wiring deferred, Plan 08's kind test pins the cap
 
 ### Pending Todos
 
@@ -163,11 +166,12 @@ Tech-debt still carried forward: W-2 FailureHalt/gate-order divergences (todos a
 | Phase 51 P03 | 7min | 3 tasks | 7 files |
 | Phase 51 P04 | 5min | 2 tasks | 7 files |
 | Phase 51 P05 | 17min | 2 tasks | 6 files |
+| Phase 51 P06 | 48min | 2 tasks | 6 files |
 
 ## Session Continuity
 
-Last session: 2026-07-19T13:36:05.736Z
-Stopped at: Completed 51-05-PLAN.md
+Last session: 2026-07-19T14:29:21.895Z
+Stopped at: Completed 51-06-PLAN.md
 Resume file: None
 
 ## Operator Next Steps

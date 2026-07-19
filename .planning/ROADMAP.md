@@ -156,7 +156,7 @@ Plans:
 
 **Wave 3** *(blocked on 51-01/02/03/04/05)*
 
-- [ ] 51-06-PLAN.md — verifier dispatch path: Verifying sub-state + VerifyContext envelope + verifierInFlightCount cap + BudgetCents + lockedSHA
+- [x] 51-06-PLAN.md — verifier dispatch path: Verifying sub-state + VerifyContext envelope + verifierInFlightCount cap + BudgetCents + lockedSHA
 
 **Wave 4** *(blocked on 51-06)*
 
@@ -214,6 +214,6 @@ Phases execute in numeric order: 48 → 49 → 50 → 51 → 52 → 53
 | 48. LangGraph Evaluator Image + Credproxy-TLS Spike | v1.0.9 | 5/5 | Complete   | 2026-07-18 |
 | 49. Common Loop Contract + Verdict/Envelope/Persistence Schema | v1.0.9 | 4/4 | Complete    | 2026-07-18 |
 | 50. Execution-Loop Hardening + Loop-Native Observability | v1.0.9 | 7/7 | Complete    | 2026-07-19 |
-| 51. The Task Loop | v1.0.9 | 5/8 | In Progress|  |
+| 51. The Task Loop | v1.0.9 | 6/8 | In Progress|  |
 | 52. Per-Level LoopPolicy Parameterization | v1.0.9 | 0/TBD | Not started | - |
 | 53. Chart Config + Dashboard Provenance Surfacing | v1.0.9 | 0/TBD | Not started | - |
