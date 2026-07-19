@@ -334,6 +334,45 @@ const (
 	AnnotationFailureResumedAt = "tideproject.k8s/failure-resumed-at"
 )
 
+// Phase 51 condition + reason vocabulary — Task loop verification halt
+// (ESC-02/ESC-03). Third generation of the BillingHalt → FailureHalt →
+// VerifyHalt halt-condition mirror.
+//
+// What SETS it — setVerifyHaltIfNeeded (verify_halt.go) stamps
+// ConditionVerifyHalt=True when a Task's verification loop exhausts
+// LoopPolicy.MaxIterations without an APPROVED evaluator verdict.
+//
+// What READS it — checkVerifyHalt is wired into BOTH dispatch chains: the
+// planner-tier checkDispatchHolds AND the Task-tier gateChecks (D-09) —
+// because a BLOCKED verify means the artifact tree the next dispatch would
+// build on is suspect, at every level.
+//
+// What CLEARS it — `tide resume` stamps AnnotationVerifyResumedAt when
+// clearing the condition; mirrors AnnotationFailureResumedAt's CR-02
+// resume time-fence so a straggler reconcile predating the resume cannot
+// re-freeze the project.
+//
+// VerifyHalt is a DISTINCT halt class — never a reinterpretation of Failed
+// wave semantics. A VerifyHalt leaves phase/wave-siblings/conservative-
+// profile propagation untouched (ESC-03).
+const (
+	// ConditionVerifyHalt — the Task loop's verification exhausted
+	// LoopPolicy.MaxIterations without an APPROVED evaluator verdict; new
+	// dispatch is halted project-wide until the operator runs `tide resume`.
+	ConditionVerifyHalt = "VerifyHalt"
+
+	// ReasonVerifyExhausted — the Task loop reached MaxIterations without
+	// an APPROVED evaluation; set on Project by setVerifyHaltIfNeeded.
+	ReasonVerifyExhausted = "VerifyExhausted"
+
+	// AnnotationVerifyResumedAt — RFC3339 timestamp stamped by `tide resume`
+	// when clearing the VerifyHalt condition. Mirrors
+	// AnnotationFailureResumedAt; consumed by setVerifyHaltIfNeeded's
+	// resume time-fence to ignore verify-exhaustion evidence predating the
+	// resume timestamp.
+	AnnotationVerifyResumedAt = "tideproject.k8s/verify-resumed-at"
+)
+
 // Phase 28 condition + reason vocabulary — envelope import (IMPORT-01..05).
 const (
 	// ConditionImportComplete — the one-shot UID-rewrite import Job has
