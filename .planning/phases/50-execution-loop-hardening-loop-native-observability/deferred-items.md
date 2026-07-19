@@ -4,7 +4,9 @@ Out-of-scope discoveries surfaced during plan execution but not fixed
 (scope boundary: only auto-fix issues directly caused by the current
 task's changes).
 
-## 50-03: pre-existing `lll` (line-too-long) violations block `make lint`
+## 50-03: pre-existing `lll` (line-too-long) violations block `make lint` — ✅ RESOLVED
+
+**Resolved:** wave-1 close, commit `84c9dfce` (`style(50): wrap two >120-char lines to pass make lint`). Both lines wrapped; `make lint` now passes. Fixed by the orchestrator at wave-1 close per the v1.0.8 release-cascade lesson (make lint is a CI-only gate GSD verification skips) rather than deferring to release pre-flight. Original report retained below for the record.
 
 **Found during:** 50-03 Task 2 verification (`make lint`).
 
