@@ -32,7 +32,7 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 - [x] **TASK-01**: `TaskSpec` gains a verification contract embodying the committed TASK-template shape — **planner-authored** acceptance-signal `commands` (executed for real by the evaluator, exit codes parsed, never self-reported), `requiredArtifacts`, `evaluator` (type), constraints/prohibited-changes, `maxIterations`, `onExhaustion` — and the contract is **immutable once locked** (Draft→Locked→Superseded + version): a run references the locking commit so `git show <sha>` reproduces exactly what was dispatched, and a fresh attempt re-uses that locked spec
 - [ ] **TASK-02**: A verification result classified **repairable** creates a FRESH attempt seeded with the original spec + a **compact evidence packet** (the relevant failures/diffs/test output) — never the previous agent's entire context
 - [ ] **TASK-03**: **Infrastructure-retry** (rerun the same attempt after eviction/transient failure) is distinct from **quality-iteration** (a new attempt with evaluator feedback): the eviction-retry path is preserved and the blind `maxAttemptsPerTask` quality-retry is superseded by evaluator-driven attempts
-- [ ] **TASK-04**: The evaluator is **logically independent** of the implementation agent (a distinct runtime/process — the LangGraph image), and a **deterministic security, compile, or test failure dominates** any probabilistic LLM-judge approval (a red gate can never be overridden by a judge)
+- [x] **TASK-04**: The evaluator is **logically independent** of the implementation agent (a distinct runtime/process — the LangGraph image), and a **deterministic security, compile, or test failure dominates** any probabilistic LLM-judge approval (a red gate can never be overridden by a judge)
 - [x] **TASK-05**: The Task loop is bounded by `maxIterations` with `onExhaustion` → escalate / `requireApproval` (never unbounded), and its iteration/cost/budget state is re-derivable and **resumable across a controller restart**
 - [ ] **TASK-06**: The Task contract's escalation is **three-tier** — *fresh attempt* (repairable failures return to the Task loop), *system escalation* (a recurring cross-attempt pattern — notably an attempt that edits fixtures/thresholds/the evaluator itself instead of the code — is flagged as systemic, never counted as a pass), *human decision* (spec/architecture/risk changes → `requireApproval`); the **anti-gaming invariant** "do not weaken or delete an evaluator to make a Task pass" is enforced, not merely documented
 
@@ -55,7 +55,7 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 - [x] **OBS-01**: Spans carry `loop.kind`, `loop.run_id`, `loop.parent_run_id`, `loop.iteration`, `loop.candidate_version`, `loop.exit_reason`, `evaluation.result`, `evaluation.version`, and `human_intervention`, plus cost/duration/token usage
 - [x] **OBS-02**: Run IDs stay **out of Prometheus labels** (traces + structured logs only); metrics use bounded labels (loop kind, exit reason, evaluator type, risk tier)
-- [ ] **OBS-03**: The LangGraph evaluator's vendor registers in `pkg/dispatch.SelfInstruments` (reporter skips `events.jsonl` span synthesis) in the **same phase** as its dispatch sites, and it emits a distinct OpenInference `EVALUATOR`-kind span parented as a **sibling** to the checked level's `AGENT` span — no double-emission into the v1.0.8 trace tree
+- [x] **OBS-03**: The LangGraph evaluator's vendor registers in `pkg/dispatch.SelfInstruments` (reporter skips `events.jsonl` span synthesis) in the **same phase** as its dispatch sites, and it emits a distinct OpenInference `EVALUATOR`-kind span parented as a **sibling** to the checked level's `AGENT` span — no double-emission into the v1.0.8 trace tree
 - [ ] **OBS-04**: The dashboard shows nested loop provenance (Project run → Task iteration → Execution attempt/tool spans) and surfaces `VerifyHalt` as a visually **distinct** state from `Failed`, with the staged findings browsable through the existing gitfetch/artifacts API (no new endpoint)
 
 ### Config & Surfacing (CFG)
@@ -110,7 +110,7 @@ Locked at roadmap creation 2026-07-18 (`ROADMAP.md`): Phase 48 LangGraph evaluat
 | TASK-01 | Phase 51 | Complete |
 | TASK-02 | Phase 51 | Pending |
 | TASK-03 | Phase 51 | Pending |
-| TASK-04 | Phase 51 | Pending |
+| TASK-04 | Phase 51 | Complete |
 | TASK-05 | Phase 51 | Complete |
 | TASK-06 | Phase 51 | Pending |
 | EVAL-01 | Phase 48 | Complete |
@@ -124,7 +124,7 @@ Locked at roadmap creation 2026-07-18 (`ROADMAP.md`): Phase 48 LangGraph evaluat
 | ESC-04 | Phase 51 | Pending |
 | OBS-01 | Phase 50 | Complete |
 | OBS-02 | Phase 50 | Complete |
-| OBS-03 | Phase 51 | Pending |
+| OBS-03 | Phase 51 | Complete |
 | OBS-04 | Phase 53 | Pending |
 | CFG-01 | Phase 53 | Pending |
 | CFG-02 | Phase 53 | Pending |
