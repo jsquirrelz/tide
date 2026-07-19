@@ -22,10 +22,10 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### Execution Loop (EXEC) — inside the Job
 
-- [ ] **EXEC-01**: Every attempt carries a stable `loopRunID` + `attemptID` and emits a span per tool/action iteration
-- [ ] **EXEC-02**: The result envelope carries an explicit terminal reason — `completed | cap_exceeded | blocked | tool_failure | invalid_output`
-- [ ] **EXEC-03**: The result envelope satisfies the canonical **run-evidence contract** (`docs/templates/minimal-loop-project/evals/README.md`) — Task+Spec IDs and the contract's locking commit, commands + evaluator versions executed, test/eval results, changed-file manifest, runtime/model/prompt version, cost/duration, terminal reason, and any bounded feedback passed to a new attempt — referenced, not re-derived
-- [ ] **EXEC-04**: The Execution loop reports only that the agent *believes* the attempt is complete; it never stamps the Task correct (correctness is exclusively the Task loop's decision)
+- [x] **EXEC-01**: Every attempt carries a stable `loopRunID` + `attemptID` and emits a span per tool/action iteration
+- [x] **EXEC-02**: The result envelope carries an explicit terminal reason — `completed | cap_exceeded | blocked | tool_failure | invalid_output`
+- [x] **EXEC-03**: The result envelope satisfies the canonical **run-evidence contract** (`docs/templates/minimal-loop-project/evals/README.md`) — Task+Spec IDs and the contract's locking commit, commands + evaluator versions executed, test/eval results, changed-file manifest, runtime/model/prompt version, cost/duration, terminal reason, and any bounded feedback passed to a new attempt — referenced, not re-derived
+- [x] **EXEC-04**: The Execution loop reports only that the agent *believes* the attempt is complete; it never stamps the Task correct (correctness is exclusively the Task loop's decision)
 
 ### Task Loop (TASK) — the core
 
@@ -103,10 +103,10 @@ Locked at roadmap creation 2026-07-18 (`ROADMAP.md`): Phase 48 LangGraph evaluat
 | LOOP-01 | Phase 49 | Complete |
 | LOOP-02 | Phase 49 | Complete |
 | LOOP-03 | Phase 49 | Complete |
-| EXEC-01 | Phase 50 | Pending |
-| EXEC-02 | Phase 50 | Pending |
-| EXEC-03 | Phase 50 | Pending |
-| EXEC-04 | Phase 50 | Pending |
+| EXEC-01 | Phase 50 | Complete |
+| EXEC-02 | Phase 50 | Complete |
+| EXEC-03 | Phase 50 | Complete |
+| EXEC-04 | Phase 50 | Complete |
 | TASK-01 | Phase 51 | Pending |
 | TASK-02 | Phase 51 | Pending |
 | TASK-03 | Phase 51 | Pending |
