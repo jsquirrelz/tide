@@ -1406,7 +1406,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 			// budget.RollUpUsage — guarantees Prometheus cost totals never diverge from
 			// Budget accounting (Phase 16 D-12). Non-fatal: task is already terminal.
 			// OutputValidationError is a controller-side policy failure → "internal" reason.
-			if emitErr := r.emitTaskMetrics(ctx, task, project, out.Usage, out.CompletedAt, "internal"); emitErr != nil {
+			if emitErr := r.emitTaskMetrics(ctx, task, project, out.Usage, out.CompletedAt, "internal", true); emitErr != nil {
 				logger.Error(emitErr, "failed to emit task metrics (non-fatal)", "task", task.Name)
 			}
 			return ctrl.Result{}, nil
@@ -1444,7 +1444,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 			// budget.RollUpUsage — guarantees Prometheus cost totals never diverge from
 			// Budget accounting (Phase 16 D-12). Non-fatal: task is already terminal.
 			// OutputPathsViolation is a controller-side policy failure → "internal" reason.
-			if emitErr := r.emitTaskMetrics(ctx, task, project, out.Usage, out.CompletedAt, "internal"); emitErr != nil {
+			if emitErr := r.emitTaskMetrics(ctx, task, project, out.Usage, out.CompletedAt, "internal", true); emitErr != nil {
 				logger.Error(emitErr, "failed to emit task metrics (non-fatal)", "task", task.Name)
 			}
 			return ctrl.Result{}, nil
@@ -1560,15 +1560,20 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 	if fbErr := setPricingFallbackIfNeeded(ctx, r.Client, project, out.Usage.PricingFallbackModel); fbErr != nil {
 		logger.Error(fbErr, "setPricingFallbackIfNeeded failed (non-fatal)", "task", task.Name)
 	}
-	// Emit six locked metrics at the same once-only terminal commit point as
+	// Emit the six locked spend metrics at the same once-only commit point as
 	// budget.RollUpUsage — guarantees Prometheus cost totals never diverge from
-	// Budget accounting (Phase 16 D-12). Non-fatal: task is already terminal.
+	// Budget accounting (Phase 16 D-12). Non-fatal.
 	// Compute the bounded metric reason from the envelope result; "" = Succeeded.
+	// ME-01: a contract-bearing Task moving to Verifying is NOT terminal — record
+	// its executor spend but defer the completion/failure counter to
+	// finishVerifierTerminal (countCompletion=false), so a Task is never counted
+	// completed at each Verifying transition AND again at its real terminal.
 	var metricReason string
 	if task.Status.Phase == tideprojectv1alpha3.LevelPhaseFailed {
 		metricReason = metricFailureReason(out.Result, out.ExitCode)
 	}
-	if emitErr := r.emitTaskMetrics(ctx, task, project, out.Usage, out.CompletedAt, metricReason); emitErr != nil {
+	countCompletion := task.Status.Phase != tideprojectv1alpha3.LevelPhaseVerifying
+	if emitErr := r.emitTaskMetrics(ctx, task, project, out.Usage, out.CompletedAt, metricReason, countCompletion); emitErr != nil {
 		logger.Error(emitErr, "failed to emit task metrics (non-fatal)", "task", task.Name)
 	}
 
@@ -1685,8 +1690,16 @@ func metricFailureReason(envelopeResult string, exitCode int) string {
 // and TasksFailedTotal carry only {project, phase, plan} (no wave label) per
 // registry.go — arity differs from the six TELEM-03 metrics above.
 //
+// countCompletion gates ONLY the terminal TasksCompletedTotal/TasksFailedTotal
+// counter (ME-01): the six token/cost/duration spend metrics are ALWAYS emitted
+// (the executor's spend is real regardless of the loop's eventual outcome), but
+// a NON-terminal transition (a contract-bearing Task moving to Verifying) passes
+// false so it records the executor's spend without prematurely counting the Task
+// as completed. The terminal counter is deferred to finishVerifierTerminal — a
+// verify-halted Task must count as failed-only, never both completed and failed.
+//
 //nolint:unparam // error return kept so callers can `if err := r.emitTaskMetrics(...); err != nil` in the reconcile chain
-func (r *TaskReconciler) emitTaskMetrics(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, usage pkgdispatch.Usage, completedAt time.Time, failureReason string) error {
+func (r *TaskReconciler) emitTaskMetrics(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, usage pkgdispatch.Usage, completedAt time.Time, failureReason string, countCompletion bool) error {
 	logger := logf.FromContext(ctx)
 	wave := r.resolveWave(task)
 	projectName := project.Name
@@ -1736,6 +1749,13 @@ func (r *TaskReconciler) emitTaskMetrics(ctx context.Context, task *tideprojectv
 
 	// CR-02: emit task completion/failure counters with {project, phase, plan} (3-label,
 	// no wave). These counters power the Dispatch Counts and Failure Rate panels.
+	// ME-01: only at a TERMINAL transition — a non-terminal Verifying transition
+	// passes countCompletion=false so the executor's spend (above) is recorded
+	// without the Task being double-counted as completed here AND failed/completed
+	// again at its real terminal (finishVerifierTerminal).
+	if !countCompletion {
+		return nil
+	}
 	if failureReason == "" {
 		tidemetrics.TasksCompletedTotal.WithLabelValues(projectName, phase, plan).Inc()
 	} else {
@@ -2461,7 +2481,11 @@ func (r *TaskReconciler) settleVerifierSpend(ctx context.Context, task *tideproj
 // not increment TasksCompletedTotal/TasksFailedTotal.
 func (r *TaskReconciler) finishVerifierTerminal(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, out pkgdispatch.EnvelopeOut, metricFailureReason string) {
 	logger := logf.FromContext(ctx)
-	if emitErr := r.emitTaskMetrics(ctx, task, project, out.Usage, out.CompletedAt, metricFailureReason); emitErr != nil {
+	// finishVerifierTerminal is the Task's REAL terminal for a contract-bearing
+	// Task (Succeeded via markVerifiedSucceeded or VerifyHalted via haltVerify) —
+	// so this is where the completion/failure counter is emitted (ME-01,
+	// countCompletion=true), never at the earlier non-terminal Verifying transition.
+	if emitErr := r.emitTaskMetrics(ctx, task, project, out.Usage, out.CompletedAt, metricFailureReason, true); emitErr != nil {
 		logger.Error(emitErr, "failed to emit verifier task metrics (non-fatal)", "task", task.Name)
 	}
 	if err := setBudgetBlockedIfNeeded(ctx, r.Client, project, r.Deps.Reservations.TotalReserved()); err != nil {

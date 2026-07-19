@@ -142,8 +142,9 @@ func TestEmitTaskMetrics_EndToEnd(t *testing.T) {
 		EstimatedCostCents:  42,
 	}
 
-	// "" = Succeeded; all six legacy metrics + TasksCompletedTotal must fire.
-	if err := r.emitTaskMetrics(context.Background(), task, project, usage, now, ""); err != nil {
+	// "" = Succeeded; all six legacy metrics + TasksCompletedTotal must fire
+	// (countCompletion=true — a terminal completion).
+	if err := r.emitTaskMetrics(context.Background(), task, project, usage, now, "", true); err != nil {
 		t.Fatalf("emitTaskMetrics: %v", err)
 	}
 
@@ -218,7 +219,7 @@ func TestEmitTaskMetrics_PhaseMissSentinel(t *testing.T) {
 	}
 	completedAt := time.Now().UTC()
 
-	if err := r.emitTaskMetrics(context.Background(), task, project, usage, completedAt, ""); err != nil {
+	if err := r.emitTaskMetrics(context.Background(), task, project, usage, completedAt, "", true); err != nil {
 		t.Fatalf("emitTaskMetrics with missing plan: %v", err)
 	}
 
@@ -270,7 +271,7 @@ func TestEmitTaskMetrics_FailedReason(t *testing.T) {
 
 	usage := pkgdispatch.Usage{InputTokens: 10, EstimatedCostCents: 1}
 
-	if err := r.emitTaskMetrics(context.Background(), task, project, usage, now, "budget"); err != nil {
+	if err := r.emitTaskMetrics(context.Background(), task, project, usage, now, "budget", true); err != nil {
 		t.Fatalf("emitTaskMetrics (budget): %v", err)
 	}
 
@@ -354,7 +355,7 @@ func TestEmitTaskMetrics_NegativeDuration_WR04(t *testing.T) {
 	usage := pkgdispatch.Usage{InputTokens: 5, EstimatedCostCents: 1}
 
 	// Should not panic and should not record a histogram observation.
-	if err := r.emitTaskMetrics(context.Background(), task, project, usage, completedAt, ""); err != nil {
+	if err := r.emitTaskMetrics(context.Background(), task, project, usage, completedAt, "", true); err != nil {
 		t.Fatalf("emitTaskMetrics (negative duration): %v", err)
 	}
 
@@ -391,4 +392,64 @@ func TestEmitTaskMetrics_NegativeDuration_WR04(t *testing.T) {
 	// that label set (the observer was never touched prior to this WithLabelValues call).
 	// We simply assert no panic occurred and counters fired — the histogram guard is
 	// tested by absence of panic and by the positive control test below.
+}
+
+// TestEmitTaskMetrics_NonTerminalDefersCounter (ME-01) asserts that a
+// non-terminal transition (countCompletion=false — a contract-bearing Task
+// moving to Verifying) records the executor's token/cost/duration spend but
+// does NOT increment the completion/failure counter. The counter is deferred
+// to the Task's real terminal (finishVerifierTerminal), so a Task is never
+// counted completed at each Verifying transition AND again at its terminal.
+func TestEmitTaskMetrics_NonTerminalDefersCounter(t *testing.T) {
+	s := newFakeSchemeForMetrics(t)
+
+	plan := &tideprojectv1alpha3.Plan{
+		ObjectMeta: metav1.ObjectMeta{Name: "plan-nt1", Namespace: "default"},
+		Spec:       tideprojectv1alpha3.PlanSpec{PhaseRef: "phase-nt1"},
+	}
+	now := time.Now().UTC()
+	startedAt := metav1.NewTime(now.Add(-30 * time.Second))
+	task := &tideprojectv1alpha3.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task-nt1",
+			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{Kind: "Wave", Name: "tide-wave-nt1-0", APIVersion: tideprojectv1alpha3.GroupVersion.String()},
+			},
+		},
+		Spec: tideprojectv1alpha3.TaskSpec{
+			PlanRef:    "plan-nt1",
+			PromptPath: "envelopes/test/children/task-nt1.json",
+		},
+		Status: tideprojectv1alpha3.TaskStatus{StartedAt: &startedAt},
+	}
+	project := &tideprojectv1alpha3.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: "proj-nt1", Namespace: "default"},
+		Spec:       tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3", TargetRepo: "https://example.com/repo.git"},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(plan, task, project).
+		WithStatusSubresource(task, project).
+		Build()
+	r := &TaskReconciler{Client: c, Scheme: s}
+
+	usage := pkgdispatch.Usage{InputTokens: 88, EstimatedCostCents: 7}
+
+	// countCompletion=false — the executor's spend is real (record it) but the
+	// Task is NOT terminal yet (record no completion/failure counter).
+	if err := r.emitTaskMetrics(context.Background(), task, project, usage, now, "", false); err != nil {
+		t.Fatalf("emitTaskMetrics (non-terminal): %v", err)
+	}
+
+	// Spend metric fired.
+	tokenLabels := []string{"proj-nt1", "phase-nt1", "plan-nt1", "tide-wave-nt1-0"}
+	if got := testutil.ToFloat64(tidemetrics.TokensInputTotal.WithLabelValues(tokenLabels...)); got != 88 {
+		t.Errorf("TokensInputTotal (non-terminal): got %v, want 88 (spend must still be recorded)", got)
+	}
+	// Completion counter did NOT fire.
+	completedLabels := []string{"proj-nt1", "phase-nt1", "plan-nt1"}
+	if got := testutil.ToFloat64(tidemetrics.TasksCompletedTotal.WithLabelValues(completedLabels...)); got != 0 {
+		t.Errorf("TasksCompletedTotal (non-terminal): got %v, want 0 (counter deferred to the real terminal)", got)
+	}
 }
