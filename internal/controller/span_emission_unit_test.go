@@ -788,6 +788,163 @@ func TestSynthesizePlannerSpanTracingDarkNotEmitted(t *testing.T) {
 	}
 }
 
+// ─── D-05 loop.* AGENT-span stamping (50-06 Task 3) ────────────────────────
+
+// TestSynthesizePlannerSpanLoopAttributes — a Task-level span synthesized
+// from an envelope with AttemptID/LoopRunID/TerminalReason/Usage.Iterations/
+// Git.HeadSHA set carries exactly the 6 loop.* keys D-05 populates this
+// phase; evaluation.*/human_intervention stay unset (Phase 51's domain).
+func TestSynthesizePlannerSpanLoopAttributes(t *testing.T) {
+	exp := setupSpanExporter(t)
+
+	start := mustTime(t, "2026-07-15T10:00:00Z")
+	end := mustTime(t, "2026-07-15T10:05:00Z")
+	job := &batchv1.Job{
+		Status: batchv1.JobStatus{
+			StartTime:      &metav1.Time{Time: start},
+			CompletionTime: &metav1.Time{Time: end},
+			Conditions: []batchv1.JobCondition{
+				{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+	project := spanEmissionFixtureProject(testProjectUID, "claude-test-model")
+	out := pkgdispatch.EnvelopeOut{
+		LoopRunID:      "task-uid-abc",
+		AttemptID:      "task-uid-abc-2",
+		TerminalReason: pkgdispatch.TerminalReasonCompleted,
+		Usage:          pkgdispatch.Usage{Iterations: 3},
+		Git:            &pkgdispatch.GitOutput{HeadSHA: "deadbeef"},
+	}
+
+	_, _, gotOK := synthesizePlannerSpan(context.Background(), "task", "task-1", "", project, ProviderDefaults{}, job, out, true, trace.SpanID{})
+	if !gotOK {
+		t.Fatalf("synthesizePlannerSpan(task, populated loop identity) = false, want true")
+	}
+
+	spans := exp.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("recorded %d spans, want exactly 1", len(spans))
+	}
+	span := spans[0]
+
+	wantStringAttrs := map[attribute.Key]string{
+		"loop.kind":              "execution",
+		"loop.run_id":            "task-uid-abc-2",
+		"loop.parent_run_id":     "task-uid-abc",
+		"loop.candidate_version": "deadbeef",
+		"loop.exit_reason":       "completed",
+	}
+	for key, want := range wantStringAttrs {
+		val, ok := attrValue(span.Attributes, key)
+		if !ok {
+			t.Errorf("span missing attribute %q", key)
+			continue
+		}
+		if val.AsString() != want {
+			t.Errorf("attribute %q = %q, want %q", key, val.AsString(), want)
+		}
+	}
+	iteration, ok := attrValue(span.Attributes, "loop.iteration")
+	if !ok || iteration.AsInt64() != 3 {
+		t.Errorf("loop.iteration = %v (found=%v), want 3", iteration, ok)
+	}
+
+	// D-05/CONTEXT <specifics>: defined but Phase-51-populated — Phase 50
+	// must never fake-populate them.
+	for _, key := range []attribute.Key{"evaluation.result", "evaluation.version", "human_intervention"} {
+		if _, found := attrValue(span.Attributes, key); found {
+			t.Errorf("span unexpectedly carries %q — Phase 51 populates this, not Phase 50", key)
+		}
+	}
+}
+
+// TestSynthesizePlannerSpanLoopAttributesAbsentWhenEmpty — an envelope with
+// an empty AttemptID (e.g. a planner-level dispatch, never stamped this
+// phase) produces a span with ZERO loop.* attributes — never fabricated.
+func TestSynthesizePlannerSpanLoopAttributesAbsentWhenEmpty(t *testing.T) {
+	exp := setupSpanExporter(t)
+
+	start := mustTime(t, "2026-07-15T10:00:00Z")
+	end := mustTime(t, "2026-07-15T10:05:00Z")
+	job := &batchv1.Job{
+		Status: batchv1.JobStatus{
+			StartTime:      &metav1.Time{Time: start},
+			CompletionTime: &metav1.Time{Time: end},
+			Conditions: []batchv1.JobCondition{
+				{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+	project := spanEmissionFixtureProject(testProjectUID, "claude-test-model")
+
+	_, _, gotOK := synthesizePlannerSpan(context.Background(), "milestone", "ms-1", "", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, true, trace.SpanID{})
+	if !gotOK {
+		t.Fatalf("synthesizePlannerSpan(empty envelope) = false, want true")
+	}
+
+	spans := exp.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("recorded %d spans, want exactly 1", len(spans))
+	}
+	for _, key := range []attribute.Key{
+		"loop.kind", "loop.run_id", "loop.parent_run_id",
+		"loop.iteration", "loop.candidate_version", "loop.exit_reason",
+	} {
+		if _, found := attrValue(spans[0].Attributes, key); found {
+			t.Errorf("span unexpectedly carries %q with an empty AttemptID (never fabricate)", key)
+		}
+	}
+}
+
+// TestSynthesizePlannerSpanLoopAttributesOmitTokenCount — 46 D-03 preserved:
+// even with loop.* populated, the AGENT span still carries NO
+// llm.token_count.* attribute (token counts remain the per-call LLM spans'
+// sole responsibility).
+func TestSynthesizePlannerSpanLoopAttributesOmitTokenCount(t *testing.T) {
+	exp := setupSpanExporter(t)
+
+	start := mustTime(t, "2026-07-15T10:00:00Z")
+	end := mustTime(t, "2026-07-15T10:05:00Z")
+	job := &batchv1.Job{
+		Status: batchv1.JobStatus{
+			StartTime:      &metav1.Time{Time: start},
+			CompletionTime: &metav1.Time{Time: end},
+			Conditions: []batchv1.JobCondition{
+				{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+	project := spanEmissionFixtureProject(testProjectUID, "claude-test-model")
+	out := pkgdispatch.EnvelopeOut{
+		LoopRunID:      "task-uid-abc",
+		AttemptID:      "task-uid-abc-1",
+		TerminalReason: pkgdispatch.TerminalReasonCompleted,
+		Usage: pkgdispatch.Usage{
+			InputTokens: 700, OutputTokens: 300, Iterations: 1,
+		},
+	}
+
+	_, _, gotOK := synthesizePlannerSpan(context.Background(), "task", "task-1", "", project, ProviderDefaults{}, job, out, true, trace.SpanID{})
+	if !gotOK {
+		t.Fatalf("synthesizePlannerSpan(task, populated loop identity) = false, want true")
+	}
+
+	spans := exp.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("recorded %d spans, want exactly 1", len(spans))
+	}
+	for _, key := range []attribute.Key{
+		"llm.token_count.prompt", "llm.token_count.completion",
+		"llm.token_count.prompt_details.cache_read", "llm.token_count.prompt_details.cache_write",
+		"llm.token_count.total",
+	} {
+		if _, found := attrValue(spans[0].Attributes, key); found {
+			t.Errorf("span unexpectedly carries token-count attribute %q (46 D-03)", key)
+		}
+	}
+}
+
 // ─── spanIDFromHexOrZero ────────────────────────────────────────────────────
 
 func TestSpanIDFromHexOrZero(t *testing.T) {
