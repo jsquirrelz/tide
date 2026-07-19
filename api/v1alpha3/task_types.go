@@ -65,6 +65,83 @@ type TaskDev struct {
 	TestMode string `json:"testMode,omitempty"`
 }
 
+// VerificationSpec is the planner-authored, immutable-once-locked
+// verification contract for a Task (Phase 51 TASK-01/D-01). Mirrors the
+// Gates/Caps standalone-type precedent — NOT inline TaskSpec fields — so the
+// identical VerificationSpec shape generalizes to Plan.Spec/Project.Spec with
+// a Task > Plan > Project precedence in Phase 52 (this phase is Task-scoped
+// only; Plan/Project fields are OUT OF SCOPE here).
+//
+// Design note (RESEARCH Pitfall 2 / Open Question 1): the governing Phase/
+// Version fields live HERE on spec — not on TaskStatus — because a CEL
+// x-kubernetes-validations transition rule reading oldSelf can only see the
+// prior state of its own spec subtree; a spec-level rule cannot reference
+// status. Only the observed LockedSHA (the commit a dispatched attempt
+// actually ran against) lives on TaskStatus.
+//
+// +kubebuilder:validation:XValidation:rule="oldSelf.phase != 'Locked' || self == oldSelf || self.phase == 'Superseded'",message="verification is immutable once Locked; supersede to a new version to change it"
+type VerificationSpec struct {
+	// Phase is the lifecycle state governing immutability: Draft is freely
+	// editable, Locked is immutable except for a Locked->Superseded
+	// transition (which mints a new version to carry further edits),
+	// Superseded is a terminal historical record. Transition rules are
+	// skipped on CREATE (no oldSelf) — a Draft-at-create is unconstrained.
+	// +kubebuilder:validation:Enum=Draft;Locked;Superseded
+	// +optional
+	Phase string `json:"phase,omitempty"`
+
+	// Version is the monotonic version number, incremented each time a
+	// Locked contract is superseded by a new Draft.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	Version int32 `json:"version,omitempty"`
+
+	// GateCommand is the single canonical primary pass-criterion command —
+	// resolves onto pkg/dispatch.VerifyContext.GateCommand at verifier
+	// dispatch time (Plan 06). This is planner-authored data EXECUTED FOR
+	// REAL downstream, NOT decorative/status text: the independent verifier
+	// runs it and parses the exit code (TASK-04); a non-zero exit dominates
+	// any LLM judge's APPROVED verdict.
+	// +optional
+	GateCommand string `json:"gateCommand,omitempty"`
+
+	// Commands lists additional acceptance-signal commands beyond
+	// GateCommand. Plan 06 resolves this list onto the transported
+	// VerifyContext.Commands list; the Plan 02 verifier executes EACH
+	// command out-of-band (exit codes parsed, any non-zero dominates any
+	// LLM APPROVED — TASK-04). Not decorative.
+	// +optional
+	Commands []string `json:"commands,omitempty"`
+
+	// RequiredArtifacts lists workspace-relative paths the verifier
+	// confirms exist.
+	// +optional
+	RequiredArtifacts []string `json:"requiredArtifacts,omitempty"`
+
+	// Evaluator names the evaluator config this verification contract
+	// resolves against (same-namespace name ref, plain string — not
+	// corev1.LocalObjectReference).
+	// +optional
+	Evaluator string `json:"evaluator,omitempty"`
+
+	// MaxIterations bounds the Task loop's repeat policy: the maximum
+	// number of evaluator-driven fresh attempts the loop may dispatch
+	// before halting (D-07/TASK-05).
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	MaxIterations int32 `json:"maxIterations,omitempty"`
+
+	// OnExhaustion declares the bounded exit path once MaxIterations is
+	// reached without an APPROVED evaluation. In Phase 51 BOTH enum values
+	// resolve IDENTICALLY to ConditionVerifyHalt + await `tide resume` —
+	// per-value differentiation (a future LoopPolicy.EscalationPolicy) is
+	// Phase 52 scope. Declared-but-uniform-now, never unenforced: both
+	// values halt dispatch today.
+	// +kubebuilder:validation:Enum=escalate;requireApproval
+	// +optional
+	OnExhaustion string `json:"onExhaustion,omitempty"`
+}
+
 // TaskSpec carries the executor envelope per D-F1 (retired), D-F2.
 // In v1alpha3 the plan-local D-F1 restriction on DependsOn stays retired
 // (retired in the prior schema revision); Tasks may declare dependencies on
@@ -124,6 +201,14 @@ type TaskSpec struct {
 	// Caps optionally restricts subagent resource usage (Phase 2+).
 	// +optional
 	Caps *Caps `json:"caps,omitempty"`
+
+	// Verification declares the planner-authored, immutable-once-locked
+	// pass-criteria contract for this Task (Phase 51 TASK-01). Mirrors the
+	// Gates precedence-doc pattern: Task-scoped only in this phase; the
+	// identical VerificationSpec shape generalizes to Plan.Spec/
+	// Project.Spec with a Task > Plan > Project precedence in Phase 52.
+	// +optional
+	Verification VerificationSpec `json:"verification,omitempty"`
 
 	// Dev carries dev/test-only overrides for the stub subagent (Phase 2+).
 	// Zero-value embed (not pointer) — field presence is governed by the TestMode
@@ -191,6 +276,23 @@ type TaskStatus struct {
 	// name-fallback branch here (unlike the four planner-level markers).
 	// +optional
 	TaskTraceReporterSpawnedUID string `json:"taskTraceReporterSpawnedUID,omitempty"`
+
+	// LoopStatus carries the Task loop's current-iteration summary + exit
+	// reason only (Phase 51 D-07/LOOP-03 — no accumulating iteration
+	// history; see TestLoopStatus_NoForbiddenFields). Re-derivable across a
+	// restart from Attempt above + the completed-set, never a cache of
+	// iteration history.
+	// +optional
+	LoopStatus LoopStatus `json:"loopStatus,omitempty"`
+
+	// LockedSHA is the commit SHA of spec.verification at the moment it was
+	// last transitioned to Locked — a runtime OBSERVATION recorded at
+	// dispatch, not the governing enum (which lives on
+	// spec.verification.phase/version per RESEARCH Pitfall 2 / Open
+	// Question 1). `git show <lockedSHA>` reproduces exactly the contract a
+	// dispatched attempt ran against (TASK-01 repudiation guard).
+	// +optional
+	LockedSHA string `json:"lockedSHA,omitempty"`
 }
 
 // +kubebuilder:object:root=true
