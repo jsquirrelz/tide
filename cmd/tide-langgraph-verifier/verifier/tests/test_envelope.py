@@ -97,9 +97,13 @@ def test_write_envelope_out_trivial_shape(tmp_path: Path) -> None:
         "kind": envelope.KIND_OUT,
         "exitCode": 0,
         "result": "ran the gate command",
+        "terminalReason": "",
     }
     assert "git" not in data
     assert "childCRDs" not in data
+    assert "loopRunID" not in data
+    assert "attemptID" not in data
+    assert "runEvidence" not in data
     assert stat.S_IMODE(out_path.stat().st_mode) == 0o644
 
 
@@ -121,3 +125,59 @@ def test_write_termination_stub_enforces_size_cap(tmp_path: Path) -> None:
     assert len(data) <= envelope.TERMINATION_STUB_MAX_BYTES
     parsed = json.loads(data)
     assert parsed["exitCode"] == 1
+
+
+def test_write_envelope_out_mirrors_go_camelcase_keys(tmp_path: Path) -> None:
+    """Phase 50 D-02/D-03: terminal_reason/loop_run_id/attempt_id/run_evidence
+    join the JSON document under the exact Go camelCase spellings —
+    terminalReason/loopRunID/attemptID/runEvidence."""
+    out_path = tmp_path / "out.json"
+
+    envelope.write_envelope_out(
+        out_path,
+        exit_code=1,
+        result="cap-exceeded during agent loop",
+        terminal_reason="blocked",
+        loop_run_id="uid-0001",
+        attempt_id="uid-0001-2",
+        run_evidence={"specID": "spec-001", "commands": ["go test ./..."]},
+    )
+
+    data = json.loads(out_path.read_text())
+    assert data["terminalReason"] == "blocked"
+    assert data["loopRunID"] == "uid-0001"
+    assert data["attemptID"] == "uid-0001-2"
+    assert data["runEvidence"] == {"specID": "spec-001", "commands": ["go test ./..."]}
+
+
+def test_write_envelope_out_terminal_reason_never_defaults(tmp_path: Path) -> None:
+    """Phase 50 D-02: an unset terminal_reason writes as "" — NEVER silently
+    defaults to "completed" (fail-closed, mirroring verdict.classify_verdict)."""
+    out_path = tmp_path / "out.json"
+
+    envelope.write_envelope_out(out_path, exit_code=0, result="ran the gate command")
+
+    data = json.loads(out_path.read_text())
+    assert data["terminalReason"] == ""
+    assert data["terminalReason"] != "completed"
+
+
+def test_write_termination_stub_with_loop_fields_stays_small(tmp_path: Path) -> None:
+    """Phase 50 D-02/D-03: terminal_reason + changed_file_count join the
+    stub unconditionally and survive truncation of a 10KB reason, staying
+    strictly under the 4096-byte termination-message budget."""
+    stub_path = tmp_path / "termination-log"
+
+    envelope.write_termination_stub(
+        stub_path,
+        exit_code=1,
+        reason="x" * 10_000,
+        terminal_reason="cap_exceeded",
+        changed_file_count=500,
+    )
+
+    data = stub_path.read_bytes()
+    assert len(data) < envelope.TERMINATION_STUB_MAX_BYTES
+    parsed = json.loads(data)
+    assert parsed["terminalReason"] == "cap_exceeded"
+    assert parsed["changedFileCount"] == 500
