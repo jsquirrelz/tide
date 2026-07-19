@@ -39,6 +39,7 @@ import (
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/credproxy"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
+	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
 // fakeSchemeWithAll returns a runtime.Scheme with TIDE types + k8s batch/core registered.
@@ -702,6 +703,54 @@ func TestBuildEnvelopeIn_PromptPath(t *testing.T) {
 			if envIn.AttemptID != want {
 				t.Errorf("attempt=%d: EnvelopeIn.AttemptID = %q, want %q", attempt, envIn.AttemptID, want)
 			}
+		}
+	})
+}
+
+// TestSynthesizeNoEnvelopeOut covers the controller-half of RESEARCH Open
+// Question 1 (50-06 Task 2): the ONLY place a wall-clock (ActiveDeadlineSeconds)
+// Job kill can ever be classified as cap_exceeded, since the SIGKILLed pod
+// never writes out.json. Pure function — no reconciler plumbing, no envtest.
+func TestSynthesizeNoEnvelopeOut(t *testing.T) {
+	task := &tideprojectv1alpha3.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "task-no-envelope", Namespace: "default", UID: types.UID("abc")},
+		Status:     tideprojectv1alpha3.TaskStatus{Attempt: 2},
+	}
+
+	jobWithCondition := func(reason string) *batchv1.Job {
+		return &batchv1.Job{
+			Status: batchv1.JobStatus{
+				Conditions: []batchv1.JobCondition{
+					{Type: batchv1.JobFailed, Status: corev1.ConditionTrue, Reason: reason},
+				},
+			},
+		}
+	}
+
+	t.Run("DeadlineExceeded maps to cap_exceeded, identity survives envelope loss", func(t *testing.T) {
+		out := synthesizeNoEnvelopeOut(task, jobWithCondition("DeadlineExceeded"))
+		if out.TerminalReason != pkgdispatch.TerminalReasonCapExceeded {
+			t.Errorf("TerminalReason = %q, want %q", out.TerminalReason, pkgdispatch.TerminalReasonCapExceeded)
+		}
+		if out.Reason == "" {
+			t.Error("Reason = \"\", want a non-empty diagnostic detail string")
+		}
+		if out.LoopRunID != "abc" {
+			t.Errorf("LoopRunID = %q, want %q", out.LoopRunID, "abc")
+		}
+		if out.AttemptID != "abc-2" {
+			t.Errorf("AttemptID = %q, want %q", out.AttemptID, "abc-2")
+		}
+	})
+
+	t.Run("BackoffLimitExceeded stays unclassified (fail-closed, never guess)", func(t *testing.T) {
+		out := synthesizeNoEnvelopeOut(task, jobWithCondition("BackoffLimitExceeded"))
+		if out.TerminalReason != "" {
+			t.Errorf("TerminalReason = %q, want unset (only DeadlineExceeded maps to cap_exceeded)", out.TerminalReason)
+		}
+		// Identity must still survive even when the reason stays unclassified.
+		if out.LoopRunID != "abc" || out.AttemptID != "abc-2" {
+			t.Errorf("identity fields = (%q, %q), want (\"abc\", \"abc-2\") even on unclassified reason", out.LoopRunID, out.AttemptID)
 		}
 	})
 }
