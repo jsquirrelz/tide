@@ -41,9 +41,9 @@ import (
 	. "github.com/onsi/gomega"
 
 	batchv1 "k8s.io/api/batch/v1"
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -214,7 +214,7 @@ func completeVerifierJob(ctx context.Context, task *tideprojectv1alpha3.Task, at
 	var job batchv1.Job
 	ExpectWithOffset(1, k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: "default"}, &job)).To(Succeed())
 	jobPatch := client.MergeFrom(job.DeepCopy())
-	job.Status.Conditions = []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}}
+	completeJobStatus(&job)
 	ExpectWithOffset(1, k8sClient.Status().Patch(ctx, &job, jobPatch)).To(Succeed())
 	waitForJobTerminalInCache(ctx, jobName)
 }
@@ -336,7 +336,7 @@ var _ = Describe("Task loop: verifier verdict consumption (Phase 51 Plan 07, Ver
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(k8sClient.Get(ctx, name, task)).To(Succeed())
-		Expect(task.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseFailed),
+		Expect(task.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseVerifyHalted),
 			"an unreadable verifier envelope must never resolve to Succeeded")
 
 		var project tideprojectv1alpha3.Project
@@ -368,7 +368,7 @@ var _ = Describe("Task loop: verifier verdict consumption (Phase 51 Plan 07, Ver
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(k8sClient.Get(ctx, name, task)).To(Succeed())
-		Expect(task.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseFailed))
+		Expect(task.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseVerifyHalted))
 		Expect(task.Status.LoopStatus.ExitReason).To(Equal(tideprojectv1alpha3.ExitEscalated))
 
 		var project tideprojectv1alpha3.Project
@@ -446,7 +446,7 @@ var _ = Describe("Task loop: verifier verdict consumption (Phase 51 Plan 07, Ver
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(k8sClient.Get(ctx, name, task)).To(Succeed())
-		Expect(task.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseFailed))
+		Expect(task.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseVerifyHalted))
 		Expect(task.Status.Attempt).To(Equal(attempt), "an exhausted loop must never mint a further attempt")
 		Expect(task.Status.LoopStatus.ExitReason).To(Equal(tideprojectv1alpha3.ExitIterationsExhausted))
 
@@ -489,7 +489,7 @@ var _ = Describe("Task loop: anti-gaming structural enforcement (Phase 51 Plan 0
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(k8sClient.Get(ctx, name, task)).To(Succeed())
-		Expect(task.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseFailed),
+		Expect(task.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseVerifyHalted),
 			"an evaluator-path edit must never resolve to Succeeded or a plain repair")
 		Expect(task.Status.Attempt).To(Equal(attempt), "an anti-gaming escalation must never mint a fresh attempt")
 		Expect(task.Status.LoopStatus.ExitReason).To(Equal(tideprojectv1alpha3.ExitEscalated))
@@ -544,6 +544,82 @@ var _ = Describe("Task loop: anti-gaming structural enforcement (Phase 51 Plan 0
 			}
 		}
 		Expect(found).To(BeFalse(), "an ordinary repair must never carry the AntiGamingDetected reason")
+	})
+})
+
+var _ = Describe("Task loop: verify-exhaustion is a distinct halt class (Phase 51 ESC-03, VerifyHaltClass)", Label("envtest", "phase51", "esc03"), func() {
+	ctx := context.Background()
+
+	// HI-01 end-to-end: drives the FULL haltVerify flow under a conservative
+	// FailureProfile and proves ESC-03 — a verify-exhaustion halts as the
+	// distinct LevelPhaseVerifyHalted terminal, stamps the project-wide
+	// ConditionVerifyHalt, and NEVER trips the conservative ConditionFailureHalt
+	// (the exact over-halt the old Phase=Failed verify-halt caused on the next
+	// reconcile). The prior coverage was helper-only (co_occurring_holds_test);
+	// this exercises the reconcile path that stamped the halt.
+	It("halts VerifyHalted, stamps VerifyHalt, and never stamps conservative FailureHalt", func() {
+		const projName, planRef, taskName, sibName = "esc3-proj", "esc3-plan", "esc3-task", "esc3-sibling"
+
+		proj := &tideprojectv1alpha3.Project{
+			ObjectMeta: metav1.ObjectMeta{Name: projName, Namespace: "default"},
+			Spec: tideprojectv1alpha3.ProjectSpec{
+				SchemaRevision: "v1alpha3",
+				TargetRepo:     "https://github.com/example/tide.git",
+				FailureProfile: tideprojectv1alpha3.FailureProfileConservative,
+			},
+		}
+		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+		waitForCacheSync(projName, "default", &tideprojectv1alpha3.Project{})
+		defer cleanupProject(projName)
+
+		// A wave sibling: ESC-03 requires a VerifyHalt to leave sibling phases untouched.
+		sibling := makeVerifyTask(sibName, planRef, projName, tideprojectv1alpha3.VerificationSpec{})
+		defer cleanupTask(sibName)
+
+		envReader := newMapEnvReader()
+		_, task, attempt := driveToVerifying(ctx, envReader, taskName, planRef, projName, tideprojectv1alpha3.VerificationSpec{
+			Phase: "Locked", Version: 1, GateCommand: "make test-verify", MaxIterations: 1, OnExhaustion: "requireApproval",
+		})
+		defer cleanupTask(taskName)
+
+		// REPAIRABLE at MaxIterations=1 → exhaustion → haltVerify.
+		envReader.SetOut(string(task.UID), pkgdispatch.EnvelopeOut{
+			TaskUID: string(task.UID), ExitCode: 0, Result: "verified", CompletedAt: time.Now(),
+			Verdict: &pkgdispatch.GateDecision{
+				Verdict:  pkgdispatch.VerdictRepairable,
+				Findings: []pkgdispatch.Finding{{Dimension: "correctness", Severity: "advisory"}},
+			},
+		})
+		completeVerifierJob(ctx, task, attempt)
+
+		r := newVerifyDispatchTaskReconciler(envReader)
+		name := types.NamespacedName{Name: taskName, Namespace: "default"}
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Get(ctx, name, task)).To(Succeed())
+		Expect(task.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseVerifyHalted))
+
+		var project tideprojectv1alpha3.Project
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, &project)).To(Succeed())
+		Expect(meta.IsStatusConditionTrue(project.Status.Conditions, tideprojectv1alpha3.ConditionVerifyHalt)).To(BeTrue(),
+			"ESC-02: verify-exhaustion stamps the project-wide VerifyHalt")
+
+		// Reconcile the halted Task AGAIN — under the OLD Phase=Failed behavior
+		// THIS is the reconcile whose gateChecks Failed short-circuit stamped
+		// the conservative ConditionFailureHalt. The VerifyHalted short-circuit
+		// (Step 1a) must not.
+		_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, &project)).To(Succeed())
+		Expect(meta.IsStatusConditionTrue(project.Status.Conditions, tideprojectv1alpha3.ConditionFailureHalt)).To(BeFalse(),
+			"ESC-03: a VerifyHalt must NEVER stamp the conservative FailureHalt — distinct halt class")
+
+		// The wave sibling's own phase is untouched by the VerifyHalt.
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: sibName, Namespace: "default"}, sibling)).To(Succeed())
+		Expect(sibling.Status.Phase).NotTo(Equal(tideprojectv1alpha3.LevelPhaseVerifyHalted))
+		Expect(sibling.Status.Phase).NotTo(Equal(tideprojectv1alpha3.LevelPhaseFailed))
 	})
 })
 

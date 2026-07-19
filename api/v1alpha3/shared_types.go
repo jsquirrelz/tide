@@ -496,4 +496,17 @@ const (
 	// only the verifier's consumed verdict can (Plan 07). A Task with no
 	// contract preserves the pre-Phase-51 exit-0 -> Succeeded path (OQ2).
 	LevelPhaseVerifying = "Verifying"
+	// LevelPhaseVerifyHalted is Task-only (Phase 51 ESC-03): the terminal a
+	// verification loop reaches when it exhausts MaxIterations, hits a BLOCKED
+	// verdict, an unreadable verifier envelope, or an anti-gaming escalation
+	// without an APPROVED verdict. It is a DISTINCT halt class from
+	// LevelPhaseFailed — never a reinterpretation of Failed wave semantics
+	// (ESC-03). Unlike a Failed Task, a VerifyHalted Task does NOT trip the
+	// conservative-profile FailureHalt backstop (gateChecks) and its recovery
+	// path is `tide resume` (clears ConditionVerifyHalt project-wide), not
+	// `tide resume --retry-failed`. The project-wide ConditionVerifyHalt that
+	// haltVerify stamps alongside this phase is what freezes new dispatch;
+	// this phase keeps the halted Task grep-distinguishable from an execution
+	// failure at every phase switch/== call site.
+	LevelPhaseVerifyHalted = "VerifyHalted"
 )

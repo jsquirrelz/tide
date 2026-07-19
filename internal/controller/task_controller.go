@@ -348,6 +348,18 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 	if task.Status.Phase == tideprojectv1alpha3.LevelPhaseSucceeded {
 		return taskGateResult{shouldHalt: true, result: ctrl.Result{}}, nil
 	}
+	// Step 1a (Phase 51 ESC-03/HI-01): VerifyHalted is a DISTINCT terminal
+	// halt class — it must NOT flow through the Failed short-circuit below,
+	// because that would stamp the conservative-profile ConditionFailureHalt
+	// (setFailureHaltIfNeeded) on top of the ConditionVerifyHalt haltVerify
+	// already stamped, and drag the Task into Failed-wave dependent semantics.
+	// A VerifyHalt already froze new dispatch project-wide via
+	// ConditionVerifyHalt (checkDispatchHolds/gateChecks); this Task simply
+	// halts here with no additional failure propagation. Recovery is
+	// `tide resume` (clears ConditionVerifyHalt), never `--retry-failed`.
+	if task.Status.Phase == tideprojectv1alpha3.LevelPhaseVerifyHalted {
+		return taskGateResult{shouldHalt: true, result: ctrl.Result{}}, nil
+	}
 	if task.Status.Phase == tideprojectv1alpha3.LevelPhaseFailed {
 		// Phase 25 D-02b: conservative failure halt check at terminal short-circuit.
 		// A Failed task re-triggers the reconciler on every status change; this
@@ -2400,7 +2412,17 @@ func (r *TaskReconciler) finishVerifierTerminal(ctx context.Context, task *tidep
 func (r *TaskReconciler) haltVerify(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, out pkgdispatch.EnvelopeOut, message, conditionReason string, exitReason tideprojectv1alpha3.ExitReason) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 	patch := client.MergeFrom(task.DeepCopy())
-	task.Status.Phase = tideprojectv1alpha3.LevelPhaseFailed
+	// ESC-03 (HI-01): a verify-exhaustion is a DISTINCT halt class, never a
+	// reinterpretation of Failed wave semantics. Driving it through
+	// LevelPhaseFailed made the next reconcile's gateChecks Failed
+	// short-circuit stamp the conservative-profile ConditionFailureHalt on
+	// top of ConditionVerifyHalt — an over-halt that stranded the project on
+	// `tide resume` alone (it needed `--retry-failed` too, a verb the
+	// VerifyHalt path never surfaced). LevelPhaseVerifyHalted keeps the
+	// terminal grep-distinguishable and out of the Failed backstop; the
+	// ConditionFailed condition below still carries the caller's Reason for
+	// audit trails and dashboards.
+	task.Status.Phase = tideprojectv1alpha3.LevelPhaseVerifyHalted
 	meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
 		Type:               tideprojectv1alpha3.ConditionFailed,
 		Status:             metav1.ConditionTrue,

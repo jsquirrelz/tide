@@ -258,9 +258,26 @@ func completeExecutorJob(ctx context.Context, task *tideprojectv1alpha3.Task) in
 		ExpectWithOffset(1, err).NotTo(HaveOccurred())
 	}
 	jobPatch := client.MergeFrom(job.DeepCopy())
-	job.Status.Conditions = []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}}
+	completeJobStatus(&job)
 	ExpectWithOffset(1, k8sClient.Status().Patch(ctx, &job, jobPatch)).To(Succeed())
 	return attempt
+}
+
+// completeJobStatus stamps a VALID terminal (Complete) status onto job. k8s
+// >=1.34 Job validation rejects a Complete=True condition unless the Job also
+// carries a SuccessCriteriaMet=True condition and both startTime and
+// completionTime — so patching only {Complete=True} (the pre-1.34 shortcut)
+// now fails apiserver validation with "cannot set Complete=True condition
+// without the SuccessCriteriaMet=true condition". isJobTerminal still reads
+// this as terminal (it keys on JobComplete=True).
+func completeJobStatus(job *batchv1.Job) {
+	now := metav1.Now()
+	job.Status.StartTime = &now
+	job.Status.CompletionTime = &now
+	job.Status.Conditions = []batchv1.JobCondition{
+		{Type: batchv1.JobSuccessCriteriaMet, Status: corev1.ConditionTrue},
+		{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+	}
 }
 
 // decodeEnvelopeIn extracts and decodes the EnvelopeIn a Job's

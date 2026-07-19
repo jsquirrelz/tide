@@ -147,6 +147,52 @@ func resumeRun(ctx context.Context, c client.Client, ns, projectName string, ret
 		}
 	}
 
+	// Phase 51 ESC-03 (HI-01): VerifyHalt recovery is UNCONDITIONAL on plain
+	// `tide resume` — a DISTINCT halt class from the conservative FailureHalt
+	// that --retry-failed clears (setVerifyHaltIfNeeded's own operator message
+	// points at plain `tide resume`). Mirror the Phase 25 CR-01 ordering:
+	// reset the VerifyHalted Tasks FIRST, then clear the project-wide
+	// ConditionVerifyHalt LAST and stamp AnnotationVerifyResumedAt, so a
+	// pre-resume straggler verifier completion cannot re-stamp the halt after
+	// the clear (setVerifyHaltIfNeeded reads that fence). No-op when no
+	// VerifyHalt condition exists.
+	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
+		return fmt.Errorf("re-get project for VerifyHalt clear: %w", err)
+	}
+	if vhCond := meta.FindStatusCondition(proj.Status.Conditions, tidev1alpha3.ConditionVerifyHalt); vhCond != nil && vhCond.Status == metav1.ConditionTrue {
+		if err := resetVerifyHaltedTasks(ctx, c, ns, projectName, out); err != nil {
+			return err
+		}
+		// Re-fetch for a fresh resourceVersion after the Task phase-reset patches.
+		if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
+			return fmt.Errorf("re-get project for VerifyHalt clear: %w", err)
+		}
+		patchVH := client.MergeFrom(proj.DeepCopy())
+		meta.RemoveStatusCondition(&proj.Status.Conditions, tidev1alpha3.ConditionVerifyHalt)
+		if err := c.Status().Patch(ctx, &proj, patchVH); err != nil {
+			return fmt.Errorf("patch status (clear VerifyHalt): %w", err)
+		}
+		// CR-02 fence stamp: AnnotationVerifyResumedAt is metadata (not status) —
+		// separate metadata patch from the condition removal above. Re-fetch
+		// first for a fresh resourceVersion after the status patch.
+		if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
+			return fmt.Errorf("re-get project for verify-resumed-at stamp: %w", err)
+		}
+		metaPatch := client.MergeFrom(proj.DeepCopy())
+		ann := proj.GetAnnotations()
+		if ann == nil {
+			ann = make(map[string]string)
+		}
+		ann[tidev1alpha3.AnnotationVerifyResumedAt] = time.Now().UTC().Format(time.RFC3339)
+		proj.SetAnnotations(ann)
+		if err := c.Patch(ctx, &proj, metaPatch); err != nil {
+			return fmt.Errorf("patch metadata (verify-resumed-at stamp): %w", err)
+		}
+		if out != nil {
+			fmt.Fprintln(out, "tide: cleared VerifyHalt; pre-resume verifier stragglers can no longer re-trip the halt")
+		}
+	}
+
 	if !retryFailed {
 		return nil
 	}
@@ -338,6 +384,47 @@ func retryFailedLevels(ctx context.Context, c client.Client, ns, projectName str
 	return nil
 }
 
+// resetVerifyHaltedTasks resets any Task whose Status.Phase=="VerifyHalted"
+// (Phase 51 ESC-03/HI-01) to the empty phase via the status subresource so
+// the TaskReconciler re-dispatches a fresh executor attempt once
+// ConditionVerifyHalt clears. VerifyHalted is a DISTINCT halt class from
+// Failed — retryFailedLevels never touches these (they are not
+// LevelPhaseFailed), so plain `tide resume` owns their recovery. Only
+// Status.Phase=="VerifyHalted" items are touched; Running/Succeeded/Failed/
+// empty tasks are never modified. Prints one line per reset to out.
+func resetVerifyHaltedTasks(ctx context.Context, c client.Client, ns, projectName string, out io.Writer) error {
+	var tkList tidev1alpha3.TaskList
+	if err := c.List(ctx, &tkList,
+		client.InNamespace(ns),
+		client.MatchingLabels{owner.LabelProject: projectName},
+	); err != nil {
+		return fmt.Errorf("list tasks for verify-halt reset: %w", err)
+	}
+	resumedByUser := metav1.Condition{
+		Type:               tidev1alpha3.ConditionWaveOrLevelPaused,
+		Status:             metav1.ConditionFalse,
+		Reason:             tidev1alpha3.ReasonResumedByUser,
+		Message:            "VerifyHalted task reset by tide resume; reconciler will re-dispatch",
+		LastTransitionTime: metav1.Now(),
+	}
+	for i := range tkList.Items {
+		item := &tkList.Items[i]
+		if item.Status.Phase != tidev1alpha3.LevelPhaseVerifyHalted {
+			continue
+		}
+		orig := item.DeepCopy()
+		patch := client.MergeFrom(orig)
+		item.Status.Phase = ""
+		item.Status.Conditions = nil
+		meta.SetStatusCondition(&item.Status.Conditions, resumedByUser)
+		if err := c.Status().Patch(ctx, item, patch); err != nil {
+			return fmt.Errorf("reset verify-halted task %s: %w", item.Name, err)
+		}
+		printReset(out, "Task", item.Name)
+	}
+	return nil
+}
+
 // printReset writes one line of per-level feedback to out (nil-safe).
 func printReset(out io.Writer, kind, name string) {
 	if out == nil {
@@ -388,7 +475,10 @@ func newResumeCmd() *cobra.Command {
 			"IntegrationIncomplete condition or a non-zero BoundaryPush.Attempts " +
 			"tally is stamped with tideproject.k8s/reset-boundary-push=true, which " +
 			"the controller consumes to zero Attempts/LastError and clear the " +
-			"condition.\n\n" +
+			"condition. It also clears a project-wide VerifyHalt (Phase 51 " +
+			"ESC-03) — resetting any VerifyHalted Task for re-dispatch and " +
+			"stamping a verify-resumed-at fence — a DISTINCT halt class from the " +
+			"conservative FailureHalt that --retry-failed clears.\n\n" +
 			"With --retry-failed, also resets Status.Phase on every Failed level " +
 			"(Milestone/Phase/Plan/Task) of the project via the status subresource " +
 			"and stamps a ResumedByUser condition. This is the sanctioned replacement " +
