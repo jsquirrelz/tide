@@ -1747,7 +1747,17 @@ func (r *TaskReconciler) defaultsForSecret(secret *corev1.Secret) budget.Limits 
 
 // buildEnvelopeIn constructs and marshals the EnvelopeIn for this Task dispatch.
 // Translates api/v1alpha3.Caps → pkg/dispatch.Caps per Plan 03's two-type design.
-func (r *TaskReconciler) buildEnvelopeIn(_ context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, _ int, token string) (pkgdispatch.EnvelopeIn, []byte, error) {
+//
+// D-01 (50-06 Task 1, EXEC-01): attempt is the same dispatch-attempt number
+// podjob.JobName(taskUID, attempt) uses to derive the per-attempt Job name
+// ("tide-task-{taskUID}-{attempt}") — LoopRunID/AttemptID below are re-derived
+// from that identical tuple, never minted or persisted. LoopRunID is the outer
+// Task-loop run anchor (loop.parent_run_id, stable across repair attempts);
+// AttemptID is this execution attempt (loop.run_id). Planner-level dispatches
+// (dispatch_helpers.go's BuildPlannerEnvelope) are deliberately NOT stamped
+// this phase — the Execution loop is the in-Job Task attempt; planner-loop
+// identity is future work.
+func (r *TaskReconciler) buildEnvelopeIn(_ context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, attempt int, token string) (pkgdispatch.EnvelopeIn, []byte, error) {
 	caps := pkgdispatch.Caps{}
 	if task.Spec.Caps != nil {
 		caps = pkgdispatch.Caps{
@@ -1781,6 +1791,9 @@ func (r *TaskReconciler) buildEnvelopeIn(_ context.Context, task *tideprojectv1a
 		DependsOn:           task.Spec.DependsOn,
 		DeclaredOutputPaths: task.Spec.DeclaredOutputPaths,
 		Caps:                caps,
+		// D-01: derived from the task.UID + attempt tuple, never minted.
+		LoopRunID: string(task.UID),
+		AttemptID: fmt.Sprintf("%s-%d", task.UID, attempt),
 		// Resolve the executor's ProviderSpec the same way the planner
 		// reconcilers do (BuildPlannerEnvelope → ResolveProvider): Vendor pinned
 		// to "anthropic" + the task-level model. Without this the envelope's
