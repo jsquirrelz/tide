@@ -6,6 +6,12 @@ pkg/dispatch/doc.go), so this module independently re-implements the JSON
 wire shapes this image reads (EnvelopeIn) and writes (EnvelopeOut,
 TerminationStub) directly from the Go struct tags — the tags are the frozen
 contract, not this module.
+
+Phase 50 (D-02/D-03) extends both writers with the mirrored
+TerminalReason/RunEvidence/loopRunID/attemptID fields hand-ported from
+pkg/dispatch/terminal_reason.go and pkg/dispatch/run_evidence.go — proven
+against the shared pkg/dispatch/testdata/envelope_out_golden.json fixture
+(see [ENVELOPE_OUT_GOLDEN_FIXTURE]).
 """
 
 from __future__ import annotations
@@ -15,6 +21,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from verifier.verdict import _repo_root
 
 # Wire-contract discriminators (pkg/dispatch/envelope.go:21-38). Consumers
 # MUST reject any envelope whose apiVersion/kind does not match these exactly
@@ -135,24 +143,56 @@ def write_envelope_out(
     exit_code: int,
     result: str,
     reason: str = "",
+    terminal_reason: str = "",
+    loop_run_id: str = "",
+    attempt_id: str = "",
+    run_evidence: dict[str, Any] | None = None,
 ) -> None:
-    """Write a trivial EnvelopeOut document to path (D-01 scope).
+    """Write an EnvelopeOut document to path (D-01 scope, extended by
+    Phase 50 D-02/D-03).
 
-    Emits exactly apiVersion/kind/exitCode/result (+reason when exit_code is
-    nonzero) — no `git`/`childCRDs` keys. Per
+    Emits apiVersion/kind/exitCode/result/terminalReason (+reason when
+    exit_code is nonzero) — no `git`/`childCRDs` keys. Per
     pkg/dispatch/envelope.go IsEnvelopeComplete (:254), a complete envelope
     has ExitCode==0 AND len(ChildCRDs)==ChildCount; omitting both keys leaves
     ChildCount implicitly 0, which is complete for an executor-level
     dispatch. Written 0o644 (harness.WriteEnvelopeOut's own permission).
+
+    terminal_reason mirrors pkg/dispatch.TerminalReason (D-02) — the closed
+    5-value enum `completed | cap_exceeded | blocked | tool_failure |
+    invalid_output`. The empty string is the unset sentinel and is written
+    verbatim as `terminalReason` UNCONDITIONALLY (never gated, mirroring
+    Go's field with no `omitempty` tag) — it is NEVER silently defaulted to
+    `"completed"`; consumers MUST treat an unset terminalReason as NOT
+    completed (fail-closed, matching verdict.classify_verdict's discipline).
+
+    loop_run_id/attempt_id mirror EnvelopeOut.LoopRunID/AttemptID (D-01) —
+    joined as `loopRunID`/`attemptID` only when non-empty, mirroring Go's
+    `omitempty` tag on both fields.
+
+    run_evidence mirrors EnvelopeOut.RunEvidence (D-03) — joined as
+    `runEvidence` only when not None, mirroring Go's `omitempty` tag. The
+    CALLER owns bounding the dict before passing it in (this function does
+    no truncation) — see pkg/dispatch.RunEvidence.Bounded's consts:
+    at most 100 changedFiles entries (256 bytes per path), at most 10
+    commands entries (256 bytes each), and at most 64 bytes each for
+    model/promptVersion/runtimeVersion/specID/lockingCommit.
     """
     out: dict[str, Any] = {
         "apiVersion": API_VERSION,
         "kind": KIND_OUT,
         "exitCode": exit_code,
         "result": result,
+        "terminalReason": terminal_reason,
     }
     if exit_code != 0:
         out["reason"] = reason
+    if loop_run_id:
+        out["loopRunID"] = loop_run_id
+    if attempt_id:
+        out["attemptID"] = attempt_id
+    if run_evidence is not None:
+        out["runEvidence"] = run_evidence
 
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -168,6 +208,8 @@ def write_termination_stub(
     gate_decision: str = "",
     findings_count: int = 0,
     high_severity_count: int = 0,
+    terminal_reason: str = "",
+    changed_file_count: int = 0,
 ) -> None:
     """Write a TerminationStub (pkg/dispatch/envelope.go:394) to path.
 
@@ -181,9 +223,12 @@ def write_termination_stub(
     gate_decision/findings_count/high_severity_count (EVAL-05/D-05a) mirror
     TerminationStub's bounded verdict summary — an enum string + two ints,
     joined into the dict unconditionally since they are bounded by
-    construction. Only `reason` is unbounded free text and needs the
-    truncation loop; the loop terminates by emptying `reason` (never spinning)
-    even if a caller mis-sizes a bounded field past the cap.
+    construction. terminal_reason/changed_file_count (Phase 50 D-02/D-03)
+    mirror TerminationStub.TerminalReason/ChangedFileCount the same way —
+    joined unconditionally, never subject to the truncation loop below. Only
+    `reason` is unbounded free text and needs the truncation loop; the loop
+    terminates by emptying `reason` (never spinning) even if a caller
+    mis-sizes a bounded field past the cap.
     """
     stub: dict[str, Any] = {
         "exitCode": exit_code,
@@ -191,6 +236,8 @@ def write_termination_stub(
         "gateDecision": gate_decision,
         "findingsCount": findings_count,
         "highSeverityCount": high_severity_count,
+        "terminalReason": terminal_reason,
+        "changedFileCount": changed_file_count,
     }
     data = json.dumps(stub).encode("utf-8")
 
@@ -213,3 +260,11 @@ def write_termination_stub(
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(data)
+
+
+# ENVELOPE_OUT_GOLDEN_FIXTURE is the single source-of-truth EnvelopeOut
+# fixture pkg/dispatch's Go test suite also reads
+# (pkg/dispatch/testdata/envelope_out_golden.json) — the cross-language
+# round-trip proof (D-02/D-03), never a Python-local copy. Mirrors
+# verdict.GOLDEN_FIXTURE's identical repo-root idiom.
+ENVELOPE_OUT_GOLDEN_FIXTURE = _repo_root() / "pkg" / "dispatch" / "testdata" / "envelope_out_golden.json"
