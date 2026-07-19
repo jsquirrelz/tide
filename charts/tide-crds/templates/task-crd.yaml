@@ -373,6 +373,48 @@ spec:
                 x-kubernetes-list-type: map
               exitCode:
                 type: integer
+              lastAttemptEvidence:
+                description: |-
+                  LastAttemptEvidence is the compact, current-iteration-only run-evidence
+                  projection captured at the most recent executor completion (Phase 51
+                  BL-01). It carries the EXECUTOR's changed-file manifest + commands — data
+                  the verifier's read-only envelope never writes — so the anti-gaming
+                  detector's belt-and-suspenders (repairOrHalt, TASK-06) and the repair
+                  evidence packet (stageEvidencePacket, TASK-02) can read it after the
+                  executor's out.json has been overwritten by the verifier's verdict-only
+                  envelope. Overwritten every attempt (LOOP-03 — no history) and bounded
+                  (PERSIST-02).
+                properties:
+                  changedFiles:
+                    description: |-
+                      ChangedFiles is the bounded git --name-status manifest the executor
+                      produced for the most recent attempt.
+                    items:
+                      description: |-
+                        ChangedFileRef is the api-local mirror of pkg/dispatch.ChangedFile — a
+                        single git --name-status pair (path + status letter). api/v1alpha3 stays
+                        free of a pkg/dispatch import (the import firewall), so the wire type is
+                        mirrored here, exactly as EvaluationSummary mirrors pkg/dispatch.GateDecision
+                        (loop_types.go's own two-homes design note).
+                      properties:
+                        path:
+                          description: Path is the repo-relative path of the changed
+                            file.
+                          type: string
+                        status:
+                          description: |-
+                            Status is the git name-status letter: A (added), M (modified),
+                            D (deleted), R (renamed), etc.
+                          type: string
+                      type: object
+                    type: array
+                  commands:
+                    description: Commands is the bounded list of command lines the executor
+                      ran.
+                    items:
+                      type: string
+                    type: array
+                type: object
               lockedSHA:
                 description: |-
                   LockedSHA is the commit SHA of spec.verification at the moment it was

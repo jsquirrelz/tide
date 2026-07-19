@@ -227,6 +227,42 @@ type TaskSpec struct {
 	SharedContext string `json:"sharedContext,omitempty"`
 }
 
+// ChangedFileRef is the api-local mirror of pkg/dispatch.ChangedFile — a
+// single git --name-status pair (path + status letter). api/v1alpha3 stays
+// free of a pkg/dispatch import (the import firewall), so the wire type is
+// mirrored here, exactly as EvaluationSummary mirrors pkg/dispatch.GateDecision
+// (loop_types.go's own two-homes design note).
+type ChangedFileRef struct {
+	// Path is the repo-relative path of the changed file.
+	// +optional
+	Path string `json:"path,omitempty"`
+
+	// Status is the git name-status letter: A (added), M (modified),
+	// D (deleted), R (renamed), etc.
+	// +optional
+	Status string `json:"status,omitempty"`
+}
+
+// RunEvidenceSummary is the compact, current-iteration-only projection of the
+// EXECUTOR's run evidence captured at its most recent completion (Phase 51
+// BL-01). It carries the changed-file manifest + commands the read-only
+// verifier envelope never writes — the two data the anti-gaming detector
+// (TASK-06) and the repair evidence packet (TASK-02/D-04) must read AFTER the
+// executor's out.json has been overwritten by the verifier's verdict-only
+// envelope on the shared PVC path. Overwritten every attempt (LOOP-03 — no
+// accumulating history) and bounded via pkg/dispatch.RunEvidence.Bounded()
+// before persistence (PERSIST-02 — TaskStatus stays small).
+type RunEvidenceSummary struct {
+	// ChangedFiles is the bounded git --name-status manifest the executor
+	// produced for the most recent attempt.
+	// +optional
+	ChangedFiles []ChangedFileRef `json:"changedFiles,omitempty"`
+
+	// Commands is the bounded list of command lines the executor ran.
+	// +optional
+	Commands []string `json:"commands,omitempty"`
+}
+
 // TaskStatus defines the observed state of Task.
 // Stays small per PERSIST-02 / Pitfall 4.
 type TaskStatus struct {
@@ -293,6 +329,18 @@ type TaskStatus struct {
 	// dispatched attempt ran against (TASK-01 repudiation guard).
 	// +optional
 	LockedSHA string `json:"lockedSHA,omitempty"`
+
+	// LastAttemptEvidence is the compact, current-iteration-only run-evidence
+	// projection captured at the most recent executor completion (Phase 51
+	// BL-01). It carries the EXECUTOR's changed-file manifest + commands — data
+	// the verifier's read-only envelope never writes — so the anti-gaming
+	// detector's belt-and-suspenders (repairOrHalt, TASK-06) and the repair
+	// evidence packet (stageEvidencePacket, TASK-02) can read it after the
+	// executor's out.json has been overwritten by the verifier's verdict-only
+	// envelope. Overwritten every attempt (LOOP-03 — no history) and bounded
+	// (PERSIST-02).
+	// +optional
+	LastAttemptEvidence *RunEvidenceSummary `json:"lastAttemptEvidence,omitempty"`
 }
 
 // +kubebuilder:object:root=true

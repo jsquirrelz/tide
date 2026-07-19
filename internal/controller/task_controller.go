@@ -1489,6 +1489,22 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 			logger.Error(hErr, "setFailureHaltIfNeeded failed (non-fatal)", "task", task.Name)
 		}
 	} else if hasVerificationContract(task) {
+		// Phase 51 TASK-06 anti-gaming (BL-01): the EXECUTOR's own changed-file
+		// manifest is present in out.RunEvidence HERE — before a verifier
+		// overwrites the shared out.json path with its verdict-only envelope
+		// (which never carries RunEvidence). If the attempt touched a protected
+		// evaluator/fixture/threshold path, escalate as a SYSTEM escalation NOW,
+		// before dispatching a verifier that could bless the gaming attempt.
+		// This fires on EVERY downstream verdict path (APPROVED and REPAIRABLE
+		// alike), closing the hole where a *successful* gaming attempt (gate
+		// goes green -> APPROVED) reached markVerifiedSucceeded with no
+		// anti-gaming check at all. `out` here is the executor envelope, so
+		// escalateSystem's terminal bookkeeping rolls up the executor's real
+		// spend exactly once — this function's own roll-up/metrics below are
+		// not reached (early return).
+		if out.RunEvidence != nil && intersectsProtected(out.RunEvidence.ChangedFiles, protectedPathsFor(task)) {
+			return r.escalateSystem(ctx, task, project, out)
+		}
 		// Phase 51 EXEC-04: the Execution loop believes it is complete but
 		// NEVER stamps Task correctness directly for a contract-bearing
 		// Task — only an independent verifier's consumed verdict can (Plan
@@ -1511,6 +1527,11 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 		// commit spec.verification was Locked at" (no finer-grained
 		// per-Lock commit SHA is tracked anywhere in the codebase today).
 		task.Status.LockedSHA = project.Status.Git.LastPushedSHA
+		// BL-01/LO-02: persist the executor's bounded changed-file manifest so
+		// the repairOrHalt anti-gaming belt-and-suspenders (TASK-06) and the
+		// repair evidence packet (stageEvidencePacket, TASK-02) can read it
+		// after the verifier overwrites out.json with its verdict-only envelope.
+		task.Status.LastAttemptEvidence = runEvidenceSummaryFrom(out.RunEvidence)
 	} else {
 		task.Status.Phase = tideprojectv1alpha3.LevelPhaseSucceeded
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
@@ -2292,7 +2313,10 @@ func protectedPathsFor(_ *tideprojectv1alpha3.Task) []string {
 
 // intersectsProtected reports whether any changed file's path falls under a
 // protected prefix (TASK-06, path-prefix match — an edit anywhere inside a
-// protected directory counts, not just an exact file match).
+// protected directory counts, not just an exact file match). Consumes the
+// EXECUTOR's wire-format RunEvidence.ChangedFiles at executor-completion time
+// (handleJobCompletion), the ONE place the executor's manifest is present
+// before the verifier overwrites out.json (BL-01).
 func intersectsProtected(changed []pkgdispatch.ChangedFile, protected []string) bool {
 	for _, f := range changed {
 		for _, p := range protected {
@@ -2302,6 +2326,51 @@ func intersectsProtected(changed []pkgdispatch.ChangedFile, protected []string) 
 		}
 	}
 	return false
+}
+
+// intersectsProtectedRefs is intersectsProtected over the api-local
+// ChangedFileRef persisted on TaskStatus.LastAttemptEvidence. The
+// repairOrHalt belt-and-suspenders reads the PERSISTED executor manifest
+// through this — never the verifier's verdict-only envelope, which carries
+// no RunEvidence (the BL-01 root cause).
+func intersectsProtectedRefs(changed []tideprojectv1alpha3.ChangedFileRef, protected []string) bool {
+	for _, f := range changed {
+		for _, p := range protected {
+			if strings.HasPrefix(f.Path, p) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// runEvidenceSummaryFrom projects the executor's bounded RunEvidence onto the
+// api-local RunEvidenceSummary persisted on TaskStatus.LastAttemptEvidence
+// (BL-01). Bounds before persisting (PERSIST-02); nil in -> nil out.
+func runEvidenceSummaryFrom(ev *pkgdispatch.RunEvidence) *tideprojectv1alpha3.RunEvidenceSummary {
+	if ev == nil {
+		return nil
+	}
+	bounded := ev.Bounded()
+	summary := &tideprojectv1alpha3.RunEvidenceSummary{Commands: bounded.Commands}
+	for _, f := range bounded.ChangedFiles {
+		summary.ChangedFiles = append(summary.ChangedFiles, tideprojectv1alpha3.ChangedFileRef{Path: f.Path, Status: f.Status})
+	}
+	return summary
+}
+
+// changedFileRefsToDispatch converts the persisted api-local ChangedFileRef
+// slice back to the pkg/dispatch.ChangedFile wire type the evidence packet
+// (stageEvidencePacket, LO-02) carries.
+func changedFileRefsToDispatch(refs []tideprojectv1alpha3.ChangedFileRef) []pkgdispatch.ChangedFile {
+	if len(refs) == 0 {
+		return nil
+	}
+	out := make([]pkgdispatch.ChangedFile, 0, len(refs))
+	for _, r := range refs {
+		out = append(out, pkgdispatch.ChangedFile{Path: r.Path, Status: r.Status})
+	}
+	return out
 }
 
 // applyLoopStatus updates task.Status.LoopStatus with the current-iteration
@@ -2494,14 +2563,22 @@ func (r *TaskReconciler) escalateSystem(ctx context.Context, task *tideprojectv1
 }
 
 // repairOrHalt implements the REPAIRABLE leg of the verdict decision tree
-// (TASK-02/TASK-06). An attempt whose RunEvidence.ChangedFiles intersects the
-// protected evaluator/fixture/threshold path set is a system escalation
-// (escalateSystem), never a plain repair and never a pass. Otherwise, once
-// task.Status.Attempt reaches spec.verification.MaxIterations without an
-// APPROVED verdict, the loop halts (TASK-05, onExhaustion). Otherwise a
-// fresh, evidence-seeded attempt is dispatched (TASK-02).
+// (TASK-02/TASK-06). Once task.Status.Attempt reaches
+// spec.verification.MaxIterations without an APPROVED verdict, the loop halts
+// (TASK-05, onExhaustion). Otherwise a fresh, evidence-seeded attempt is
+// dispatched (TASK-02).
+//
+// The anti-gaming check here is belt-and-suspenders (BL-01): the PRIMARY
+// enforcement runs at executor completion (handleJobCompletion) BEFORE a
+// verifier is ever dispatched, so a protected-path edit escalates without
+// reaching this function at all. This re-check reads the PERSISTED executor
+// manifest (Task.Status.LastAttemptEvidence) — never the verifier's
+// verdict-only `out`, which carries no RunEvidence (the original BL-01 root
+// cause) — so the invariant still holds if a future path reaches repairOrHalt
+// without the executor-completion gate.
 func (r *TaskReconciler) repairOrHalt(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, out pkgdispatch.EnvelopeOut) (ctrl.Result, error) {
-	if out.RunEvidence != nil && intersectsProtected(out.RunEvidence.ChangedFiles, protectedPathsFor(task)) {
+	if task.Status.LastAttemptEvidence != nil &&
+		intersectsProtectedRefs(task.Status.LastAttemptEvidence.ChangedFiles, protectedPathsFor(task)) {
 		return r.escalateSystem(ctx, task, project, out)
 	}
 	if task.Status.Attempt >= int(task.Spec.Verification.MaxIterations) {
@@ -2552,10 +2629,14 @@ func (r *TaskReconciler) stageEvidencePacket(ctx context.Context, task *tideproj
 		}
 		packet.Findings = findings
 	}
-	if out.RunEvidence != nil {
-		bounded := out.RunEvidence.Bounded()
-		packet.ChangedFiles = bounded.ChangedFiles
-		packet.Commands = bounded.Commands
+	// LO-02/BL-01: source the changed-file/command context from the EXECUTOR's
+	// persisted run evidence (Task.Status.LastAttemptEvidence, already bounded),
+	// NOT from `out` — `out` here is the verifier's verdict-only envelope, which
+	// never carries RunEvidence, so the packet previously shipped an empty
+	// ChangedFiles/Commands in production.
+	if task.Status.LastAttemptEvidence != nil {
+		packet.ChangedFiles = changedFileRefsToDispatch(task.Status.LastAttemptEvidence.ChangedFiles)
+		packet.Commands = task.Status.LastAttemptEvidence.Commands
 	}
 
 	data, mErr := json.Marshal(packet)

@@ -132,6 +132,49 @@ func TestAntiGaming_IntersectsProtected(t *testing.T) {
 	}
 }
 
+// TestAntiGaming_PersistedManifestRoundTrip proves BL-01's persistence seam:
+// the EXECUTOR's bounded RunEvidence projects onto the api-local
+// RunEvidenceSummary (runEvidenceSummaryFrom), and the repairOrHalt
+// belt-and-suspenders re-detects a protected-path edit through that persisted
+// manifest (intersectsProtectedRefs) — never the verifier's nil RunEvidence.
+func TestAntiGaming_PersistedManifestRoundTrip(t *testing.T) {
+	protected := protectedPathsFor(nil)
+
+	t.Run("nil executor evidence projects to nil", func(t *testing.T) {
+		if got := runEvidenceSummaryFrom(nil); got != nil {
+			t.Errorf("runEvidenceSummaryFrom(nil) = %v, want nil", got)
+		}
+	})
+
+	t.Run("protected path survives the round-trip and is re-detected", func(t *testing.T) {
+		ev := &pkgdispatch.RunEvidence{
+			ChangedFiles: []pkgdispatch.ChangedFile{{Path: "internal/eval/scorer.go", Status: "M"}},
+			Commands:     []string{"make test-verify"},
+		}
+		summary := runEvidenceSummaryFrom(ev)
+		if summary == nil || len(summary.ChangedFiles) != 1 || summary.ChangedFiles[0].Path != "internal/eval/scorer.go" {
+			t.Fatalf("round-trip lost the manifest: %+v", summary)
+		}
+		if len(summary.Commands) != 1 {
+			t.Errorf("Commands lost in round-trip: %+v", summary.Commands)
+		}
+		if !intersectsProtectedRefs(summary.ChangedFiles, protected) {
+			t.Error("intersectsProtectedRefs failed to re-detect a protected-path edit through the persisted manifest")
+		}
+	})
+
+	t.Run("ordinary paths are not flagged through the persisted manifest", func(t *testing.T) {
+		ev := &pkgdispatch.RunEvidence{ChangedFiles: []pkgdispatch.ChangedFile{
+			{Path: "internal/foo/bar.go", Status: "M"},
+			{Path: "internal/foo/bar_test.go", Status: "M"},
+		}}
+		summary := runEvidenceSummaryFrom(ev)
+		if intersectsProtectedRefs(summary.ChangedFiles, protected) {
+			t.Error("intersectsProtectedRefs wrongly flagged ordinary source+test paths as gaming")
+		}
+	})
+}
+
 // TestVerifyLoop_ApplyLoopStatus proves LOOP-03's current-iteration-only
 // contract: Iteration mirrors Status.Attempt, LastEvaluation is populated
 // from a real Verdict (nil-safe on a degraded envelope), and ExitReason
@@ -219,12 +262,16 @@ func completeVerifierJob(ctx context.Context, task *tideprojectv1alpha3.Task, at
 	waitForJobTerminalInCache(ctx, jobName)
 }
 
-// driveToVerifying dispatches a contract-bearing Task's executor, completes
-// it (exit 0), and reconciles once more so the Task transitions to Verifying
-// and its independent verifier Job is dispatched (Plan 06's forward half).
-// Returns the reconciler, the refreshed task, and the attempt number the
-// verifier Job was dispatched under.
-func driveToVerifying(ctx context.Context, envReader *mapEnvReader, taskName, planRef, projName string, v tideprojectv1alpha3.VerificationSpec) (*TaskReconciler, *tideprojectv1alpha3.Task, int) {
+// driveExecutorCompletion dispatches a contract-bearing Task's executor,
+// stages the given EXECUTOR EnvelopeOut (execOut — where a real executor's
+// RunEvidence.ChangedFiles lands, the data the read-only verifier never
+// writes), completes the executor Job, and reconciles once so
+// handleJobCompletion runs. It does NOT assert the resulting phase: the caller
+// decides whether the completion transitioned to Verifying (normal) or
+// short-circuited to a VerifyHalted anti-gaming escalation (BL-01). execOut's
+// TaskUID is stamped internally to match the created Task. Returns the
+// reconciler, refreshed task, and attempt number.
+func driveExecutorCompletion(ctx context.Context, envReader *mapEnvReader, taskName, planRef, projName string, v tideprojectv1alpha3.VerificationSpec, execOut pkgdispatch.EnvelopeOut) (*TaskReconciler, *tideprojectv1alpha3.Task, int) {
 	task := makeVerifyTask(taskName, planRef, projName, v)
 	r := newVerifyDispatchTaskReconciler(envReader)
 	name := types.NamespacedName{Name: taskName, Namespace: "default"}
@@ -232,20 +279,30 @@ func driveToVerifying(ctx context.Context, envReader *mapEnvReader, taskName, pl
 	ExpectWithOffset(1, reconcileWithRetry(r.Reconcile, name, 4)).To(Succeed())
 	ExpectWithOffset(1, k8sClient.Get(ctx, name, task)).To(Succeed())
 
-	envReader.SetOut(string(task.UID), pkgdispatch.EnvelopeOut{
-		TaskUID:     string(task.UID),
-		ExitCode:    0,
-		Result:      "success",
-		CompletedAt: time.Now(),
-	})
+	execOut.TaskUID = string(task.UID)
+	envReader.SetOut(string(task.UID), execOut)
 	attempt := completeExecutorJob(ctx, task)
 	waitForJobTerminalInCache(ctx, podjob.JobName(task.UID, attempt))
 
 	_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
 	ExpectWithOffset(1, err).NotTo(HaveOccurred())
 	ExpectWithOffset(1, k8sClient.Get(ctx, name, task)).To(Succeed())
-	ExpectWithOffset(1, task.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseVerifying))
 
+	return r, task, attempt
+}
+
+// driveToVerifying dispatches a contract-bearing Task's executor, completes
+// it (exit 0, clean run evidence), and reconciles once more so the Task
+// transitions to Verifying and its independent verifier Job is dispatched
+// (Plan 06's forward half). Returns the reconciler, the refreshed task, and
+// the attempt number the verifier Job was dispatched under.
+func driveToVerifying(ctx context.Context, envReader *mapEnvReader, taskName, planRef, projName string, v tideprojectv1alpha3.VerificationSpec) (*TaskReconciler, *tideprojectv1alpha3.Task, int) {
+	r, task, attempt := driveExecutorCompletion(ctx, envReader, taskName, planRef, projName, v, pkgdispatch.EnvelopeOut{
+		ExitCode:    0,
+		Result:      "success",
+		CompletedAt: time.Now(),
+	})
+	ExpectWithOffset(1, task.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseVerifying))
 	return r, task, attempt
 }
 
@@ -460,39 +517,41 @@ var _ = Describe("Task loop: verifier verdict consumption (Phase 51 Plan 07, Ver
 var _ = Describe("Task loop: anti-gaming structural enforcement (Phase 51 Plan 07, AntiGaming)", Label("envtest", "phase51", "anti-gaming"), func() {
 	ctx := context.Background()
 
-	It("an attempt editing a protected evaluator/fixture path is a system escalation, never a pass (true positive)", func() {
+	// BL-01: the anti-gaming escalation fires at EXECUTOR completion, before a
+	// verifier is ever dispatched — WHERE the executor's own
+	// RunEvidence.ChangedFiles is present (the read-only verifier never writes
+	// it). This is the currently-untested-and-dangerous case: a *successful*
+	// gaming attempt (one whose weakened gate would return APPROVED) is caught
+	// too, because escalation happens BEFORE the verifier can bless it.
+	It("an executor attempt editing a protected evaluator/fixture path escalates BEFORE the verifier runs (true positive, APPROVED-path coverage)", func() {
 		const projName, planRef, taskName = "ag-proj-positive", "ag-plan-positive", "ag-task-positive"
 		makeProjectForTask(projName)
 		defer cleanupProject(projName)
 
 		envReader := newMapEnvReader()
-		_, task, attempt := driveToVerifying(ctx, envReader, taskName, planRef, projName, tideprojectv1alpha3.VerificationSpec{
-			Phase: "Locked", Version: 1, GateCommand: "make test-verify", MaxIterations: 3, OnExhaustion: "requireApproval",
-		})
+		_, task, attempt := driveExecutorCompletion(ctx, envReader, taskName, planRef, projName,
+			tideprojectv1alpha3.VerificationSpec{
+				Phase: "Locked", Version: 1, GateCommand: "make test-verify", MaxIterations: 3, OnExhaustion: "requireApproval",
+			},
+			pkgdispatch.EnvelopeOut{
+				ExitCode: 0, Result: "success", CompletedAt: time.Now(),
+				RunEvidence: &pkgdispatch.RunEvidence{ChangedFiles: []pkgdispatch.ChangedFile{
+					{Path: "internal/eval/scorer.go", Status: "M"},
+				}},
+			})
 		defer cleanupTask(taskName)
 
-		envReader.SetOut(string(task.UID), pkgdispatch.EnvelopeOut{
-			TaskUID: string(task.UID), ExitCode: 0, Result: "verified", CompletedAt: time.Now(),
-			Verdict: &pkgdispatch.GateDecision{
-				Verdict:  pkgdispatch.VerdictRepairable,
-				Findings: []pkgdispatch.Finding{{Dimension: "correctness", Severity: "advisory"}},
-			},
-			RunEvidence: &pkgdispatch.RunEvidence{ChangedFiles: []pkgdispatch.ChangedFile{
-				{Path: "internal/eval/scorer.go", Status: "M"},
-			}},
-		})
-		completeVerifierJob(ctx, task, attempt)
-
-		r := newVerifyDispatchTaskReconciler(envReader)
-		name := types.NamespacedName{Name: taskName, Namespace: "default"}
-		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
-		Expect(err).NotTo(HaveOccurred())
-
-		Expect(k8sClient.Get(ctx, name, task)).To(Succeed())
 		Expect(task.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseVerifyHalted),
-			"an evaluator-path edit must never resolve to Succeeded or a plain repair")
+			"an evaluator-path edit must escalate at executor completion, never reach Verifying/Succeeded")
 		Expect(task.Status.Attempt).To(Equal(attempt), "an anti-gaming escalation must never mint a fresh attempt")
 		Expect(task.Status.LoopStatus.ExitReason).To(Equal(tideprojectv1alpha3.ExitEscalated))
+
+		// No verifier Job was ever dispatched — the escalation fired first, so
+		// no verifier could return APPROVED and bless the gaming attempt.
+		verifierJobName := podjob.VerifierJobName(task.UID, attempt)
+		var vJob batchv1.Job
+		err := k8sClient.Get(ctx, types.NamespacedName{Name: verifierJobName, Namespace: "default"}, &vJob)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "a gaming attempt must never dispatch a verifier that could bless it")
 
 		found := false
 		for _, c := range task.Status.Conditions {
@@ -500,42 +559,30 @@ var _ = Describe("Task loop: anti-gaming structural enforcement (Phase 51 Plan 0
 				found = true
 			}
 		}
-		Expect(found).To(BeTrue(), "the Failed condition Reason must be grep-distinguishable as AntiGamingDetected")
+		Expect(found).To(BeTrue(), "the condition Reason must be grep-distinguishable as AntiGamingDetected")
 	})
 
-	It("an ordinary code+test repair (non-protected paths) is NOT flagged as gaming (true negative)", func() {
+	It("an ordinary executor code+test change (non-protected paths) is NOT flagged as gaming; it proceeds to verify (true negative)", func() {
 		const projName, planRef, taskName = "ag-proj-negative", "ag-plan-negative", "ag-task-negative"
 		makeProjectForTask(projName)
 		defer cleanupProject(projName)
 
 		envReader := newMapEnvReader()
-		_, task, attempt := driveToVerifying(ctx, envReader, taskName, planRef, projName, tideprojectv1alpha3.VerificationSpec{
-			Phase: "Locked", Version: 1, GateCommand: "make test-verify", MaxIterations: 3, OnExhaustion: "requireApproval",
-		})
+		_, task, _ := driveExecutorCompletion(ctx, envReader, taskName, planRef, projName,
+			tideprojectv1alpha3.VerificationSpec{
+				Phase: "Locked", Version: 1, GateCommand: "make test-verify", MaxIterations: 3, OnExhaustion: "requireApproval",
+			},
+			pkgdispatch.EnvelopeOut{
+				ExitCode: 0, Result: "success", CompletedAt: time.Now(),
+				RunEvidence: &pkgdispatch.RunEvidence{ChangedFiles: []pkgdispatch.ChangedFile{
+					{Path: "internal/foo/bar.go", Status: "M"},
+					{Path: "internal/foo/bar_test.go", Status: "M"},
+				}},
+			})
 		defer cleanupTask(taskName)
 
-		envReader.SetOut(string(task.UID), pkgdispatch.EnvelopeOut{
-			TaskUID: string(task.UID), ExitCode: 0, Result: "verified", CompletedAt: time.Now(),
-			Verdict: &pkgdispatch.GateDecision{
-				Verdict:  pkgdispatch.VerdictRepairable,
-				Findings: []pkgdispatch.Finding{{Dimension: "correctness", Severity: "advisory"}},
-			},
-			RunEvidence: &pkgdispatch.RunEvidence{ChangedFiles: []pkgdispatch.ChangedFile{
-				{Path: "internal/foo/bar.go", Status: "M"},
-				{Path: "internal/foo/bar_test.go", Status: "M"},
-			}},
-		})
-		completeVerifierJob(ctx, task, attempt)
-
-		r := newVerifyDispatchTaskReconciler(envReader)
-		name := types.NamespacedName{Name: taskName, Namespace: "default"}
-		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
-		Expect(err).NotTo(HaveOccurred())
-
-		Expect(k8sClient.Get(ctx, name, task)).To(Succeed())
-		Expect(task.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseRunning),
-			"an ordinary source+test repair must proceed to a fresh attempt, not escalate")
-		Expect(task.Status.Attempt).To(Equal(attempt + 1))
+		Expect(task.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseVerifying),
+			"an ordinary source+test change must proceed to verification, not escalate")
 
 		found := false
 		for _, c := range task.Status.Conditions {
@@ -543,7 +590,13 @@ var _ = Describe("Task loop: anti-gaming structural enforcement (Phase 51 Plan 0
 				found = true
 			}
 		}
-		Expect(found).To(BeFalse(), "an ordinary repair must never carry the AntiGamingDetected reason")
+		Expect(found).To(BeFalse(), "an ordinary change must never carry the AntiGamingDetected reason")
+
+		// BL-01/LO-02: the executor's manifest is persisted for the evidence
+		// packet + the repairOrHalt belt-and-suspenders (never the verifier's
+		// nil RunEvidence).
+		Expect(task.Status.LastAttemptEvidence).NotTo(BeNil())
+		Expect(task.Status.LastAttemptEvidence.ChangedFiles).To(HaveLen(2))
 	})
 })
 
