@@ -119,13 +119,18 @@ func run(ctx context.Context, envelopePath string, stdout, stderr io.Writer) int
 	if err != nil {
 		fmt.Fprintf(stderr, "stub-subagent: envelope load: %v\n", err)
 		// Attempt a best-effort failure envelope if we can derive the outPath.
+		// env carries no identity here (loadEnvelope failed before parsing
+		// succeeded — env is the zero value), so LoopRunID/AttemptID stay
+		// empty by construction, unavoidably, matching TaskUID's existing
+		// omission at this exact site.
 		_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
-			APIVersion:  pkgdispatch.APIVersionV1Alpha1,
-			Kind:        pkgdispatch.KindTaskEnvelopeOut,
-			ExitCode:    2,
-			Result:      "invalid-envelope",
-			Reason:      err.Error(),
-			CompletedAt: time.Now().UTC(),
+			APIVersion:     pkgdispatch.APIVersionV1Alpha1,
+			Kind:           pkgdispatch.KindTaskEnvelopeOut,
+			ExitCode:       2,
+			Result:         "invalid-envelope",
+			Reason:         err.Error(),
+			CompletedAt:    time.Now().UTC(),
+			TerminalReason: pkgdispatch.TerminalReasonInvalidOutput,
 		})
 		return 2
 	}
@@ -170,13 +175,16 @@ func run(ctx context.Context, envelopePath string, stdout, stderr io.Writer) int
 	default:
 		fmt.Fprintf(stderr, "stub-subagent: unknown testMode %q\n", testMode)
 		_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
-			APIVersion:  pkgdispatch.APIVersionV1Alpha1,
-			Kind:        pkgdispatch.KindTaskEnvelopeOut,
-			TaskUID:     env.TaskUID,
-			ExitCode:    2,
-			Result:      "invalid-envelope",
-			Reason:      fmt.Sprintf("unknown testMode %q", testMode),
-			CompletedAt: time.Now().UTC(),
+			APIVersion:     pkgdispatch.APIVersionV1Alpha1,
+			Kind:           pkgdispatch.KindTaskEnvelopeOut,
+			TaskUID:        env.TaskUID,
+			ExitCode:       2,
+			Result:         "invalid-envelope",
+			Reason:         fmt.Sprintf("unknown testMode %q", testMode),
+			CompletedAt:    time.Now().UTC(),
+			TerminalReason: pkgdispatch.TerminalReasonInvalidOutput,
+			LoopRunID:      env.LoopRunID,
+			AttemptID:      env.AttemptID,
 		})
 		return 2
 	}
@@ -229,7 +237,10 @@ func ensureExecutorWorktree(ctx context.Context, env pkgdispatch.EnvelopeIn, out
 		_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
 			APIVersion: pkgdispatch.APIVersionV1Alpha1, Kind: pkgdispatch.KindTaskEnvelopeOut,
 			TaskUID: env.TaskUID, ExitCode: 1, Result: "worktree-setup-failed", Reason: err.Error(),
-			CompletedAt: time.Now().UTC(),
+			CompletedAt:    time.Now().UTC(),
+			TerminalReason: pkgdispatch.TerminalReasonToolFailure,
+			LoopRunID:      env.LoopRunID,
+			AttemptID:      env.AttemptID,
 		})
 		return 1
 	}
@@ -342,13 +353,16 @@ func dispatchPlannerSuccess(_ context.Context, env pkgdispatch.EnvelopeIn, outPa
 		if err != nil {
 			fmt.Fprintf(stderr, "stub-subagent: dispatchPlannerSuccess: marshal Milestone spec: %v\n", err)
 			_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
-				APIVersion:  pkgdispatch.APIVersionV1Alpha1,
-				Kind:        pkgdispatch.KindTaskEnvelopeOut,
-				TaskUID:     env.TaskUID,
-				ExitCode:    2,
-				Result:      "internal-error",
-				Reason:      err.Error(),
-				CompletedAt: time.Now().UTC(),
+				APIVersion:     pkgdispatch.APIVersionV1Alpha1,
+				Kind:           pkgdispatch.KindTaskEnvelopeOut,
+				TaskUID:        env.TaskUID,
+				ExitCode:       2,
+				Result:         "internal-error",
+				Reason:         err.Error(),
+				CompletedAt:    time.Now().UTC(),
+				TerminalReason: pkgdispatch.TerminalReasonInvalidOutput,
+				LoopRunID:      env.LoopRunID,
+				AttemptID:      env.AttemptID,
 			})
 			return 2
 		}
@@ -363,13 +377,16 @@ func dispatchPlannerSuccess(_ context.Context, env pkgdispatch.EnvelopeIn, outPa
 		if err != nil {
 			fmt.Fprintf(stderr, "stub-subagent: dispatchPlannerSuccess: marshal Phase spec: %v\n", err)
 			_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
-				APIVersion:  pkgdispatch.APIVersionV1Alpha1,
-				Kind:        pkgdispatch.KindTaskEnvelopeOut,
-				TaskUID:     env.TaskUID,
-				ExitCode:    2,
-				Result:      "internal-error",
-				Reason:      err.Error(),
-				CompletedAt: time.Now().UTC(),
+				APIVersion:     pkgdispatch.APIVersionV1Alpha1,
+				Kind:           pkgdispatch.KindTaskEnvelopeOut,
+				TaskUID:        env.TaskUID,
+				ExitCode:       2,
+				Result:         "internal-error",
+				Reason:         err.Error(),
+				CompletedAt:    time.Now().UTC(),
+				TerminalReason: pkgdispatch.TerminalReasonInvalidOutput,
+				LoopRunID:      env.LoopRunID,
+				AttemptID:      env.AttemptID,
 			})
 			return 2
 		}
@@ -384,13 +401,16 @@ func dispatchPlannerSuccess(_ context.Context, env pkgdispatch.EnvelopeIn, outPa
 		if err != nil {
 			fmt.Fprintf(stderr, "stub-subagent: dispatchPlannerSuccess: marshal Plan spec: %v\n", err)
 			_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
-				APIVersion:  pkgdispatch.APIVersionV1Alpha1,
-				Kind:        pkgdispatch.KindTaskEnvelopeOut,
-				TaskUID:     env.TaskUID,
-				ExitCode:    2,
-				Result:      "internal-error",
-				Reason:      err.Error(),
-				CompletedAt: time.Now().UTC(),
+				APIVersion:     pkgdispatch.APIVersionV1Alpha1,
+				Kind:           pkgdispatch.KindTaskEnvelopeOut,
+				TaskUID:        env.TaskUID,
+				ExitCode:       2,
+				Result:         "internal-error",
+				Reason:         err.Error(),
+				CompletedAt:    time.Now().UTC(),
+				TerminalReason: pkgdispatch.TerminalReasonInvalidOutput,
+				LoopRunID:      env.LoopRunID,
+				AttemptID:      env.AttemptID,
 			})
 			return 2
 		}
@@ -421,13 +441,16 @@ func dispatchPlannerSuccess(_ context.Context, env pkgdispatch.EnvelopeIn, outPa
 		if err != nil {
 			fmt.Fprintf(stderr, "stub-subagent: dispatchPlannerSuccess: marshal Task spec: %v\n", err)
 			_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
-				APIVersion:  pkgdispatch.APIVersionV1Alpha1,
-				Kind:        pkgdispatch.KindTaskEnvelopeOut,
-				TaskUID:     env.TaskUID,
-				ExitCode:    2,
-				Result:      "internal-error",
-				Reason:      err.Error(),
-				CompletedAt: time.Now().UTC(),
+				APIVersion:     pkgdispatch.APIVersionV1Alpha1,
+				Kind:           pkgdispatch.KindTaskEnvelopeOut,
+				TaskUID:        env.TaskUID,
+				ExitCode:       2,
+				Result:         "internal-error",
+				Reason:         err.Error(),
+				CompletedAt:    time.Now().UTC(),
+				TerminalReason: pkgdispatch.TerminalReasonInvalidOutput,
+				LoopRunID:      env.LoopRunID,
+				AttemptID:      env.AttemptID,
 			})
 			return 2
 		}
@@ -441,26 +464,32 @@ func dispatchPlannerSuccess(_ context.Context, env pkgdispatch.EnvelopeIn, outPa
 		if mkErr := os.MkdirAll(childrenDir, 0o755); mkErr != nil {
 			fmt.Fprintf(stderr, "stub-subagent: dispatchPlannerSuccess: mkdir children: %v\n", mkErr)
 			_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
-				APIVersion:  pkgdispatch.APIVersionV1Alpha1,
-				Kind:        pkgdispatch.KindTaskEnvelopeOut,
-				TaskUID:     env.TaskUID,
-				ExitCode:    2,
-				Result:      "internal-error",
-				Reason:      mkErr.Error(),
-				CompletedAt: time.Now().UTC(),
+				APIVersion:     pkgdispatch.APIVersionV1Alpha1,
+				Kind:           pkgdispatch.KindTaskEnvelopeOut,
+				TaskUID:        env.TaskUID,
+				ExitCode:       2,
+				Result:         "internal-error",
+				Reason:         mkErr.Error(),
+				CompletedAt:    time.Now().UTC(),
+				TerminalReason: pkgdispatch.TerminalReasonInvalidOutput,
+				LoopRunID:      env.LoopRunID,
+				AttemptID:      env.AttemptID,
 			})
 			return 2
 		}
 		if wErr := os.WriteFile(filepath.Join(childrenDir, taskChildName), raw, 0o644); wErr != nil {
 			fmt.Fprintf(stderr, "stub-subagent: dispatchPlannerSuccess: write children/stub-task-1.json: %v\n", wErr)
 			_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
-				APIVersion:  pkgdispatch.APIVersionV1Alpha1,
-				Kind:        pkgdispatch.KindTaskEnvelopeOut,
-				TaskUID:     env.TaskUID,
-				ExitCode:    2,
-				Result:      "internal-error",
-				Reason:      wErr.Error(),
-				CompletedAt: time.Now().UTC(),
+				APIVersion:     pkgdispatch.APIVersionV1Alpha1,
+				Kind:           pkgdispatch.KindTaskEnvelopeOut,
+				TaskUID:        env.TaskUID,
+				ExitCode:       2,
+				Result:         "internal-error",
+				Reason:         wErr.Error(),
+				CompletedAt:    time.Now().UTC(),
+				TerminalReason: pkgdispatch.TerminalReasonInvalidOutput,
+				LoopRunID:      env.LoopRunID,
+				AttemptID:      env.AttemptID,
 			})
 			return 2
 		}
@@ -491,27 +520,44 @@ func dispatchPlannerSuccess(_ context.Context, env pkgdispatch.EnvelopeIn, outPa
 		if wErr := os.WriteFile(docPath, []byte(docBody), 0o644); wErr != nil {
 			fmt.Fprintf(stderr, "stub-subagent: dispatchPlannerSuccess: write %s: %v\n", docName, wErr)
 			_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
-				APIVersion:  pkgdispatch.APIVersionV1Alpha1,
-				Kind:        pkgdispatch.KindTaskEnvelopeOut,
-				TaskUID:     env.TaskUID,
-				ExitCode:    2,
-				Result:      "internal-error",
-				Reason:      wErr.Error(),
-				CompletedAt: time.Now().UTC(),
+				APIVersion:     pkgdispatch.APIVersionV1Alpha1,
+				Kind:           pkgdispatch.KindTaskEnvelopeOut,
+				TaskUID:        env.TaskUID,
+				ExitCode:       2,
+				Result:         "internal-error",
+				Reason:         wErr.Error(),
+				CompletedAt:    time.Now().UTC(),
+				TerminalReason: pkgdispatch.TerminalReasonInvalidOutput,
+				LoopRunID:      env.LoopRunID,
+				AttemptID:      env.AttemptID,
 			})
 			return 2
 		}
 	}
 
+	// D-03/EXEC-03: a minimal RunEvidence — the stub renders no prompt
+	// templates, so PromptVersion stays empty rather than faking a version
+	// string; RuntimeVersion is the literal "stub" (there is no real CLI
+	// probe to run). .Bounded() applied for consistency with the real write
+	// sites even though these values are already well within bounds.
+	evidence := pkgdispatch.RunEvidence{
+		Model:          env.Provider.Model,
+		RuntimeVersion: "stub",
+	}.Bounded()
+
 	out := pkgdispatch.EnvelopeOut{
-		APIVersion:  pkgdispatch.APIVersionV1Alpha1,
-		Kind:        pkgdispatch.KindTaskEnvelopeOut,
-		TaskUID:     env.TaskUID,
-		ExitCode:    0,
-		Result:      "success",
-		Reason:      "planner stub success",
-		ChildCRDs:   children,
-		CompletedAt: time.Now().UTC(),
+		APIVersion:     pkgdispatch.APIVersionV1Alpha1,
+		Kind:           pkgdispatch.KindTaskEnvelopeOut,
+		TaskUID:        env.TaskUID,
+		ExitCode:       0,
+		Result:         "success",
+		Reason:         "planner stub success",
+		ChildCRDs:      children,
+		CompletedAt:    time.Now().UTC(),
+		TerminalReason: pkgdispatch.TerminalReasonCompleted,
+		LoopRunID:      env.LoopRunID,
+		AttemptID:      env.AttemptID,
+		RunEvidence:    &evidence,
 	}
 	if err := writeEnvelope(outPath, out); err != nil {
 		fmt.Fprintf(stderr, "stub-subagent: dispatchPlannerSuccess: write out.json: %v\n", err)
@@ -582,6 +628,15 @@ func dispatchSuccess(ctx context.Context, env pkgdispatch.EnvelopeIn, outPath st
 		}
 	}
 
+	// D-03/EXEC-03: a minimal RunEvidence — the stub renders no prompt
+	// templates, so PromptVersion stays empty rather than faking a version
+	// string; RuntimeVersion is the literal "stub". .Bounded() applied for
+	// consistency with the real write sites.
+	evidence := pkgdispatch.RunEvidence{
+		Model:          env.Provider.Model,
+		RuntimeVersion: "stub",
+	}.Bounded()
+
 	out := pkgdispatch.EnvelopeOut{
 		APIVersion: pkgdispatch.APIVersionV1Alpha1,
 		Kind:       pkgdispatch.KindTaskEnvelopeOut,
@@ -595,8 +650,12 @@ func dispatchSuccess(ctx context.Context, env pkgdispatch.EnvelopeIn, outPath st
 			EstimatedCostCents: 1,
 			Iterations:         1,
 		},
-		Artifacts:   artifacts,
-		CompletedAt: time.Now().UTC(),
+		Artifacts:      artifacts,
+		CompletedAt:    time.Now().UTC(),
+		TerminalReason: pkgdispatch.TerminalReasonCompleted,
+		LoopRunID:      env.LoopRunID,
+		AttemptID:      env.AttemptID,
+		RunEvidence:    &evidence,
 	}
 
 	// Executor git contract, success half (mirrors cmd/claude-subagent's
@@ -611,7 +670,10 @@ func dispatchSuccess(ctx context.Context, env pkgdispatch.EnvelopeIn, outPath st
 			_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
 				APIVersion: pkgdispatch.APIVersionV1Alpha1, Kind: pkgdispatch.KindTaskEnvelopeOut,
 				TaskUID: env.TaskUID, ExitCode: 1, Result: "commit-failed", Reason: gErr.Error(),
-				CompletedAt: time.Now().UTC(),
+				CompletedAt:    time.Now().UTC(),
+				TerminalReason: pkgdispatch.TerminalReasonToolFailure,
+				LoopRunID:      env.LoopRunID,
+				AttemptID:      env.AttemptID,
 			})
 			return 1
 		}
@@ -642,6 +704,12 @@ func dispatchFail(env pkgdispatch.EnvelopeIn, outPath string, stderr io.Writer) 
 			Iterations:         0,
 		},
 		CompletedAt: time.Now().UTC(),
+		// RESEARCH A2: forced-failure is the stub's deliberately-injected
+		// generic-failure bucket — not a cap, not an output-path violation,
+		// not malformed output. tool_failure is the most defensible mapping.
+		TerminalReason: pkgdispatch.TerminalReasonToolFailure,
+		LoopRunID:      env.LoopRunID,
+		AttemptID:      env.AttemptID,
 	}
 	if err := writeEnvelope(outPath, out); err != nil {
 		fmt.Fprintf(stderr, "stub-subagent: write out.json: %v\n", err)
@@ -685,8 +753,11 @@ func dispatchExceedOutputPaths(env pkgdispatch.EnvelopeIn, outPath string, stder
 			EstimatedCostCents: 1,
 			Iterations:         1,
 		},
-		Artifacts:   []string{leakPath},
-		CompletedAt: time.Now().UTC(),
+		Artifacts:      []string{leakPath},
+		CompletedAt:    time.Now().UTC(),
+		TerminalReason: pkgdispatch.TerminalReasonBlocked,
+		LoopRunID:      env.LoopRunID,
+		AttemptID:      env.AttemptID,
 	}
 	if err := writeEnvelope(outPath, out); err != nil {
 		fmt.Fprintf(stderr, "stub-subagent: write out.json: %v\n", err)
