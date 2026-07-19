@@ -588,11 +588,28 @@ func boundedSpanAttrs(
 // the same level's AGENT span carries (Phoenix's ProjectSession groups
 // purely on an exact session.id string match).
 //
+// attemptID and loopRunID are the 50 D-01/D-05 loop-identity pair, threaded
+// in verbatim from cmd/tide-reporter's --attempt-id/--loop-run-id flags.
+// Per D-05 the LLM-span correlating subset is exactly loop.run_id +
+// loop.iteration — when attemptID is non-empty, every span stamps its run ID
+// plus a 1-indexed iteration derived from i (the call's 0-indexed position
+// in calls), matching LoopStatus.Iteration's documented "1-indexed once
+// dispatched" convention (api/v1alpha3/loop_types.go:93-94). CallSpan
+// carries no ordinal field by design — the slice order IS the iteration
+// order (RESEARCH Pitfall 5). loopRunID is accepted for signature symmetry
+// with the --loop-run-id flag and future use; only run_id+iteration are
+// stamped this phase (loop.kind/parent_run_id/candidate_version/exit_reason
+// are the AGENT span's job, stamped in synthesizePlannerSpan — 50-06).
+// Absent when attemptID is empty, never a fabricated empty value.
+//
 // Errors are reserved for programming-level failures; content-level
 // problems (oversized messages, degraded calls) degrade to marker
 // attributes rather than failing the run (D-10/D-11).
-func EmitSpans(ctx context.Context, tracer trace.Tracer, calls []CallSpan, artifactPath string, sessionID string, metadataJSON string, tags []string) error {
-	for _, call := range calls {
+func EmitSpans(
+	ctx context.Context, tracer trace.Tracer, calls []CallSpan, artifactPath string,
+	sessionID string, metadataJSON string, tags []string, attemptID string, loopRunID string,
+) error {
+	for i, call := range calls {
 		spanName := call.Model
 		if spanName == "" {
 			spanName = "llm"
@@ -656,6 +673,16 @@ func EmitSpans(ctx context.Context, tracer trace.Tracer, calls []CallSpan, artif
 		}
 		if len(tags) > 0 {
 			span.SetAttributes(otelai.Tags(tags...))
+		}
+		// 50 D-01/D-05: loop.run_id + 1-indexed loop.iteration — the
+		// LLM-span correlating subset (D-05's "stamp the correlating
+		// subset"). Absent when attemptID is empty, never a fabricated
+		// empty value. loop.kind/parent_run_id/candidate_version/
+		// exit_reason are NOT stamped here — that is the AGENT span's
+		// job (synthesizePlannerSpan, 50-06).
+		if attemptID != "" {
+			span.SetAttributes(otelai.LoopRunID(attemptID))
+			span.SetAttributes(otelai.LoopIteration(i + 1))
 		}
 		span.SetStatus(codes.Ok, "")
 		span.End(trace.WithTimestamp(endTime))

@@ -358,7 +358,7 @@ func TestEmitSpans_SpanShape(t *testing.T) {
 	}
 
 	const artifactPath = "envelopes/task-uid/events.jsonl"
-	if err := EmitSpans(context.Background(), tracer, calls, artifactPath, "", "", nil); err != nil {
+	if err := EmitSpans(context.Background(), tracer, calls, artifactPath, "", "", nil, "", ""); err != nil {
 		t.Fatalf("EmitSpans: %v", err)
 	}
 
@@ -409,7 +409,7 @@ func TestEmitSpans_Redacts(t *testing.T) {
 			OutputMessages: []otelai.Message{{Role: "assistant", Content: "ack"}},
 		},
 	}
-	if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil); err != nil {
+	if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil, "", ""); err != nil {
 		t.Fatalf("EmitSpans: %v", err)
 	}
 
@@ -445,7 +445,7 @@ func TestEmitSpans_RedactsBeforeTruncate(t *testing.T) {
 			InputMessages: []otelai.Message{{Role: "user", Content: content}},
 		},
 	}
-	if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil); err != nil {
+	if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil, "", ""); err != nil {
 		t.Fatalf("EmitSpans: %v", err)
 	}
 
@@ -475,7 +475,7 @@ func TestEmitSpans_SignatureRedactedTruncatedAndCounted(t *testing.T) {
 				Contents: []otelai.MessageContent{{Type: "reasoning", Text: "thinking", Signature: "sig-" + testSecret}},
 			}},
 		}}
-		if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil); err != nil {
+		if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil, "", ""); err != nil {
 			t.Fatalf("EmitSpans: %v", err)
 		}
 		for _, span := range exp.GetSpans() {
@@ -498,7 +498,7 @@ func TestEmitSpans_SignatureRedactedTruncatedAndCounted(t *testing.T) {
 				Contents: []otelai.MessageContent{{Type: "reasoning", Text: "t", Signature: strings.Repeat("s", 40000)}},
 			}},
 		}}
-		if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil); err != nil {
+		if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil, "", ""); err != nil {
 			t.Fatalf("EmitSpans: %v", err)
 		}
 		spans := exp.GetSpans()
@@ -529,7 +529,7 @@ func TestEmitSpans_SignatureRedactedTruncatedAndCounted(t *testing.T) {
 			Model:          "claude-test",
 			OutputMessages: []otelai.Message{{Role: "assistant", Contents: contents}},
 		}}
-		if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil); err != nil {
+		if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil, "", ""); err != nil {
 			t.Fatalf("EmitSpans: %v", err)
 		}
 		spans := exp.GetSpans()
@@ -558,7 +558,7 @@ func TestEmitSpans_TruncatesOversizedMessage(t *testing.T) {
 		{Model: "claude-test", InputMessages: []otelai.Message{{Role: "user", Content: content}}},
 	}
 	const artifactPath = "envelopes/task-uid/events.jsonl"
-	if err := EmitSpans(context.Background(), tracer, calls, artifactPath, "", "", nil); err != nil {
+	if err := EmitSpans(context.Background(), tracer, calls, artifactPath, "", "", nil, "", ""); err != nil {
 		t.Fatalf("EmitSpans: %v", err)
 	}
 
@@ -605,7 +605,7 @@ func TestEmitSpans_WholeSpanBudget(t *testing.T) {
 			OutputMessages: []otelai.Message{{Role: "assistant", Content: "short reply"}},
 		},
 	}
-	if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil); err != nil {
+	if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil, "", ""); err != nil {
 		t.Fatalf("EmitSpans: %v", err)
 	}
 
@@ -642,7 +642,7 @@ func TestEmitSpans_DegradedMarker(t *testing.T) {
 	tracer := otel.Tracer("test")
 
 	calls := []CallSpan{{Model: "claude-test", Degraded: true}}
-	if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil); err != nil {
+	if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil, "", ""); err != nil {
 		t.Fatalf("EmitSpans: %v", err)
 	}
 	spans := exp.GetSpans()
@@ -669,7 +669,7 @@ func TestEmitSpans_EnrichmentTriple(t *testing.T) {
 	}
 	const metadataJSON = `{"level":"task"}`
 	if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl",
-		"uid-1", metadataJSON, []string{"task", "strict"}); err != nil {
+		"uid-1", metadataJSON, []string{"task", "strict"}, "", ""); err != nil {
 		t.Fatalf("EmitSpans: %v", err)
 	}
 
@@ -709,7 +709,7 @@ func TestEmitSpans_EnrichmentTripleOmittedWhenEmpty(t *testing.T) {
 	tracer := otel.Tracer("test")
 
 	calls := []CallSpan{{Model: "claude-test", InputMessages: []otelai.Message{{Role: "user", Content: "hi"}}}}
-	if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil); err != nil {
+	if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil, "", ""); err != nil {
 		t.Fatalf("EmitSpans: %v", err)
 	}
 
@@ -737,7 +737,7 @@ func TestEmitSpans_TokenCountUnchangedWithEnrichment(t *testing.T) {
 		InputMessages: []otelai.Message{{Role: "user", Content: "hi"}},
 		Usage:         Usage{InputTokens: 10, OutputTokens: 5},
 	}}
-	if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "uid-1", "", nil); err != nil {
+	if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "uid-1", "", nil, "", ""); err != nil {
 		t.Fatalf("EmitSpans: %v", err)
 	}
 	spans := exp.GetSpans()
@@ -746,6 +746,64 @@ func TestEmitSpans_TokenCountUnchangedWithEnrichment(t *testing.T) {
 	}
 	if _, ok := attrValue(spans[0].Attributes, "llm.token_count.prompt"); !ok {
 		t.Errorf("span missing llm.token_count.prompt when enrichment triple is also set")
+	}
+}
+
+// TestEmitSpans_LoopIdentityIndexed — 50 D-01/D-05: when attemptID is set,
+// every emitted LLM span carries loop.run_id == attemptID and a 1-indexed
+// loop.iteration matching the call's position in calls (1, 2, 3 across a
+// 3-CallSpan fixture) — the LLM-span correlating subset. loopRunID is
+// threaded but not asserted here (signature symmetry only, not yet stamped).
+func TestEmitSpans_LoopIdentityIndexed(t *testing.T) {
+	exp := setupSpanExporter(t)
+	tracer := otel.Tracer("test")
+
+	calls := []CallSpan{
+		{Model: "claude-test-1", InputMessages: []otelai.Message{{Role: "user", Content: "one"}}},
+		{Model: "claude-test-2", InputMessages: []otelai.Message{{Role: "user", Content: "two"}}},
+		{Model: "claude-test-3", InputMessages: []otelai.Message{{Role: "user", Content: "three"}}},
+	}
+	if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl",
+		"", "", nil, "abc-2", "abc"); err != nil {
+		t.Fatalf("EmitSpans: %v", err)
+	}
+
+	spans := exp.GetSpans()
+	if len(spans) != 3 {
+		t.Fatalf("got %d spans, want 3", len(spans))
+	}
+	for i, span := range spans {
+		runIDVal, ok := attrValue(span.Attributes, "loop.run_id")
+		if !ok || runIDVal.AsString() != "abc-2" {
+			t.Errorf("span[%d] loop.run_id = %v (ok=%v), want %q", i, runIDVal, ok, "abc-2")
+		}
+		iterVal, ok := attrValue(span.Attributes, "loop.iteration")
+		if !ok || iterVal.AsInt64() != int64(i+1) {
+			t.Errorf("span[%d] loop.iteration = %v (ok=%v), want %d", i, iterVal, ok, i+1)
+		}
+	}
+}
+
+// TestEmitSpans_LoopIdentityOmittedWhenEmpty — 50 D-01/D-05: when attemptID
+// is empty, neither loop.run_id nor loop.iteration appears on any span
+// (absent when empty, never a fabricated empty value).
+func TestEmitSpans_LoopIdentityOmittedWhenEmpty(t *testing.T) {
+	exp := setupSpanExporter(t)
+	tracer := otel.Tracer("test")
+
+	calls := []CallSpan{{Model: "claude-test", InputMessages: []otelai.Message{{Role: "user", Content: "hi"}}}}
+	if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil, "", ""); err != nil {
+		t.Fatalf("EmitSpans: %v", err)
+	}
+
+	spans := exp.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+	for _, key := range []attribute.Key{"loop.run_id", "loop.iteration"} {
+		if _, ok := attrValue(spans[0].Attributes, key); ok {
+			t.Errorf("span carries %q attribute; want omitted when attemptID is empty", key)
+		}
 	}
 }
 
@@ -798,7 +856,7 @@ func TestEmitSpans_BatchAggregateUnderCeiling(t *testing.T) {
 		ctxMsgs = append(ctxMsgs, otelai.Message{Role: "assistant", Content: strings.Repeat("y", turnSize)})
 	}
 
-	if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil); err != nil {
+	if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil, "", ""); err != nil {
 		t.Fatalf("EmitSpans: %v", err)
 	}
 	if err := tp.Shutdown(context.Background()); err != nil {
@@ -855,7 +913,7 @@ func TestEmitSpans_ZeroTimeFallbacksPreserveOrdering(t *testing.T) {
 			tracer := otel.Tracer("test")
 
 			calls := []CallSpan{{Model: "claude-test", StartTime: tc.start, EndTime: tc.end, TimingSynthetic: true}}
-			if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil); err != nil {
+			if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil, "", ""); err != nil {
 				t.Fatalf("EmitSpans: %v", err)
 			}
 			spans := exp.GetSpans()
@@ -899,7 +957,7 @@ func TestEmitSpans_WholeSpanBudgetJointAcrossSides(t *testing.T) {
 	calls := []CallSpan{
 		{Model: "claude-test", InputMessages: inputMsgs, OutputMessages: outputMsgs},
 	}
-	if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil); err != nil {
+	if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil, "", ""); err != nil {
 		t.Fatalf("EmitSpans: %v", err)
 	}
 
@@ -960,7 +1018,7 @@ func TestEmitSpans_WholeSpanBudgetBothSidesOver(t *testing.T) {
 	calls := []CallSpan{
 		{Model: "claude-test", InputMessages: inputMsgs, OutputMessages: outputMsgs},
 	}
-	if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil); err != nil {
+	if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl", "", "", nil, "", ""); err != nil {
 		t.Fatalf("EmitSpans: %v", err)
 	}
 

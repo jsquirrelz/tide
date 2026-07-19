@@ -453,6 +453,51 @@ func TestParseFlagsEnrichmentTriple(t *testing.T) {
 	})
 }
 
+// TestParseFlagsAttemptIDLoopRunID (50 D-01/D-05): --attempt-id/--loop-run-id
+// round-trip verbatim onto cfg.AttemptID/cfg.LoopRunID; omitted flags yield
+// empty strings (never gates, mirrors the enrichment triple's Pitfall-3
+// precedent — a dropped struct-copy line would silently strip loop identity
+// from every reporter LLM span with all producer-side tests still green).
+func TestParseFlagsAttemptIDLoopRunID(t *testing.T) {
+	t.Run("present", func(t *testing.T) {
+		cfg, err := parseFlags([]string{
+			"--attempt-id=task-uid-abc-2",
+			"--loop-run-id=task-uid-abc",
+			"--project-uid=x",
+			"--task-uid=t",
+			"--parent-name=p",
+			"--parent-namespace=ns",
+			"--parent-kind=Milestone",
+		})
+		if err != nil {
+			t.Fatalf("parseFlags: unexpected error: %v", err)
+		}
+		if cfg.AttemptID != "task-uid-abc-2" {
+			t.Errorf("cfg.AttemptID = %q, want %q", cfg.AttemptID, "task-uid-abc-2")
+		}
+		if cfg.LoopRunID != "task-uid-abc" {
+			t.Errorf("cfg.LoopRunID = %q, want %q", cfg.LoopRunID, "task-uid-abc")
+		}
+	})
+
+	t.Run("absent", func(t *testing.T) {
+		cfg, err := parseFlags([]string{
+			"--project-uid=x",
+			"--task-uid=t",
+			"--parent-name=p",
+			"--parent-namespace=ns",
+			"--parent-kind=Milestone",
+		})
+		if err != nil {
+			t.Fatalf("parseFlags: unexpected error: %v", err)
+		}
+		if cfg.AttemptID != "" || cfg.LoopRunID != "" {
+			t.Errorf("(AttemptID, LoopRunID) = (%q, %q), want both empty when flags are absent",
+				cfg.AttemptID, cfg.LoopRunID)
+		}
+	})
+}
+
 // TestSplitTags — the --tags CSV split feeding EmitSpans (46-REVIEW WR-04):
 // empty segments from doubled/trailing commas are transport artifacts, and
 // an empty CSV must yield nil, never [""] (an empty tag would pollute

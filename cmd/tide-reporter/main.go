@@ -98,6 +98,8 @@ type reporterConfig struct {
 	SessionID        string // 46 D-05/OBS-02: TIDE's run identity (Project UID), stamped on every emitted LLM span
 	MetadataJSON     string // 46 D-05/OBS-03: manager-pre-JSON-encoded metadata, stamped opaquely (never re-marshaled)
 	TagsCSV          string // 46 D-05/OBS-03: comma-separated tags, split before threading into EmitSpans
+	AttemptID        string // 50 D-01/D-05: Execution-loop attempt identity, stamped as loop.run_id on every LLM span
+	LoopRunID        string // 50 D-01/D-05: parent Task-loop run (taskUID); signature symmetry only, not yet stamped
 }
 
 const (
@@ -135,6 +137,10 @@ func parseFlags(args []string) (reporterConfig, error) {
 	metadataJSON := fs.String("metadata", "",
 		"manager-pre-JSON-encoded metadata map, stamped opaquely without re-marshaling (46 D-05/OBS-03)")
 	tagsCSV := fs.String("tags", "", "comma-separated tags stamped as a native string list (46 D-05/OBS-03)")
+	attemptID := fs.String("attempt-id", "",
+		"Execution-loop attempt identity, stamped as loop.run_id on every emitted LLM span (50 D-01/D-05)")
+	loopRunID := fs.String("loop-run-id", "",
+		"parent Task-loop run (taskUID); threaded for signature symmetry, not yet stamped (50 D-01/D-05)")
 
 	if err := fs.Parse(args); err != nil {
 		return reporterConfig{}, err
@@ -153,6 +159,8 @@ func parseFlags(args []string) (reporterConfig, error) {
 		SessionID:        *sessionID,
 		MetadataJSON:     *metadataJSON,
 		TagsCSV:          *tagsCSV,
+		AttemptID:        *attemptID,
+		LoopRunID:        *loopRunID,
 	}, nil
 }
 
@@ -384,6 +392,7 @@ func synthesizeSpans(ctx context.Context, cfg reporterConfig, stderr io.Writer) 
 	err = reporter.EmitSpans(
 		parentCtx, tracer, calls, artifactPath,
 		cfg.SessionID, cfg.MetadataJSON, splitTags(cfg.TagsCSV),
+		cfg.AttemptID, cfg.LoopRunID,
 	)
 	if err != nil {
 		fmt.Fprintf(stderr, "tide-reporter: emit spans: %v\n", err)
