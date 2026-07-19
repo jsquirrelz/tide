@@ -150,47 +150,9 @@ func resumeRun(ctx context.Context, c client.Client, ns, projectName string, ret
 	// Phase 51 ESC-03 (HI-01): VerifyHalt recovery is UNCONDITIONAL on plain
 	// `tide resume` — a DISTINCT halt class from the conservative FailureHalt
 	// that --retry-failed clears (setVerifyHaltIfNeeded's own operator message
-	// points at plain `tide resume`). Mirror the Phase 25 CR-01 ordering:
-	// reset the VerifyHalted Tasks FIRST, then clear the project-wide
-	// ConditionVerifyHalt LAST and stamp AnnotationVerifyResumedAt, so a
-	// pre-resume straggler verifier completion cannot re-stamp the halt after
-	// the clear (setVerifyHaltIfNeeded reads that fence). No-op when no
-	// VerifyHalt condition exists.
-	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
-		return fmt.Errorf("re-get project for VerifyHalt clear: %w", err)
-	}
-	if vhCond := meta.FindStatusCondition(proj.Status.Conditions, tidev1alpha3.ConditionVerifyHalt); vhCond != nil && vhCond.Status == metav1.ConditionTrue {
-		if err := resetVerifyHaltedTasks(ctx, c, ns, projectName, out); err != nil {
-			return err
-		}
-		// Re-fetch for a fresh resourceVersion after the Task phase-reset patches.
-		if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
-			return fmt.Errorf("re-get project for VerifyHalt clear: %w", err)
-		}
-		patchVH := client.MergeFrom(proj.DeepCopy())
-		meta.RemoveStatusCondition(&proj.Status.Conditions, tidev1alpha3.ConditionVerifyHalt)
-		if err := c.Status().Patch(ctx, &proj, patchVH); err != nil {
-			return fmt.Errorf("patch status (clear VerifyHalt): %w", err)
-		}
-		// CR-02 fence stamp: AnnotationVerifyResumedAt is metadata (not status) —
-		// separate metadata patch from the condition removal above. Re-fetch
-		// first for a fresh resourceVersion after the status patch.
-		if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
-			return fmt.Errorf("re-get project for verify-resumed-at stamp: %w", err)
-		}
-		metaPatch := client.MergeFrom(proj.DeepCopy())
-		ann := proj.GetAnnotations()
-		if ann == nil {
-			ann = make(map[string]string)
-		}
-		ann[tidev1alpha3.AnnotationVerifyResumedAt] = time.Now().UTC().Format(time.RFC3339)
-		proj.SetAnnotations(ann)
-		if err := c.Patch(ctx, &proj, metaPatch); err != nil {
-			return fmt.Errorf("patch metadata (verify-resumed-at stamp): %w", err)
-		}
-		if out != nil {
-			fmt.Fprintln(out, "tide: cleared VerifyHalt; pre-resume verifier stragglers can no longer re-trip the halt")
-		}
+	// points at plain `tide resume`). No-op when no VerifyHalt condition exists.
+	if err := clearVerifyHaltIfPresent(ctx, c, ns, projectName, out); err != nil {
+		return err
 	}
 
 	if !retryFailed {
@@ -380,6 +342,56 @@ func retryFailedLevels(ctx context.Context, c client.Client, ns, projectName str
 		if out != nil {
 			fmt.Fprintln(out, "tide: no Failed levels found")
 		}
+	}
+	return nil
+}
+
+// clearVerifyHaltIfPresent recovers a project-wide VerifyHalt (Phase 51
+// ESC-03/HI-01): a no-op unless ConditionVerifyHalt=True. Mirrors the Phase 25
+// CR-01 ordering — reset the VerifyHalted Tasks FIRST, then clear the
+// project-wide condition LAST and stamp AnnotationVerifyResumedAt, so a
+// pre-resume straggler verifier completion cannot re-stamp the halt after the
+// clear (setVerifyHaltIfNeeded reads that fence). Extracted from resumeRun to
+// keep its cyclomatic complexity in check.
+func clearVerifyHaltIfPresent(ctx context.Context, c client.Client, ns, projectName string, out io.Writer) error {
+	var proj tidev1alpha3.Project
+	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
+		return fmt.Errorf("re-get project for VerifyHalt clear: %w", err)
+	}
+	vhCond := meta.FindStatusCondition(proj.Status.Conditions, tidev1alpha3.ConditionVerifyHalt)
+	if vhCond == nil || vhCond.Status != metav1.ConditionTrue {
+		return nil
+	}
+	if err := resetVerifyHaltedTasks(ctx, c, ns, projectName, out); err != nil {
+		return err
+	}
+	// Re-fetch for a fresh resourceVersion after the Task phase-reset patches.
+	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
+		return fmt.Errorf("re-get project for VerifyHalt clear: %w", err)
+	}
+	patchVH := client.MergeFrom(proj.DeepCopy())
+	meta.RemoveStatusCondition(&proj.Status.Conditions, tidev1alpha3.ConditionVerifyHalt)
+	if err := c.Status().Patch(ctx, &proj, patchVH); err != nil {
+		return fmt.Errorf("patch status (clear VerifyHalt): %w", err)
+	}
+	// CR-02 fence stamp: AnnotationVerifyResumedAt is metadata (not status) —
+	// separate metadata patch from the condition removal above. Re-fetch first
+	// for a fresh resourceVersion after the status patch.
+	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
+		return fmt.Errorf("re-get project for verify-resumed-at stamp: %w", err)
+	}
+	metaPatch := client.MergeFrom(proj.DeepCopy())
+	ann := proj.GetAnnotations()
+	if ann == nil {
+		ann = make(map[string]string)
+	}
+	ann[tidev1alpha3.AnnotationVerifyResumedAt] = time.Now().UTC().Format(time.RFC3339)
+	proj.SetAnnotations(ann)
+	if err := c.Patch(ctx, &proj, metaPatch); err != nil {
+		return fmt.Errorf("patch metadata (verify-resumed-at stamp): %w", err)
+	}
+	if out != nil {
+		fmt.Fprintln(out, "tide: cleared VerifyHalt; pre-resume verifier stragglers can no longer re-trip the halt")
 	}
 	return nil
 }
