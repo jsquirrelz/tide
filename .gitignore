@@ -69,3 +69,6 @@ cmd/tide-demo-init/fixture/
 # Phase 48 — tide-langgraph-verifier's uv-managed virtualenv (make test-langgraph-verifier)
 cmd/tide-langgraph-verifier/.venv/
 cmd/tide-langgraph-verifier/**/__pycache__/
+# uv auto-creates a stub uv.lock on invocation; the verifier pins deps via
+# requirements*.txt + --require-hashes (Phase 48), not uv.lock — ignore the byproduct.
+cmd/tide-langgraph-verifier/uv.lock
