@@ -115,7 +115,7 @@ Plans:
 
 - [x] 50-01-PLAN.md — Envelope wire contract: `TerminalReason` enum + `RunEvidence` + loopRunID/attemptID fields + shared golden fixture + EXEC-04 no-correctness-field guard (Wave 1)
 - [x] 50-02-PLAN.md — `pkg/otelai` loop.*/evaluation.*/human_intervention attribute helpers, deliberately not tide.-prefixed (Wave 1)
-- [ ] 50-03-PLAN.md — Prometheus cardinality dual guard: metriccardinality analyzer + wave_label_test extended to the 9-name run-ID-shaped forbidden list; no new metric (Wave 1)
+- [x] 50-03-PLAN.md — Prometheus cardinality dual guard: metriccardinality analyzer + wave_label_test extended to the 9-name run-ID-shaped forbidden list; no new metric (Wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -188,7 +188,7 @@ Phases execute in numeric order: 48 → 49 → 50 → 51 → 52 → 53
 | 42–47 (see archive) | v1.0.8 | 32/32 | Complete | 2026-07-17 |
 | 48. LangGraph Evaluator Image + Credproxy-TLS Spike | v1.0.9 | 5/5 | Complete   | 2026-07-18 |
 | 49. Common Loop Contract + Verdict/Envelope/Persistence Schema | v1.0.9 | 4/4 | Complete    | 2026-07-18 |
-| 50. Execution-Loop Hardening + Loop-Native Observability | v1.0.9 | 2/7 | In Progress|  |
+| 50. Execution-Loop Hardening + Loop-Native Observability | v1.0.9 | 3/7 | In Progress|  |
 | 51. The Task Loop | v1.0.9 | 0/TBD | Not started | - |
 | 52. Per-Level LoopPolicy Parameterization | v1.0.9 | 0/TBD | Not started | - |
 | 53. Chart Config + Dashboard Provenance Surfacing | v1.0.9 | 0/TBD | Not started | - |
