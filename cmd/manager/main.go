@@ -210,6 +210,13 @@ func main() {
 	// Injected by the chart (Phase 28 plan 01 tideImport block). PROD_OVERRIDE_REQUIRED.
 	importImage := envOrDefault("TIDE_IMPORT_IMAGE", "ghcr.io/jsquirrelz/tide-import:v0.1.0-dev")
 
+	// TIDE_VERIFIER_IMAGE → TaskReconciler.VerifierImage field (Phase 51 the Task loop).
+	// The read-only tide-langgraph-verifier Job runs the planner-authored gate command(s)
+	// against the ReadOnly worktree and writes a gate_decision verdict. When empty, the
+	// verifier dispatch site logs and skips (mirrors the TIDE_REPORTER_IMAGE skip). Injected
+	// by the chart images.tideLanggraphVerifier block. PROD_OVERRIDE_REQUIRED.
+	verifierImage := envOrDefault("TIDE_VERIFIER_IMAGE", "ghcr.io/jsquirrelz/tide-langgraph-verifier:v0.1.0-dev")
+
 	// Single source for the cluster-wide workspace PVC name, read by both the
 	// ProjectReconciler and the ImportReconciler so they cannot skew. The chart
 	// exposes this as workspaces.pvc.name; the import Job mounts this PVC, so a
@@ -544,11 +551,14 @@ func main() {
 		// Phase 04.1 P3.2 — dispatch-tier deps consolidated into a carrier struct.
 		// Mirrors HelmProviderDefaults precedent on Milestone/Phase/Plan reconcilers.
 		Deps: controller.TaskReconcilerDeps{
-			Dispatcher:           dispatcher,
-			Budget:               budgetStore,
-			Defaults:             defaults,
-			SigningKey:           signingKey,
-			CredproxyImage:       credproxyImage,
+			Dispatcher:     dispatcher,
+			Budget:         budgetStore,
+			Defaults:       defaults,
+			SigningKey:     signingKey,
+			CredproxyImage: credproxyImage,
+			// Phase 51 the Task loop: the read-only tide-langgraph-verifier image
+			// dispatchVerifier creates the independent gate-command evaluator Job with.
+			VerifierImage:        verifierImage,
 			EnvReader:            envReader,
 			HelmProviderDefaults: helmProviderDefaults,
 			// Phase 14 D-05: reservation store + per-dispatch estimate for pre-charge.
