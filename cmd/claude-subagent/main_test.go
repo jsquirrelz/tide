@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -369,5 +370,217 @@ func TestClaudeSubagentMain_IgnoresDevTestMode(t *testing.T) {
 	}
 	if got.Result == "" {
 		t.Errorf("EnvelopeOut.Result is empty; if the shim had switched on Dev.TestMode it might have synthesized success — we want the fake-exec result instead")
+	}
+}
+
+// fakeErrRunner is a minimal anthropicRunner that always returns a
+// dispatch-level error — used to exercise the "subagent-error" TerminalReason
+// mapping without depending on the real anthropic package's error shapes.
+type fakeErrRunner struct{ err error }
+
+func (f fakeErrRunner) Run(_ context.Context, _ pkgdispatch.EnvelopeIn) (pkgdispatch.EnvelopeOut, error) {
+	return pkgdispatch.EnvelopeOut{}, f.err
+}
+
+// TestClaudeSubagentMain_TerminalReasonMapping is the 50-PATTERNS.md 6-row
+// mapping-table proof (Task 2 Test 1): every claude-subagent exit class
+// carries its mapped pkgdispatch.TerminalReason. The 6th row (success ->
+// completed) is covered separately by
+// TestClaudeSubagentMain_SuccessPathCompletesRunEvidence below, since it
+// needs a real git worktree fixture, not a failure-path setup.
+func TestClaudeSubagentMain_TerminalReasonMapping(t *testing.T) {
+	tests := []struct {
+		name       string
+		setup      func(t *testing.T, tmp string) (envelopePath string)
+		wantResult string
+		wantReason pkgdispatch.TerminalReason
+	}{
+		{
+			name: "invalid-envelope",
+			setup: func(t *testing.T, tmp string) string {
+				return filepath.Join(tmp, "does-not-exist", "in.json")
+			},
+			wantResult: "invalid-envelope",
+			wantReason: pkgdispatch.TerminalReasonInvalidOutput,
+		},
+		{
+			name: "worktree-setup-failed",
+			setup: func(t *testing.T, tmp string) string {
+				origEW := ensureWorktreeFunc
+				t.Cleanup(func() { ensureWorktreeFunc = origEW })
+				ensureWorktreeFunc = func(_ pkgdispatch.EnvelopeIn, _, _ string) error {
+					return fmt.Errorf("worktree boom")
+				}
+				envelopePath := filepath.Join(tmp, "envelopes", "t-wt", "in.json")
+				writeEnvelopeInFile(t, envelopePath, pkgdispatch.EnvelopeIn{
+					APIVersion: pkgdispatch.APIVersionV1Alpha1, Kind: pkgdispatch.KindTaskEnvelopeIn,
+					TaskUID: "t-wt", Role: "executor", Level: "task",
+					Provider: pkgdispatch.ProviderSpec{Vendor: "anthropic", Model: "claude-sonnet-4-6"},
+				})
+				return envelopePath
+			},
+			wantResult: "worktree-setup-failed",
+			wantReason: pkgdispatch.TerminalReasonToolFailure,
+		},
+		{
+			name: "subagent-error",
+			setup: func(t *testing.T, tmp string) string {
+				origSA := newSubagent
+				t.Cleanup(func() { newSubagent = origSA })
+				newSubagent = func(_, _ string, _ map[string]pkgdispatch.PriceOverride) anthropicRunner {
+					return fakeErrRunner{err: fmt.Errorf("dispatch boom")}
+				}
+				origEW := ensureWorktreeFunc
+				t.Cleanup(func() { ensureWorktreeFunc = origEW })
+				ensureWorktreeFunc = func(_ pkgdispatch.EnvelopeIn, _, _ string) error { return nil }
+				envelopePath := filepath.Join(tmp, "envelopes", "t-sa", "in.json")
+				writeEnvelopeInFile(t, envelopePath, pkgdispatch.EnvelopeIn{
+					APIVersion: pkgdispatch.APIVersionV1Alpha1, Kind: pkgdispatch.KindTaskEnvelopeIn,
+					TaskUID: "t-sa", Role: "planner", Level: "milestone",
+					Provider: pkgdispatch.ProviderSpec{Vendor: "anthropic", Model: "claude-sonnet-4-6"},
+				})
+				return envelopePath
+			},
+			wantResult: "subagent-error",
+			wantReason: pkgdispatch.TerminalReasonToolFailure,
+		},
+		{
+			name: "commit-failed",
+			setup: func(t *testing.T, tmp string) string {
+				withFakeSubagentSuccess(t, tmp)
+				origEW := ensureWorktreeFunc
+				t.Cleanup(func() { ensureWorktreeFunc = origEW })
+				ensureWorktreeFunc = func(_ pkgdispatch.EnvelopeIn, _, _ string) error { return nil }
+				origCW := commitWorktreeFunc
+				t.Cleanup(func() { commitWorktreeFunc = origCW })
+				commitWorktreeFunc = func(_, _ string) (plumbing.Hash, bool, error) {
+					return plumbing.ZeroHash, false, fmt.Errorf("commit boom")
+				}
+				envelopePath := filepath.Join(tmp, "envelopes", "t-commit", "in.json")
+				writeEnvelopeInFile(t, envelopePath, pkgdispatch.EnvelopeIn{
+					APIVersion: pkgdispatch.APIVersionV1Alpha1, Kind: pkgdispatch.KindTaskEnvelopeIn,
+					TaskUID: "t-commit", Role: "executor", Level: "task",
+					Provider: pkgdispatch.ProviderSpec{Vendor: "anthropic", Model: "claude-sonnet-4-6"},
+				})
+				return envelopePath
+			},
+			wantResult: "commit-failed",
+			wantReason: pkgdispatch.TerminalReasonToolFailure,
+		},
+		{
+			name: "empty-diff",
+			setup: func(t *testing.T, tmp string) string {
+				worktreeDir := filepath.Join(tmp, "worktrees", "t-empty")
+				if err := os.MkdirAll(worktreeDir, 0o755); err != nil {
+					t.Fatalf("mkdir worktreeDir: %v", err)
+				}
+				initGitWorktreeDir(t, worktreeDir)
+				withFakeSubagentSuccess(t, tmp)
+				origEW := ensureWorktreeFunc
+				t.Cleanup(func() { ensureWorktreeFunc = origEW })
+				ensureWorktreeFunc = func(_ pkgdispatch.EnvelopeIn, _, _ string) error { return nil }
+				envelopePath := filepath.Join(tmp, "envelopes", "t-empty", "in.json")
+				writeEnvelopeInFile(t, envelopePath, pkgdispatch.EnvelopeIn{
+					APIVersion: pkgdispatch.APIVersionV1Alpha1, Kind: pkgdispatch.KindTaskEnvelopeIn,
+					TaskUID: "t-empty", Role: "executor", Level: "task",
+					Provider: pkgdispatch.ProviderSpec{Vendor: "anthropic", Model: "claude-sonnet-4-6"},
+				})
+				return envelopePath
+			},
+			wantResult: "empty-diff",
+			wantReason: pkgdispatch.TerminalReasonBlocked,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			envelopePath := tt.setup(t, tmp)
+			var stdout, stderr bytes.Buffer
+			_ = run(context.Background(), envelopePath, tmp, &stdout, &stderr)
+			outPath := filepath.Join(filepath.Dir(envelopePath), "out.json")
+			data, err := os.ReadFile(outPath)
+			if err != nil {
+				t.Fatalf("read out.json: %v", err)
+			}
+			var got pkgdispatch.EnvelopeOut
+			if err := json.Unmarshal(data, &got); err != nil {
+				t.Fatalf("unmarshal out.json: %v", err)
+			}
+			if got.Result != tt.wantResult {
+				t.Errorf("Result: got %q, want %q", got.Result, tt.wantResult)
+			}
+			if got.TerminalReason != tt.wantReason {
+				t.Errorf("TerminalReason: got %q, want %q", got.TerminalReason, tt.wantReason)
+			}
+		})
+	}
+}
+
+// TestClaudeSubagentMain_SuccessPathCompletesRunEvidence asserts the D-03/
+// EXEC-03 success-path contract (Task 2 Test 2): TerminalReason arrives as
+// "completed" from anthropic.Run()'s base literal (not re-set by run()),
+// Git.HeadSHA is set, and RunEvidence.ChangedFiles/ChangedFileTotal are
+// populated from the real worktree's HEAD commit.
+func TestClaudeSubagentMain_SuccessPathCompletesRunEvidence(t *testing.T) {
+	tmp := t.TempDir()
+
+	worktreeDir := filepath.Join(tmp, "worktrees", "t-evidence")
+	if err := os.MkdirAll(worktreeDir, 0o755); err != nil {
+		t.Fatalf("mkdir worktreeDir: %v", err)
+	}
+	initGitWorktreeDir(t, worktreeDir)
+	for _, name := range []string{"a.go", "b.go"} {
+		if err := os.WriteFile(filepath.Join(worktreeDir, name), []byte("package main\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	withFakeSubagentSuccess(t, tmp)
+	origEW := ensureWorktreeFunc
+	t.Cleanup(func() { ensureWorktreeFunc = origEW })
+	ensureWorktreeFunc = func(_ pkgdispatch.EnvelopeIn, _, _ string) error { return nil }
+
+	envelopePath := filepath.Join(tmp, "envelopes", "t-evidence", "in.json")
+	env := pkgdispatch.EnvelopeIn{
+		APIVersion: pkgdispatch.APIVersionV1Alpha1,
+		Kind:       pkgdispatch.KindTaskEnvelopeIn,
+		TaskUID:    "t-evidence",
+		Role:       "executor",
+		Level:      "task",
+		Provider:   pkgdispatch.ProviderSpec{Vendor: "anthropic", Model: "claude-sonnet-4-6"},
+	}
+	writeEnvelopeInFile(t, envelopePath, env)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), envelopePath, tmp, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code: got %d, want 0; stderr=%s", code, stderr.String())
+	}
+
+	outPath := filepath.Join(filepath.Dir(envelopePath), "out.json")
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read out.json: %v", err)
+	}
+	var got pkgdispatch.EnvelopeOut
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal out.json: %v", err)
+	}
+	if got.TerminalReason != pkgdispatch.TerminalReasonCompleted {
+		t.Errorf("TerminalReason: got %q, want %q", got.TerminalReason, pkgdispatch.TerminalReasonCompleted)
+	}
+	if got.Git == nil || got.Git.HeadSHA == "" {
+		t.Fatalf("Git.HeadSHA: got %+v, want a populated HeadSHA", got.Git)
+	}
+	if got.RunEvidence == nil {
+		t.Fatal("RunEvidence: got nil, want populated")
+	}
+	if got.RunEvidence.ChangedFileTotal <= 0 {
+		t.Errorf("RunEvidence.ChangedFileTotal: got %d, want > 0", got.RunEvidence.ChangedFileTotal)
+	}
+	if got.RunEvidence.ChangedFileTotal < len(got.RunEvidence.ChangedFiles) {
+		t.Errorf("RunEvidence.ChangedFileTotal (%d) must be >= len(ChangedFiles) (%d)",
+			got.RunEvidence.ChangedFileTotal, len(got.RunEvidence.ChangedFiles))
 	}
 }

@@ -103,15 +103,30 @@ func main() {
 
 // run is the testable entry point. Does NOT branch on env.Dev.TestMode.
 //
+// Every exit path maps to an explicit [pkgdispatch.TerminalReason] per the
+// 50-PATTERNS.md mapping table (D-02/EXEC-02 — "never a silent default"):
+//
+//	invalid-envelope       -> invalid_output
+//	worktree-setup-failed  -> tool_failure
+//	subagent-error         -> tool_failure
+//	commit-failed          -> tool_failure
+//	empty-diff             -> blocked
+//	(success)              -> completed (set by anthropic.Run()'s base literal;
+//	                          not re-set here)
+//
 //nolint:unparam // stdout is part of the shared subagent-binary (stdout, stderr) entry-point contract
 func run(ctx context.Context, envelopePath, workspaceRoot string, stdout, stderr io.Writer) int {
 	outPath := filepath.Join(filepath.Dir(envelopePath), "out.json")
 	env, err := harness.ReadEnvelopeIn(envelopePath)
 	if err != nil {
-		return failOut(stderr, outPath, "", err, 2, "invalid-envelope")
+		// env does not exist yet at this failure point, so the envelope
+		// carries empty LoopRunID/AttemptID — unavoidable; the controller's
+		// synthetic fallback (Plan 50-06) covers span identity for this case.
+		return failOut(stderr, outPath, pkgdispatch.EnvelopeIn{}, err, 2, "invalid-envelope",
+			pkgdispatch.TerminalReasonInvalidOutput)
 	}
 	if err := ensureWorktreeFunc(env, workspaceRoot, env.Branch); err != nil {
-		return failOut(stderr, outPath, env.TaskUID, err, 1, "worktree-setup-failed")
+		return failOut(stderr, outPath, env, err, 1, "worktree-setup-failed", pkgdispatch.TerminalReasonToolFailure)
 	}
 	// D-02: read pricing overrides from TIDE_PRICING_OVERRIDES_JSON env.
 	// Invalid JSON logs a loud warning and falls back to compiled table (defense in depth).
@@ -119,19 +134,26 @@ func run(ctx context.Context, envelopePath, workspaceRoot string, stdout, stderr
 	out, runErr := newSubagent("claude", workspaceRoot, pricingOverrides).Run(ctx, env)
 	if runErr != nil {
 		fmt.Fprintf(stderr, "claude-subagent: %v\n", runErr)
-		out = failEnvelope(env.TaskUID, runErr, 1, "subagent-error")
+		out = failEnvelope(env, runErr, 1, "subagent-error", pkgdispatch.TerminalReasonToolFailure)
 	}
 	if runErr == nil && env.Role == "executor" {
 		worktreeDir := filepath.Join(workspaceRoot, "worktrees", env.TaskUID)
 		hash, isEmpty, commitErr := commitWorktreeFunc(worktreeDir, env.TaskUID)
 		if commitErr != nil {
-			out = failEnvelope(env.TaskUID, commitErr, 1, "commit-failed")
+			out = failEnvelope(env, commitErr, 1, "commit-failed", pkgdispatch.TerminalReasonToolFailure)
 		} else if isEmpty {
 			out.ExitCode = 1
 			out.Result = "empty-diff"
 			out.Reason = "executor produced no changes in worktree"
+			out.TerminalReason = pkgdispatch.TerminalReasonBlocked
 		} else {
 			out.Git = &pkgdispatch.GitOutput{HeadSHA: hash.String()}
+			// D-03/EXEC-03: complete the RunEvidence the anthropic layer
+			// started (Model/PromptVersion/RuntimeVersion/Commands) with the
+			// changed-file manifest from the commit CommitWorktree just made.
+			// out.TerminalReason arrives as "completed" from anthropic.Run()'s
+			// base literal — not re-set here.
+			completeRunEvidenceWithChangedFiles(stderr, &out, worktreeDir)
 		}
 	}
 	if err := writeEnvelope(outPath, out); err != nil {
@@ -141,17 +163,49 @@ func run(ctx context.Context, envelopePath, workspaceRoot string, stdout, stderr
 	return out.ExitCode
 }
 
-func failEnvelope(taskUID string, err error, exitCode int, result string) pkgdispatch.EnvelopeOut {
+// completeRunEvidenceWithChangedFiles fetches the bounded changed-file
+// manifest for worktreeDir's HEAD commit and merges it onto out.RunEvidence
+// (creating one if the anthropic layer left it nil). A manifest error is
+// non-fatal — evidence collection never fails a successful attempt; it logs
+// to stderr and leaves ChangedFiles empty.
+func completeRunEvidenceWithChangedFiles(stderr io.Writer, out *pkgdispatch.EnvelopeOut, worktreeDir string) {
+	files, total, manifestErr := harness.ChangedFileManifest(worktreeDir, pkgdispatch.MaxRunEvidenceChangedFiles)
+	if manifestErr != nil {
+		fmt.Fprintf(stderr, "claude-subagent: changed-file manifest: %v\n", manifestErr)
+		return
+	}
+	evidence := pkgdispatch.RunEvidence{}
+	if out.RunEvidence != nil {
+		evidence = *out.RunEvidence
+	}
+	evidence.ChangedFiles = files
+	evidence.ChangedFileTotal = total
+	bounded := evidence.Bounded()
+	out.RunEvidence = &bounded
+}
+
+// failEnvelope builds a failure-shaped EnvelopeOut. TaskUID/LoopRunID/AttemptID
+// are echoed from env — env is the zero value at the one call site
+// (invalid-envelope) that fails before an envelope was successfully read, so
+// those fields are empty there by construction, not by omission.
+func failEnvelope(env pkgdispatch.EnvelopeIn, err error, exitCode int, result string,
+	terminalReason pkgdispatch.TerminalReason,
+) pkgdispatch.EnvelopeOut {
 	return pkgdispatch.EnvelopeOut{
 		APIVersion: pkgdispatch.APIVersionV1Alpha1, Kind: pkgdispatch.KindTaskEnvelopeOut,
-		TaskUID: taskUID, ExitCode: exitCode, Result: result, Reason: err.Error(),
-		CompletedAt: time.Now().UTC(),
+		TaskUID: env.TaskUID, ExitCode: exitCode, Result: result, Reason: err.Error(),
+		CompletedAt:    time.Now().UTC(),
+		TerminalReason: terminalReason,
+		LoopRunID:      env.LoopRunID,
+		AttemptID:      env.AttemptID,
 	}
 }
 
-func failOut(stderr io.Writer, outPath, taskUID string, err error, exitCode int, result string) int {
+func failOut(stderr io.Writer, outPath string, env pkgdispatch.EnvelopeIn, err error, exitCode int, result string,
+	terminalReason pkgdispatch.TerminalReason,
+) int {
 	fmt.Fprintf(stderr, "claude-subagent: %v\n", err)
-	_ = writeEnvelope(outPath, failEnvelope(taskUID, err, exitCode, result))
+	_ = writeEnvelope(outPath, failEnvelope(env, err, exitCode, result, terminalReason))
 	return exitCode
 }
 
