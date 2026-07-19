@@ -446,6 +446,94 @@ func TestEmptyInputsNoPanic(t *testing.T) {
 	}
 }
 
+// TestLoopAttributes_FullyPopulated — OBS-01/D-05: all six loop.* attributes
+// present when every optional argument is non-empty. Order mirrors
+// LoopAttributes' doc comment — kind/run_id/iteration always first, then the
+// optionals in parentRunID/candidateVersion/exitReason order.
+func TestLoopAttributes_FullyPopulated(t *testing.T) {
+	got := LoopAttributes(LoopKindExecution, "uid-1-2", "uid-1", 3, "abc123", "completed")
+	want := []attribute.KeyValue{
+		attribute.String("loop.kind", "execution"),
+		attribute.String("loop.run_id", "uid-1-2"),
+		attribute.Int("loop.iteration", 3),
+		attribute.String("loop.parent_run_id", "uid-1"),
+		attribute.String("loop.candidate_version", "abc123"),
+		attribute.String("loop.exit_reason", "completed"),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("LoopAttributes(fully populated) = %v, want %v", got, want)
+	}
+	if len(got) != 6 {
+		t.Errorf("LoopAttributes(fully populated) returned %d entries, want exactly 6", len(got))
+	}
+}
+
+// TestLoopAttributes_OmitsEmptyOptionals — the "absent when empty, never a
+// fabricated empty value" enrichment discipline (46 OBS-02/OBS-03): an empty
+// parentRunID/candidateVersion/exitReason must be omitted entirely, not
+// emitted as an empty-string attribute.
+func TestLoopAttributes_OmitsEmptyOptionals(t *testing.T) {
+	got := LoopAttributes(LoopKindExecution, "uid-1-2", "", 3, "", "")
+	want := []attribute.KeyValue{
+		attribute.String("loop.kind", "execution"),
+		attribute.String("loop.run_id", "uid-1-2"),
+		attribute.Int("loop.iteration", 3),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("LoopAttributes(omits empty optionals) = %v, want %v", got, want)
+	}
+	if len(got) != 3 {
+		t.Errorf("LoopAttributes(omits empty optionals) returned %d entries, want exactly 3", len(got))
+	}
+	for _, kv := range got {
+		if kv.Value.Type() == attribute.STRING && kv.Value.AsString() == "" {
+			t.Errorf("LoopAttributes(omits empty optionals) contains a fabricated empty-string value: %v", kv)
+		}
+	}
+}
+
+// TestLoopRunID — the correlating-subset helper stamped on per-call LLM
+// spans (D-05).
+func TestLoopRunID(t *testing.T) {
+	got := LoopRunID("x")
+	want := attribute.String("loop.run_id", "x")
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("LoopRunID(\"x\") = %v, want %v", got, want)
+	}
+}
+
+// TestLoopIteration — LoopRunID's sibling for the same correlating subset.
+func TestLoopIteration(t *testing.T) {
+	got := LoopIteration(4)
+	want := attribute.Int("loop.iteration", 4)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("LoopIteration(4) = %v, want %v", got, want)
+	}
+}
+
+// TestEvaluationAttributes — defined for trace-schema stability ahead of
+// Phase 51's EVALUATOR span; no Phase 50 caller exists.
+func TestEvaluationAttributes(t *testing.T) {
+	got := EvaluationAttributes("APPROVED", "v1")
+	want := []attribute.KeyValue{
+		attribute.String("evaluation.result", "APPROVED"),
+		attribute.String("evaluation.version", "v1"),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("EvaluationAttributes(\"APPROVED\", \"v1\") = %v, want %v", got, want)
+	}
+}
+
+// TestHumanIntervention — bare-bool marker attribute, mirroring
+// EnvelopeDegraded's shape; defined for Phase 51.
+func TestHumanIntervention(t *testing.T) {
+	got := HumanIntervention()
+	want := attribute.Bool("human_intervention", true)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("HumanIntervention() = %v, want %v", got, want)
+	}
+}
+
 // stripGoComments removes single-line (`// ...`) and block (`/* ... */`)
 // comments from Go source so that text inside comments doesn't count toward
 // grep-based source assertions. Mirrored verbatim from
