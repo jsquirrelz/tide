@@ -23,6 +23,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
+	"path"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -635,7 +638,7 @@ func (r *TaskReconciler) checkRunningState(ctx context.Context, task *tideprojec
 // checkVerifyingState handles a Task in Phase=Verifying (Phase 51 TASK-01):
 // looks up the deterministic verifier Job for the current attempt and either
 // retries a deferred dispatch, waits for it to complete, or (BACKWARD half,
-// Plan 07) consumes its verdict.
+// Plan 07) consumes its verdict via handleVerifierCompletion.
 //
 // Unlike checkRunningState's executor lookup — where NotFound is a genuine
 // anomaly (Phase=Running is only ever reached AFTER a Job-create attempt
@@ -646,12 +649,6 @@ func (r *TaskReconciler) checkRunningState(ctx context.Context, task *tideprojec
 // dispatch except this handler). NotFound therefore retries dispatchVerifier
 // (idempotent: podjob.VerifierJobName is deterministic and AlreadyExists on
 // Create is treated as success, SUB-03) rather than halting forever.
-//
-// This plan (06) builds ONLY the forward half — dispatch + retry. Consuming a
-// TERMINAL verifier Job's EnvelopeOut.Verdict (ClassifyVerdict, repairOrHalt,
-// haltVerify, the EVALUATOR span) is Plan 07; a terminal verifier Job halts
-// bare here for now (the Job watch already fired this reconcile via
-// Owns(&batchv1.Job{})).
 func (r *TaskReconciler) checkVerifyingState(ctx context.Context, task *tideprojectv1alpha3.Task) (taskGateResult, error) {
 	jobName := podjob.VerifierJobName(task.UID, task.Status.Attempt)
 	var job batchv1.Job
@@ -669,8 +666,19 @@ func (r *TaskReconciler) checkVerifyingState(ctx context.Context, task *tideproj
 		result, _, dErr := r.dispatchVerifier(ctx, task, project)
 		return taskGateResult{shouldHalt: true, result: result}, dErr
 	}
-	// Terminal or still-running: Plan 07 wires verdict consumption onto the
-	// terminal branch here. Halt bare either way for this plan's scope.
+	if isJobTerminal(&job) {
+		project, pErr := r.resolveProject(ctx, task)
+		if errors.Is(pErr, ErrParentUnresolved) {
+			return taskGateResult{shouldHalt: true, result: ctrl.Result{RequeueAfter: 30 * time.Second}}, nil
+		}
+		if pErr != nil {
+			return taskGateResult{}, pErr
+		}
+		result, hErr := r.handleVerifierCompletion(ctx, task, project, &job)
+		return taskGateResult{shouldHalt: true, result: result}, hErr
+	}
+	// Still running: nothing to do this reconcile — the Job watch fires again
+	// on the verifier Job's terminal transition (Owns(&batchv1.Job{})).
 	return taskGateResult{shouldHalt: true, result: ctrl.Result{}}, nil
 }
 
@@ -794,7 +802,9 @@ func (r *TaskReconciler) prepareDispatch(ctx context.Context, task *tideprojectv
 	}
 
 	// Step 9: Build EnvelopeIn; translate api/v1alpha3.Caps → pkg/dispatch.Caps per Plan 03.
-	_, envInJSON, err := r.buildEnvelopeIn(ctx, task, project, attempt, token)
+	// "" evidencePacketPath: this is the Task's first/plain dispatch, never a
+	// TASK-02 repair re-attempt (those go through dispatchRepairAttempt).
+	_, envInJSON, err := r.buildEnvelopeIn(ctx, task, project, attempt, token, "")
 	if err != nil {
 		return taskDispatchSpec{}, err
 	}
@@ -1912,7 +1922,15 @@ func (r *TaskReconciler) defaultsForSecret(secret *corev1.Secret) budget.Limits 
 // (dispatch_helpers.go's BuildPlannerEnvelope) are deliberately NOT stamped
 // this phase — the Execution loop is the in-Job Task attempt; planner-loop
 // identity is future work.
-func (r *TaskReconciler) buildEnvelopeIn(_ context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, attempt int, token string) (pkgdispatch.EnvelopeIn, []byte, error) {
+//
+// evidencePacketPath (Phase 51 TASK-02/D-04) is "" for the Task's plain
+// dispatch and non-empty only for a repairOrHalt-minted fresh quality-
+// iteration attempt (dispatchRepairAttempt) — when set, it is carried on
+// EnvelopeIn.Verify.EvidencePacketPath, the same VerifyContext field a
+// verifier dispatch's own repair re-check reads (see buildVerifierEnvelopeIn).
+// This is the ONLY VerifyContext field a role="executor" envelope ever
+// populates (GateCommand/Commands/RequiredArtifacts/EvaluatorRef stay empty).
+func (r *TaskReconciler) buildEnvelopeIn(_ context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, attempt int, token, evidencePacketPath string) (pkgdispatch.EnvelopeIn, []byte, error) {
 	caps := pkgdispatch.Caps{}
 	if task.Spec.Caps != nil {
 		caps = pkgdispatch.Caps{
@@ -1959,6 +1977,9 @@ func (r *TaskReconciler) buildEnvelopeIn(_ context.Context, task *tideprojectv1a
 		ProxyEndpoint: credproxyEndpoint,
 		SignedToken:   token,
 		Dev:           dev,
+	}
+	if evidencePacketPath != "" {
+		envIn.Verify = &pkgdispatch.VerifyContext{EvidencePacketPath: evidencePacketPath}
 	}
 
 	data, mErr := json.Marshal(envIn)
@@ -2197,6 +2218,509 @@ func (r *TaskReconciler) buildVerifierEnvelopeIn(task *tideprojectv1alpha3.Task,
 		return pkgdispatch.EnvelopeIn{}, nil, fmt.Errorf("marshal verifier envelope: %w", mErr)
 	}
 	return envIn, data, nil
+}
+
+// gateCommandFindingSeverity/gateCommandFindingDimension mirror the
+// severity="blocker"/dimension="gate-command" Finding the Plan 02 verifier
+// entrypoint's own out-of-band dominance leg emits (__main__.py's
+// _assemble_verdict) for ANY non-zero pass-criterion command exit. Kept as
+// local consts (verificationPhaseLocked precedent, above) because
+// pkg/dispatch's own highSeverityFindingToken is unexported outside its
+// package boundary — D-06/D-08 retuning point.
+const (
+	gateCommandFindingSeverity  = "blocker"
+	gateCommandFindingDimension = "gate-command"
+)
+
+// stageEvidencePacketMaxFindings bounds the Findings slice a staged evidence
+// packet carries (TASK-02: reference-only, compact — never the prior
+// agent's full context), mirroring RunEvidence.Bounded()'s own DoS-shaped
+// discipline (T-50-01) for a value this phase doesn't already bound.
+const stageEvidencePacketMaxFindings = 20
+
+// protectedEvaluatorFixturePaths is the TASK-06 anti-gaming protected-path
+// set (RunEvidence.ChangedFiles path-prefix match): the evaluator/fixture/
+// threshold surface a repair attempt is never trusted to edit, scoped
+// specifically to what the verification contract itself depends on for
+// integrity (RESEARCH Pitfall 5) — NOT every *_test.go file, which would
+// wrongly flag an ordinary test-driven repair as gaming. Claude's
+// Discretion: no planner-declared per-Task override field exists on
+// VerificationSpec this phase — a fixed, repo-wide set.
+var protectedEvaluatorFixturePaths = []string{
+	"internal/eval/",
+	"evals/",
+	"cmd/tide-langgraph-verifier/",
+	"internal/subagent/common/templates/task_verifier.tmpl",
+}
+
+// hasDeterministicFailure reports whether gd carries a deterministic
+// gate-command dominance Finding (D-06 controller-side re-check, defence-in-
+// depth over the verifier's own out-of-band dominance leg): a red gate on
+// ANY authored pass-criterion command dominates even a top-level APPROVED
+// verdict. nil-safe.
+func hasDeterministicFailure(gd *pkgdispatch.GateDecision) bool {
+	if gd == nil {
+		return false
+	}
+	for _, f := range gd.Findings {
+		if f.Severity == gateCommandFindingSeverity && f.Dimension == gateCommandFindingDimension {
+			return true
+		}
+	}
+	return false
+}
+
+// protectedPathsFor returns the TASK-06 anti-gaming protected-path prefixes
+// for task's verification contract. task is currently unused — the fixed
+// protectedEvaluatorFixturePaths set applies uniformly this phase — but kept
+// on the signature as the seam a future per-contract override would extend.
+func protectedPathsFor(_ *tideprojectv1alpha3.Task) []string {
+	return protectedEvaluatorFixturePaths
+}
+
+// intersectsProtected reports whether any changed file's path falls under a
+// protected prefix (TASK-06, path-prefix match — an edit anywhere inside a
+// protected directory counts, not just an exact file match).
+func intersectsProtected(changed []pkgdispatch.ChangedFile, protected []string) bool {
+	for _, f := range changed {
+		for _, p := range protected {
+			if strings.HasPrefix(f.Path, p) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// applyLoopStatus updates task.Status.LoopStatus with the current-iteration
+// summary only (LOOP-03 — no accumulating history, TestLoopStatus_NoForbiddenFields):
+// Iteration mirrors Status.Attempt (the attempt just evaluated), LastEvaluation
+// is the bounded verdict summary from THIS terminal verifier envelope
+// (nil-safe — a degraded/unreadable envelope leaves it nil), and ExitReason is
+// set only once the loop has genuinely stopped — callers pass "" for a
+// mid-loop repair dispatch (loop_types.go's own "empty while the loop is
+// still active" contract) and the real ExitReason value for every terminal
+// outcome (approved/iterationsExhausted/escalated).
+func applyLoopStatus(task *tideprojectv1alpha3.Task, out pkgdispatch.EnvelopeOut, exitReason tideprojectv1alpha3.ExitReason) {
+	task.Status.LoopStatus.Iteration = int32(task.Status.Attempt)
+	if out.LoopRunID != "" {
+		task.Status.LoopStatus.ParentRunID = out.LoopRunID
+	}
+	task.Status.LoopStatus.ExitReason = exitReason
+	if out.Verdict == nil {
+		return
+	}
+	var highSeverity int32
+	for _, f := range out.Verdict.Findings {
+		if f.Severity == gateCommandFindingSeverity {
+			highSeverity++
+		}
+	}
+	summary := tideprojectv1alpha3.EvaluationSummary{
+		Decision:          string(out.Verdict.Verdict),
+		FindingsCount:     int32(len(out.Verdict.Findings)),
+		HighSeverityCount: highSeverity,
+	}
+	if !out.CompletedAt.IsZero() {
+		ct := metav1.NewTime(out.CompletedAt)
+		summary.CompletedAt = &ct
+	}
+	task.Status.LoopStatus.LastEvaluation = &summary
+}
+
+// emitEvaluatorSpanForVerifier resolves the SAME parentSpanID Task's own
+// AGENT span was given (task.Spec.PlanRef's persisted PlanTraceSpanID,
+// mirroring emitTaskSpanOnce's identical TRACE-02 fetch) and emits the
+// OBS-03/D-11 EVALUATOR sibling span for a terminal verifier Job. Best-effort
+// observability — never gates verdict consumption (mirrors
+// spawnTaskTraceReporterIfNeeded's non-fatal posture); return values are
+// discarded because this phase has no dedicated {Level}TraceSpanID-equivalent
+// status field for the EVALUATOR span (Plan 07's declared file scope excludes
+// api/v1alpha3 schema changes), so there is no persistence patch to make.
+func (r *TaskReconciler) emitEvaluatorSpanForVerifier(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, verifierJob *batchv1.Job, out pkgdispatch.EnvelopeOut, envReadOK bool) {
+	var parentSpanID trace.SpanID
+	if task.Spec.PlanRef != "" {
+		var parentPlan tideprojectv1alpha3.Plan
+		if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: task.Spec.PlanRef}, &parentPlan); err == nil {
+			parentSpanID = spanIDFromHexOrZero(parentPlan.Status.PlanTraceSpanID)
+		}
+	}
+	evaluatorVersion := ""
+	if out.RunEvidence != nil && len(out.RunEvidence.EvaluatorVersions) > 0 {
+		evaluatorVersion = out.RunEvidence.EvaluatorVersions[0]
+	}
+	synthesizeEvaluatorSpan(ctx, "task", task.Name, project, r.Deps.HelmProviderDefaults, verifierJob, out, envReadOK, evaluatorVersion, parentSpanID)
+}
+
+// settleVerifierSpend rolls the verifier's own real token spend into
+// Project.Status.budget (mirrors handleJobCompletion's identical roll-up,
+// D-D2) and settles the BudgetCents reservation dispatchVerifier made at
+// verify-dispatch time (Plan 06) — nothing has settled it until this call
+// (51-06-SUMMARY.md's own "Next Phase Readiness" note). Called exactly once
+// per verifier completion regardless of verdict outcome: the verifier ran
+// and spent real tokens either way. A subsequent Reserve (dispatchRepairAttempt's
+// fresh attempt, or a later verify-dispatch) safely overwrites the same
+// ReservationStore key after this Settle — no leak, no premature-clear race.
+func (r *TaskReconciler) settleVerifierSpend(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, out pkgdispatch.EnvelopeOut) {
+	logger := logf.FromContext(ctx)
+	if err := budget.RollUpUsage(ctx, r.Client, project, out.Usage); err != nil {
+		logger.Error(err, "failed to roll up verifier budget usage", "task", task.Name)
+	}
+	if fbErr := setPricingFallbackIfNeeded(ctx, r.Client, project, out.Usage.PricingFallbackModel); fbErr != nil {
+		logger.Error(fbErr, "setPricingFallbackIfNeeded failed (non-fatal)", "task", task.Name)
+	}
+	r.Deps.Reservations.Settle(string(task.UID))
+}
+
+// finishVerifierTerminal performs the terminal-only bookkeeping (Task-level
+// Prometheus metrics + the D-D2 budget-blocked recheck) for a verifier
+// completion that ENDS the Task loop (Succeeded via markVerifiedSucceeded or
+// Failed via haltVerify) — deliberately never called for a mid-loop repair
+// dispatch (dispatchRepairAttempt), which is not yet a completion and must
+// not increment TasksCompletedTotal/TasksFailedTotal.
+func (r *TaskReconciler) finishVerifierTerminal(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, out pkgdispatch.EnvelopeOut, metricFailureReason string) {
+	logger := logf.FromContext(ctx)
+	if emitErr := r.emitTaskMetrics(ctx, task, project, out.Usage, out.CompletedAt, metricFailureReason); emitErr != nil {
+		logger.Error(emitErr, "failed to emit verifier task metrics (non-fatal)", "task", task.Name)
+	}
+	if err := setBudgetBlockedIfNeeded(ctx, r.Client, project, r.Deps.Reservations.TotalReserved()); err != nil {
+		logger.Error(err, "setBudgetBlockedIfNeeded failed (non-fatal)", "task", task.Name)
+	}
+}
+
+// haltVerify stamps the Task terminal (Failed) on a fail-closed verify
+// outcome — an unreadable envelope, a missing Verdict, a classified BLOCKED
+// verdict, an anti-gaming escalation, or MaxIterations exhaustion without an
+// APPROVED verdict — and escalates project-wide via setVerifyHaltIfNeeded
+// (ESC-02/ESC-03), mirroring gateChecks' existing setFailureHaltIfNeeded-on-
+// Failed-terminal pattern (this file's own CR-02 precedent). exitReason and
+// conditionReason are caller-chosen (haltVerify never guesses the class of
+// halt) so ExitIterationsExhausted (repairOrHalt's exhaustion leg) stays
+// grep-distinguishable from ExitEscalated (BLOCKED / unreadable / anti-gaming).
+func (r *TaskReconciler) haltVerify(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, out pkgdispatch.EnvelopeOut, message, conditionReason string, exitReason tideprojectv1alpha3.ExitReason) (ctrl.Result, error) {
+	logger := logf.FromContext(ctx)
+	patch := client.MergeFrom(task.DeepCopy())
+	task.Status.Phase = tideprojectv1alpha3.LevelPhaseFailed
+	meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha3.ConditionFailed,
+		Status:             metav1.ConditionTrue,
+		Reason:             conditionReason,
+		Message:            message,
+		LastTransitionTime: metav1.Now(),
+	})
+	applyLoopStatus(task, out, exitReason)
+	var completedAt time.Time
+	if !out.CompletedAt.IsZero() {
+		completedAt = out.CompletedAt
+		ct := metav1.NewTime(out.CompletedAt)
+		task.Status.CompletedAt = &ct
+	}
+	if pErr := r.Status().Patch(ctx, task, patch); pErr != nil {
+		return ctrl.Result{}, pErr
+	}
+	// ESC-02/ESC-03: a BLOCKED/exhausted verify means the artifact tree the
+	// next dispatch would build on is suspect — halt project-wide, not just
+	// this Task. CR-02 time-fence lives inside setVerifyHaltIfNeeded itself.
+	if hErr := setVerifyHaltIfNeeded(ctx, r.Client, project, completedAt); hErr != nil {
+		logger.Error(hErr, "setVerifyHaltIfNeeded failed (non-fatal)", "task", task.Name)
+	}
+	r.settleVerifierSpend(ctx, task, project, out)
+	r.finishVerifierTerminal(ctx, task, project, out, "verify-halt")
+	return ctrl.Result{}, nil
+}
+
+// markVerifiedSucceeded is the sole path that stamps a contract-bearing
+// Task Succeeded (EXEC-04/TASK-04): reached only after ClassifyVerdict
+// returned APPROVED AND hasDeterministicFailure found no dominating red gate
+// — the Execution (in-Job) loop itself never marks a contract-bearing Task
+// correct.
+func (r *TaskReconciler) markVerifiedSucceeded(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, out pkgdispatch.EnvelopeOut) (ctrl.Result, error) {
+	patch := client.MergeFrom(task.DeepCopy())
+	task.Status.Phase = tideprojectv1alpha3.LevelPhaseSucceeded
+	meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha3.ConditionSucceeded,
+		Status:             metav1.ConditionTrue,
+		Reason:             "VerifierApproved",
+		Message:            "Independent verifier approved the locked verification contract",
+		LastTransitionTime: metav1.Now(),
+	})
+	applyLoopStatus(task, out, tideprojectv1alpha3.ExitApproved)
+	if !out.CompletedAt.IsZero() {
+		ct := metav1.NewTime(out.CompletedAt)
+		task.Status.CompletedAt = &ct
+	}
+	if err := r.Status().Patch(ctx, task, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+	r.settleVerifierSpend(ctx, task, project, out)
+	r.finishVerifierTerminal(ctx, task, project, out, "")
+	return ctrl.Result{}, nil
+}
+
+// escalateSystem handles the TASK-06 anti-gaming terminal: an attempt's
+// RunEvidence.ChangedFiles intersected the protected evaluator/fixture path
+// set. This is a SYSTEM escalation, structurally distinct from an ordinary
+// BLOCKED/exhausted halt (never counted as a pass, never treated as an
+// ordinary repairable finding) — routed through haltVerify with a dedicated
+// condition Reason so it stays grep-distinguishable in Task.Status and
+// project audit trails.
+func (r *TaskReconciler) escalateSystem(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, out pkgdispatch.EnvelopeOut) (ctrl.Result, error) {
+	logf.FromContext(ctx).Info("anti-gaming escalation: attempt touched a protected evaluator/fixture path", "task", task.Name)
+	return r.haltVerify(ctx, task, project, out,
+		"attempt's changed files intersected the protected evaluator/fixture/threshold path set — system escalation, never a pass",
+		"AntiGamingDetected", tideprojectv1alpha3.ExitEscalated)
+}
+
+// repairOrHalt implements the REPAIRABLE leg of the verdict decision tree
+// (TASK-02/TASK-06). An attempt whose RunEvidence.ChangedFiles intersects the
+// protected evaluator/fixture/threshold path set is a system escalation
+// (escalateSystem), never a plain repair and never a pass. Otherwise, once
+// task.Status.Attempt reaches spec.verification.MaxIterations without an
+// APPROVED verdict, the loop halts (TASK-05, onExhaustion). Otherwise a
+// fresh, evidence-seeded attempt is dispatched (TASK-02).
+func (r *TaskReconciler) repairOrHalt(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, out pkgdispatch.EnvelopeOut) (ctrl.Result, error) {
+	if out.RunEvidence != nil && intersectsProtected(out.RunEvidence.ChangedFiles, protectedPathsFor(task)) {
+		return r.escalateSystem(ctx, task, project, out)
+	}
+	if task.Status.Attempt >= int(task.Spec.Verification.MaxIterations) {
+		return r.haltVerify(ctx, task, project, out,
+			fmt.Sprintf("verification loop exhausted MaxIterations=%d without an APPROVED verdict", task.Spec.Verification.MaxIterations),
+			"VerifyIterationsExhausted", tideprojectv1alpha3.ExitIterationsExhausted)
+	}
+	return r.dispatchRepairAttempt(ctx, task, project, out)
+}
+
+// evidencePacket is the compact, reference-only repair-attempt seed
+// (TASK-02): the failing findings + a bounded run-evidence summary from the
+// verifier's terminal envelope. Never the prior agent's full conversation —
+// only what a fresh attempt needs to target its repair, alongside the
+// ORIGINAL locked spec (task.Spec.PromptPath, untouched by this packet).
+type evidencePacket struct {
+	Attempt      int                       `json:"attempt"`
+	Summary      string                    `json:"summary,omitempty"`
+	Findings     []pkgdispatch.Finding     `json:"findings,omitempty"`
+	ChangedFiles []pkgdispatch.ChangedFile `json:"changedFiles,omitempty"`
+	Commands     []string                  `json:"commands,omitempty"`
+}
+
+// stageEvidencePacket writes a bounded evidence packet (TASK-02) to the
+// per-Project PVC and returns its deterministic, workspace-relative path
+// ("envelopes/<taskUID>/evidence/attempt-<N>.json", the same envelopes/
+// convention every other PVC artifact this package writes/reads uses).
+//
+// The returned path does NOT depend on the write actually succeeding — it is
+// pure string derivation, exactly like task.Spec.PromptPath (the controller
+// sets that reference without ever verifying the file is readable ahead of
+// time; only the in-pod executor's ReadPrompt validates at read time). A
+// write failure here (e.g. the Manager's /workspaces PVC mount is not
+// visible — always true under envtest, which has no real PVC) is logged and
+// tolerated, never blocking the repair dispatch: the fresh attempt still
+// carries the ORIGINAL locked spec regardless of whether the supplementary
+// packet landed.
+func (r *TaskReconciler) stageEvidencePacket(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, out pkgdispatch.EnvelopeOut) string {
+	logger := logf.FromContext(ctx)
+	relPath := path.Join("envelopes", string(task.UID), "evidence", fmt.Sprintf("attempt-%d.json", task.Status.Attempt))
+
+	packet := evidencePacket{Attempt: task.Status.Attempt}
+	if out.Verdict != nil {
+		packet.Summary = out.Verdict.Summary
+		findings := out.Verdict.Findings
+		if len(findings) > stageEvidencePacketMaxFindings {
+			findings = findings[:stageEvidencePacketMaxFindings]
+		}
+		packet.Findings = findings
+	}
+	if out.RunEvidence != nil {
+		bounded := out.RunEvidence.Bounded()
+		packet.ChangedFiles = bounded.ChangedFiles
+		packet.Commands = bounded.Commands
+	}
+
+	data, mErr := json.Marshal(packet)
+	if mErr != nil {
+		logger.Error(mErr, "marshal evidence packet failed (non-fatal); repair attempt dispatches without a packet reference", "task", task.Name)
+		return ""
+	}
+
+	fullPath := filepath.Join("/workspaces", string(project.UID), "workspace", relPath)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		logger.V(1).Info("evidence packet directory not writable (non-fatal; workspace PVC likely not mounted, e.g. envtest); repair attempt still carries the deterministic path",
+			"task", task.Name, "path", fullPath, "error", err.Error())
+		return relPath
+	}
+	if err := os.WriteFile(fullPath, data, 0o644); err != nil {
+		logger.V(1).Info("evidence packet write failed (non-fatal); repair attempt still carries the deterministic path",
+			"task", task.Name, "path", fullPath, "error", err.Error())
+	}
+	return relPath
+}
+
+// dispatchRepairAttempt mints a FRESH quality-iteration attempt
+// (Attempt++ -> new attemptID) — TASK-02, distinct from an infra-retry/
+// eviction rerun, which reconciles the SAME attemptID via checkRunningState's
+// existing Job re-read path and never reaches this function (that path only
+// ever re-reads or re-dispatches the CURRENT task.Status.Attempt's Job — it
+// has no route to repairOrHalt, which is reached exclusively from a
+// TERMINAL verifier Job via checkVerifyingState/handleVerifierCompletion).
+// The fresh attempt is seeded with the ORIGINAL locked spec
+// (task.Spec.PromptPath, re-read fresh by the executor at dispatch time —
+// untouched here, never the prior agent's full context) plus a bounded
+// evidence packet staged via stageEvidencePacket. Mirrors createDispatchJob's
+// Job-build shape but bypasses prepareDispatch's legacy maxAttemptsPerTask
+// check entirely — MaxIterations (already checked by repairOrHalt) is the
+// authoritative bound for quality-iteration attempts (TASK-05 supersedes the
+// blind per-task cap for this path; the eviction/infra-retry path is
+// unaffected and untouched by this function).
+func (r *TaskReconciler) dispatchRepairAttempt(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, out pkgdispatch.EnvelopeOut) (ctrl.Result, error) {
+	logger := logf.FromContext(ctx)
+
+	packetPath := r.stageEvidencePacket(ctx, task, project, out)
+
+	attempt, aErr := r.nextAttempt(ctx, task)
+	if aErr != nil {
+		return ctrl.Result{}, fmt.Errorf("compute next repair attempt: %w", aErr)
+	}
+
+	taskCaps := podjob.DefaultCaps(task.Spec.Caps, podjob.JobKindExecutor)
+	wallClock := taskCaps.WallClockSeconds
+	token, tErr := credproxy.Sign(r.Deps.SigningKey, string(task.UID), time.Duration(wallClock+podjob.DefaultWallClockGraceSeconds)*time.Second)
+	if tErr != nil {
+		return ctrl.Result{}, fmt.Errorf("mint repair-attempt signed token: %w", tErr)
+	}
+
+	_, envInJSON, bErr := r.buildEnvelopeIn(ctx, task, project, attempt, token, packetPath)
+	if bErr != nil {
+		return ctrl.Result{}, bErr
+	}
+
+	patch := client.MergeFromWithOptions(task.DeepCopy(), client.MergeFromWithOptimisticLock{})
+	// applyLoopStatus BEFORE reassigning Status.Attempt below: LastEvaluation
+	// must summarize the attempt that was JUST verified (Iteration mirrors
+	// the OLD Status.Attempt), never the fresh attempt about to dispatch.
+	applyLoopStatus(task, out, "") // loop continues: ExitReason stays empty (loop_types.go's own contract)
+	task.Status.Attempt = attempt
+	task.Status.Phase = tideprojectv1alpha3.LevelPhaseRunning
+	now := metav1.Now()
+	task.Status.StartedAt = &now
+	meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha3.ConditionRunning,
+		Status:             metav1.ConditionTrue,
+		Reason:             "RepairAttemptDispatched",
+		Message:            fmt.Sprintf("Verifier found repairable findings; dispatching fresh quality-iteration attempt %d", attempt),
+		LastTransitionTime: metav1.Now(),
+	})
+	if pErr := r.Status().Patch(ctx, task, patch); pErr != nil {
+		return ctrl.Result{}, pErr
+	}
+
+	// Settle the verifier's own outstanding reservation BEFORE this fresh
+	// attempt's own Reserve below re-keys the same ReservationStore entry
+	// (Reserve overwrites, never adds) — a clean one-reservation-at-a-time
+	// handoff, mirroring handleJobCompletion's settleExecutorReservation
+	// suppression pattern from Plan 06.
+	r.settleVerifierSpend(ctx, task, project, out)
+
+	var secretUID string
+	if project.Spec.ProviderSecretRef != "" {
+		var secret corev1.Secret
+		if sErr := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: project.Spec.ProviderSecretRef}, &secret); sErr == nil {
+			secretUID = string(secret.UID)
+		}
+	}
+	agentName, agentEmail := resolveAgentIdentity(project, r.Deps.HelmProviderDefaults)
+	resolvedImage := resolveImage(project, "task", r.Deps.HelmProviderDefaults)
+	job := podjob.BuildJobSpec(podjob.BuildOptions{
+		Kind:                 podjob.JobKindExecutor,
+		Task:                 task,
+		ParentObj:            task,
+		Level:                "task",
+		Project:              project,
+		Attempt:              attempt,
+		SignedToken:          token,
+		EnvelopeInJSON:       envInJSON,
+		SubagentImage:        resolvedImage,
+		AgentName:            agentName,
+		AgentEmail:           agentEmail,
+		CredproxyImage:       r.Deps.CredproxyImage,
+		SecretUID:            secretUID,
+		PVCName:              r.sharedPVCName(),
+		ProjectUID:           string(project.UID),
+		EstimatedCostCents:   r.Deps.ReserveEstimateCents,
+		PricingOverridesJSON: r.Deps.PricingOverridesJSON,
+	})
+	if oErr := owner.EnsureOwnerRef(job, task, r.Scheme); oErr != nil {
+		return ctrl.Result{}, fmt.Errorf("ensure owner ref on repair-attempt job: %w", oErr)
+	}
+	if cErr := r.Create(ctx, job); cErr != nil {
+		if !apierrors.IsAlreadyExists(cErr) {
+			return ctrl.Result{}, fmt.Errorf("create repair-attempt job: %w", cErr)
+		}
+		// AlreadyExists: idempotent success (Pitfall F / SUB-03).
+		logger.Info("repair-attempt job already exists; treating as successful dispatch", "job", job.Name)
+	}
+	if r.Deps.ReserveEstimateCents > 0 {
+		r.Deps.Reservations.Reserve(string(task.UID), r.Deps.ReserveEstimateCents)
+	}
+
+	logger.Info("dispatched quality-iteration repair attempt", "task", task.Name, "attempt", attempt, "job", job.Name, "evidencePacketPath", packetPath)
+	return ctrl.Result{}, nil
+}
+
+// handleVerifierCompletion consumes a terminal verifier Job's
+// EnvelopeOut.Verdict (Plan 07, the BACKWARD half of the verifier
+// sub-state-machine Plan 06 opened). Fail-closed by construction: an
+// unreadable envelope or a nil Verdict halts via haltVerify (BLOCKED), never
+// Succeeded (D-04). ClassifyVerdict drives the three-tier decision:
+// APPROVED (and no deterministic gate-command dominance, D-06) ->
+// markVerifiedSucceeded; REPAIRABLE, or an APPROVED verdict a red
+// gate-command Finding dominates -> repairOrHalt; BLOCKED (and
+// ClassifyVerdict's own fail-closed default) -> haltVerify.
+func (r *TaskReconciler) handleVerifierCompletion(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, verifierJob *batchv1.Job) (ctrl.Result, error) {
+	out, err := r.Deps.EnvReader.ReadOut(ctx, string(project.UID), string(task.UID))
+	if err != nil {
+		// Fail-closed (mirrors handleJobCompletion's EnvelopeReadFailed path,
+		// :1251): a Task whose verifier envelope cannot be read is never
+		// Succeeded. synthesizeNoEnvelopeOut preserves LoopRunID/AttemptID
+		// identity through the degraded envelope (same task.UID+Attempt tuple
+		// buildVerifierEnvelopeIn stamped at dispatch time).
+		synthOut := synthesizeNoEnvelopeOut(task, verifierJob)
+		r.emitEvaluatorSpanForVerifier(ctx, task, project, verifierJob, synthOut, false)
+		return r.haltVerify(ctx, task, project, synthOut, err.Error(), "VerifierEnvelopeUnreadable", tideprojectv1alpha3.ExitEscalated)
+	}
+	if out.Verdict == nil {
+		r.emitEvaluatorSpanForVerifier(ctx, task, project, verifierJob, out, true)
+		return r.haltVerify(ctx, task, project, out, "verifier envelope carried no verdict (fail-closed BLOCKED)", "VerifierVerdictMissing", tideprojectv1alpha3.ExitEscalated)
+	}
+
+	// OBS-03/D-11: the EVALUATOR sibling span, emitted before the terminal
+	// status patches below (span-loss-averse ordering, mirrors
+	// emitTaskSpanOnce's own call-site ordering in handleJobCompletion).
+	r.emitEvaluatorSpanForVerifier(ctx, task, project, verifierJob, out, true)
+
+	// D-04: re-derive the classification through the canonical fail-closed
+	// ClassifyVerdict function rather than trusting out.Verdict.Verdict's
+	// raw decoded string directly — json.Unmarshal into the Verdict string
+	// type does not itself enforce the three-value enum, so an
+	// unrecognized/malformed value must still collapse through
+	// ClassifyVerdict's own default->BLOCKED branch.
+	raw, mErr := json.Marshal(out.Verdict)
+	if mErr != nil {
+		return r.haltVerify(ctx, task, project, out, mErr.Error(), "VerifierVerdictMarshalFailed", tideprojectv1alpha3.ExitEscalated)
+	}
+
+	switch pkgdispatch.ClassifyVerdict(raw) {
+	case pkgdispatch.VerdictApproved:
+		if hasDeterministicFailure(out.Verdict) {
+			// D-06 defence-in-depth: a red gate-command Finding dominates
+			// even a top-level APPROVED verdict, controller-side.
+			return r.repairOrHalt(ctx, task, project, out)
+		}
+		return r.markVerifiedSucceeded(ctx, task, project, out)
+	case pkgdispatch.VerdictRepairable:
+		return r.repairOrHalt(ctx, task, project, out)
+	default: // pkgdispatch.VerdictBlocked, and ClassifyVerdict's own fail-closed default.
+		return r.haltVerify(ctx, task, project, out, out.Verdict.Summary, "VerifyBlocked", tideprojectv1alpha3.ExitEscalated)
+	}
 }
 
 // globalDependentsMapper re-enqueues all Tasks in the same project whose

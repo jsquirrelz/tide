@@ -986,7 +986,7 @@ func TestBuildEnvelopeInExecutorIgnoresSharedContext(t *testing.T) {
 		},
 	}
 
-	envIn, envBytes, err := r.buildEnvelopeIn(context.Background(), task, project, 1, "signed-token")
+	envIn, envBytes, err := r.buildEnvelopeIn(context.Background(), task, project, 1, "signed-token", "")
 	if err != nil {
 		t.Fatalf("buildEnvelopeIn: %v", err)
 	}

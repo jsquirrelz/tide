@@ -168,8 +168,12 @@ type EnvelopeIn struct {
 	// so production envelopes are not polluted with "dev: null".
 	Dev *Dev `json:"dev,omitempty"`
 
-	// Verify carries verify-dispatch-specific input data. Populated only
-	// when Role=="verifier" (D-03); omitted from JSON otherwise, mirroring
+	// Verify carries verify-dispatch-specific input data. Populated when
+	// Role=="verifier" (a verify dispatch, D-03) OR when Role=="executor"
+	// carries a TASK-02 repair attempt's staged EvidencePacketPath (Phase 51
+	// Plan 07, controller.buildEnvelopeIn) — GateCommand/Commands/
+	// RequiredArtifacts/EvaluatorRef stay empty on the latter; only
+	// EvidencePacketPath is set. Omitted from JSON when nil, mirroring
 	// Dispatch/Dev.
 	Verify *VerifyContext `json:"verify,omitempty"`
 

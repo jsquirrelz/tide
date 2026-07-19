@@ -634,7 +634,7 @@ func TestBuildEnvelopeIn_PromptPath(t *testing.T) {
 	}
 
 	t.Run("PromptPath stamped on EnvelopeIn", func(t *testing.T) {
-		envIn, _, err := r.buildEnvelopeIn(context.Background(), task, project, 1, "tok")
+		envIn, _, err := r.buildEnvelopeIn(context.Background(), task, project, 1, "tok", "")
 		if err != nil {
 			t.Fatalf("buildEnvelopeIn: %v", err)
 		}
@@ -650,7 +650,7 @@ func TestBuildEnvelopeIn_PromptPath(t *testing.T) {
 	// 09-09: the executor's worktree branch is threaded via EnvelopeIn.Branch
 	// from project.Status.Git.BranchName (replaces the never-written branch.txt).
 	t.Run("Branch stamped from project run branch", func(t *testing.T) {
-		envIn, _, err := r.buildEnvelopeIn(context.Background(), task, project, 1, "tok")
+		envIn, _, err := r.buildEnvelopeIn(context.Background(), task, project, 1, "tok", "")
 		if err != nil {
 			t.Fatalf("buildEnvelopeIn: %v", err)
 		}
@@ -666,7 +666,7 @@ func TestBuildEnvelopeIn_PromptPath(t *testing.T) {
 	t.Run("Provider resolved with anthropic vendor and task model", func(t *testing.T) {
 		projWithModel := project.DeepCopy()
 		projWithModel.Spec.Subagent.Model = "claude-haiku-4-5"
-		envIn, _, err := r.buildEnvelopeIn(context.Background(), task, projWithModel, 1, "tok")
+		envIn, _, err := r.buildEnvelopeIn(context.Background(), task, projWithModel, 1, "tok", "")
 		if err != nil {
 			t.Fatalf("buildEnvelopeIn: %v", err)
 		}
@@ -681,7 +681,7 @@ func TestBuildEnvelopeIn_PromptPath(t *testing.T) {
 	// D-01 (50-06 Task 1): LoopRunID/AttemptID derive from the same
 	// taskUID+attempt tuple as podjob.JobName — never minted or persisted.
 	t.Run("LoopRunID and AttemptID stamped from task UID + attempt (D-01)", func(t *testing.T) {
-		envIn, _, err := r.buildEnvelopeIn(context.Background(), task, project, 2, "tok")
+		envIn, _, err := r.buildEnvelopeIn(context.Background(), task, project, 2, "tok", "")
 		if err != nil {
 			t.Fatalf("buildEnvelopeIn: %v", err)
 		}
@@ -695,7 +695,7 @@ func TestBuildEnvelopeIn_PromptPath(t *testing.T) {
 
 	t.Run("AttemptID suffix tracks the attempt number (stable derivation, no randomness)", func(t *testing.T) {
 		for _, attempt := range []int{1, 3} {
-			envIn, _, err := r.buildEnvelopeIn(context.Background(), task, project, attempt, "tok")
+			envIn, _, err := r.buildEnvelopeIn(context.Background(), task, project, attempt, "tok", "")
 			if err != nil {
 				t.Fatalf("buildEnvelopeIn(attempt=%d): %v", attempt, err)
 			}
