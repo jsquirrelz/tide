@@ -492,19 +492,22 @@ func JobName(taskUID types.UID, attempt int) string {
 
 **All three items above are grounded in direct repo reads this session (not training-data assumptions) — tagged here per the "risk if wrong" framing the planner should sanity-check, not because the underlying claims are unverified.**
 
-## Open Questions
+## Open Questions (RESOLVED at planning — see Plans 50-03/50-04/50-06)
 
 1. **Does Phase 50 wire `CheckCaps` (iteration/token) into the live `anthropic.Run()` path, and/or does the controller synthesize `cap_exceeded` for `ActiveDeadlineSeconds`-killed Jobs?**
+   - **RESOLVED — BOTH halves (Plan 50-04 + Plan 50-06).** In-pod: `harness.CheckCaps` is wired into `anthropic.Run()`'s post-`ParseStream` step so an iteration/token cap violation produces a real `cap_exceeded` envelope (50-04). Controller-side: the `EnvelopeReadFailed`/no-envelope branch synthesizes `TerminalReason: cap_exceeded` for `DeadlineExceeded`-killed Jobs (the only place a wall-clock SIGKILL can be classified, since the pod never writes `out.json`) via `synthesizeNoEnvelopeOut`, fail-closed on any other Job-failure reason (50-06). `cap_exceeded` is therefore never a theoretically-reachable-but-dead value.
    - What we know: neither path exists today; `CheckCaps` is unit-tested but orphaned; wall-clock kills bypass envelope-writing entirely.
    - What's unclear: whether this is in Phase 50's "hardening" scope or is implicitly deferred (it's not named in CONTEXT.md's "Deliberately NOT in this phase" list, but it also isn't explicitly claimed).
    - Recommendation: the plan should explicitly scope this in or out with a one-line rationale, rather than silently shipping `cap_exceeded` as a theoretically-reachable-but-practically-dead enum value. At minimum, wiring `CheckCaps` into `anthropic.Run()`'s post-`ParseStream` step (comparing `usage.Iterations`/`usage.InputTokens`/`usage.OutputTokens` against `in.Caps`) is a small, self-contained addition with an existing, tested helper (`harness.CheckCaps`) ready to reuse — likely the highest-value, lowest-risk EXEC-02 completion.
 
 2. **Where does the prompt-template version number come from?**
+   - **RESOLVED (Plan 50-04).** A compiled-in package-level `PromptTemplateVersion` const (bumped by hand alongside template content) + the CLI runtime version from a `claude --version` probe — the recommendation below, adopted as-is.
    - What we know: no version marker exists on the compiled-in Go templates (`internal/subagent/common/prompt_templates.go`) today.
    - What's unclear: whether the plan adds a version const per template family, a content-hash, or a single package-level version bumped manually.
    - Recommendation: a simple package-level `const PromptTemplateVersion = "v1"` (bumped by hand alongside template content changes) is the lowest-friction option and matches this repo's general preference for explicit compiled-in constants over auto-derived hashes (e.g., `highSeverityFindingToken` in `envelope.go:474`).
 
 3. **Does the plan add any new Prometheus metric at all (D-06's open discretion)?**
+   - **RESOLVED — guard-only, no new metric (Plan 50-03).** The minimal-scope reading below was adopted: harden the dual cardinality guard (analyzer + runtime grep) only; the first loop-scoped metric waits for Phase 51/52's real loop-outcome consumer.
    - What we know: LOOP-03/five-loop-model explicitly says run-native detail belongs in traces, not metrics; the existing 7 TELEM-03 metrics already carry `{project,phase,plan,wave}` — no task/run-scoped metric exists today.
    - What's unclear: whether OBS-02's "metrics use bounded labels (loop kind, exit reason, evaluator type, risk tier)" implies a NEW metric (e.g. a loop-outcome counter) is expected this phase, or whether it's purely a guard against future violations.
    - Recommendation: given ROADMAP's 5 success criteria for Phase 50 mention "proven by a label-cardinality test" (criterion 5) without naming a new metric, the minimal-scope reading is: harden the guard only, add no new metric, and let Phase 51/52 (which will have real loop-outcome data — `EvaluationSummary.Decision`, `LoopStatus.ExitReason`) add the first loop-scoped metric when there's a real consumer. This matches this repo's repeated "never ship a speculative superset ahead of a real consumer" principle (`loop_types.go:35-36`, `:90-91`).
