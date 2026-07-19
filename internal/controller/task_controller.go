@@ -2260,6 +2260,19 @@ func (r *TaskReconciler) buildVerifierEnvelopeIn(task *tideprojectv1alpha3.Task,
 	if tErr != nil {
 		return pkgdispatch.EnvelopeIn{}, nil, fmt.Errorf("load verifier prompt template: %w", tErr)
 	}
+	// EVAL-04 (ME-02): the template's "Original task instruction" section must
+	// carry the executor's ORIGINAL intent so the verifier judges against it,
+	// not its own preferences. Stamp the executor's task-instruction path onto
+	// the DEDICATED PromptPath field (never the self-referential envIn.Prompt,
+	// which is still empty here and is precisely what this render produces — the
+	// original bug rendered {{.Prompt}} into itself as the empty string). The
+	// template references {{.PromptPath}}; the Manager cannot read the prompt
+	// CONTENT cross-namespace (Defect #10b — it lives on the project-namespace
+	// PVC), so the verifier reads the original task artifact in-pod from its own
+	// read-only /workspace mount, exactly as the executor reads its own
+	// PromptPath (the verifier's Python entrypoint ignores this field for its
+	// own execution — it runs the rendered envIn.Prompt below).
+	envIn.PromptPath = task.Spec.PromptPath
 	var promptBuf bytes.Buffer
 	if xErr := tmpl.Execute(&promptBuf, envIn); xErr != nil {
 		return pkgdispatch.EnvelopeIn{}, nil, fmt.Errorf("render verifier prompt template: %w", xErr)

@@ -45,7 +45,7 @@ var templateFS embed.FS
 // cross-attempt evidence comparison (EXEC-03); a stale value silently
 // corrupts that comparison by claiming two attempts ran the same prompt when
 // they did not.
-const PromptTemplateVersion = "v2"
+const PromptTemplateVersion = "v3"
 
 // LoadPromptTemplate returns the compiled-in Go text/template for the given
 // (role, level) tuple. v2 (Phase 51 EVAL-04) ships six templates — one per

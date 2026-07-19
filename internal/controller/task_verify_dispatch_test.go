@@ -385,6 +385,12 @@ var _ = Describe("Task loop: verifier dispatch (Phase 51 Plan 06, VerifierDispat
 		Expect(envIn.Verify.EvaluatorRef).To(Equal("default-evaluator"))
 		Expect(envIn.Prompt).To(ContainSubstring("make test-verify"),
 			"the prompt must be rendered controller-side via task_verifier.tmpl")
+		// ME-02/EVAL-04: the "Original task instruction" section must carry the
+		// executor's task-intent path (not the empty self-referential envIn.Prompt),
+		// so the verifier judges the candidate against the task intent.
+		Expect(task.Spec.PromptPath).NotTo(BeEmpty())
+		Expect(envIn.Prompt).To(ContainSubstring(task.Spec.PromptPath),
+			"the rendered verifier prompt must carry the executor's original task-instruction path")
 	})
 
 	It("preserves the legacy exit-0 -> Succeeded path for a Task with no verification contract (OQ2)", func() {

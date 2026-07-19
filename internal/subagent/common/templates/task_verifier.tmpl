@@ -60,6 +60,7 @@ Filesystem layout (mounted by the in-pod harness):
   /workspace/worktrees/{{.TaskUID}}/             — the candidate's worktree (read-only)
   /workspace/repo.git/                            — bare clone (read-only)
 
-Original task prompt (what the executor was asked to do — judge the
-candidate against this intent, not against your own preferences):
-{{.Prompt}}
+Original task instruction (what the executor was asked to do — judge the
+candidate against this intent, not against your own preferences). Read the
+.spec.prompt field of the locked task artifact in your read-only mount:
+  /workspace/{{.PromptPath}}
