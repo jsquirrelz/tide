@@ -136,11 +136,25 @@ func run(ctx context.Context, envelopePath, workspaceRoot string, stdout, stderr
 		fmt.Fprintf(stderr, "claude-subagent: %v\n", runErr)
 		out = failEnvelope(env, runErr, 1, "subagent-error", pkgdispatch.TerminalReasonToolFailure)
 	}
-	if runErr == nil && env.Role == "executor" {
+	// EXEC-02/EXEC-03: only a run anthropic.Run() classified "completed" enters
+	// the commit path. A run that already terminated cap_exceeded / tool_failure
+	// / invalid_output is returned as (out, nil) with that reason stamped — it
+	// must be written verbatim. Without the TerminalReasonCompleted gate the
+	// commit branch would downgrade an already-classified failure (a capped run
+	// with no diff shipping as blocked, a commit error rebuilding a cap_exceeded
+	// run as tool_failure) and commit a suspect capped run's partial work as a
+	// normal head commit — defeating the exact classification Phase 51 consumes.
+	if runErr == nil && env.Role == "executor" && out.TerminalReason == pkgdispatch.TerminalReasonCompleted {
 		worktreeDir := filepath.Join(workspaceRoot, "worktrees", env.TaskUID)
 		hash, isEmpty, commitErr := commitWorktreeFunc(worktreeDir, env.TaskUID)
 		if commitErr != nil {
-			out = failEnvelope(env, commitErr, 1, "commit-failed", pkgdispatch.TerminalReasonToolFailure)
+			// EXEC-03: preserve the RunEvidence anthropic.Run() already
+			// assembled (Model/PromptVersion/RuntimeVersion/Commands) — a commit
+			// failure is a routine executor failure mode and must stay
+			// debuggable, not lose provenance to a from-scratch failEnvelope.
+			failed := failEnvelope(env, commitErr, 1, "commit-failed", pkgdispatch.TerminalReasonToolFailure)
+			failed.RunEvidence = out.RunEvidence
+			out = failed
 		} else if isEmpty {
 			out.ExitCode = 1
 			out.Result = "empty-diff"
@@ -151,8 +165,6 @@ func run(ctx context.Context, envelopePath, workspaceRoot string, stdout, stderr
 			// D-03/EXEC-03: complete the RunEvidence the anthropic layer
 			// started (Model/PromptVersion/RuntimeVersion/Commands) with the
 			// changed-file manifest from the commit CommitWorktree just made.
-			// out.TerminalReason arrives as "completed" from anthropic.Run()'s
-			// base literal — not re-set here.
 			completeRunEvidenceWithChangedFiles(stderr, &out, worktreeDir)
 		}
 	}

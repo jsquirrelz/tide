@@ -584,3 +584,128 @@ func TestClaudeSubagentMain_SuccessPathCompletesRunEvidence(t *testing.T) {
 			got.RunEvidence.ChangedFileTotal, len(got.RunEvidence.ChangedFiles))
 	}
 }
+
+// fakeReasonRunner is an anthropicRunner that returns a caller-supplied
+// EnvelopeOut with a nil dispatch-level error — used to exercise the
+// non-"completed" terminal-reason outcomes anthropic.Run() returns as
+// (out, nil) (cap_exceeded / tool_failure) through the executor commit path.
+type fakeReasonRunner struct{ out pkgdispatch.EnvelopeOut }
+
+func (f fakeReasonRunner) Run(_ context.Context, _ pkgdispatch.EnvelopeIn) (pkgdispatch.EnvelopeOut, error) {
+	return f.out, nil
+}
+
+// TestClaudeSubagentMain_NonCompletedRunBypassesCommit is the HIGH-01
+// regression proof: a run anthropic.Run() already classified as a failure but
+// returned as (out, nil) (cap_exceeded / tool_failure) must be written verbatim
+// — the executor commit block must NOT downgrade its TerminalReason
+// (e.g. cap_exceeded -> blocked) nor discard the RunEvidence it assembled. The
+// commit fake fails the test if the completed-gate lets a non-"completed" run
+// reach the commit path at all.
+func TestClaudeSubagentMain_NonCompletedRunBypassesCommit(t *testing.T) {
+	for _, reason := range []pkgdispatch.TerminalReason{
+		pkgdispatch.TerminalReasonCapExceeded,
+		pkgdispatch.TerminalReasonToolFailure,
+	} {
+		t.Run(string(reason), func(t *testing.T) {
+			tmp := t.TempDir()
+			evidence := pkgdispatch.RunEvidence{Model: "claude-sonnet-4-6", PromptVersion: "v1"}
+			origSA := newSubagent
+			t.Cleanup(func() { newSubagent = origSA })
+			newSubagent = func(_, _ string, _ map[string]pkgdispatch.PriceOverride) anthropicRunner {
+				return fakeReasonRunner{out: pkgdispatch.EnvelopeOut{
+					APIVersion:     pkgdispatch.APIVersionV1Alpha1,
+					Kind:           pkgdispatch.KindTaskEnvelopeOut,
+					TaskUID:        "t-noncompleted",
+					ExitCode:       1,
+					Result:         "cap-or-tool",
+					TerminalReason: reason,
+					RunEvidence:    &evidence,
+				}}
+			}
+			origEW := ensureWorktreeFunc
+			t.Cleanup(func() { ensureWorktreeFunc = origEW })
+			ensureWorktreeFunc = func(_ pkgdispatch.EnvelopeIn, _, _ string) error { return nil }
+			origCW := commitWorktreeFunc
+			t.Cleanup(func() { commitWorktreeFunc = origCW })
+			commitWorktreeFunc = func(_, _ string) (plumbing.Hash, bool, error) {
+				t.Errorf("commit path must be skipped for a non-completed (%s) executor run", reason)
+				return plumbing.ZeroHash, false, fmt.Errorf("commit fake must not be called")
+			}
+			envelopePath := filepath.Join(tmp, "envelopes", "t-noncompleted", "in.json")
+			writeEnvelopeInFile(t, envelopePath, pkgdispatch.EnvelopeIn{
+				APIVersion: pkgdispatch.APIVersionV1Alpha1, Kind: pkgdispatch.KindTaskEnvelopeIn,
+				TaskUID: "t-noncompleted", Role: "executor", Level: "task",
+				Provider: pkgdispatch.ProviderSpec{Vendor: "anthropic", Model: "claude-sonnet-4-6"},
+			})
+			var stdout, stderr bytes.Buffer
+			_ = run(context.Background(), envelopePath, tmp, &stdout, &stderr)
+			got := readEnvelopeOutFile(t, filepath.Join(filepath.Dir(envelopePath), "out.json"))
+			if got.TerminalReason != reason {
+				t.Errorf("TerminalReason: got %q, want %q (must survive the executor commit path)",
+					got.TerminalReason, reason)
+			}
+			if got.RunEvidence == nil || got.RunEvidence.Model == "" {
+				t.Errorf("RunEvidence: got %+v, want the anthropic-assembled evidence preserved", got.RunEvidence)
+			}
+		})
+	}
+}
+
+// TestClaudeSubagentMain_CommitFailedPreservesRunEvidence is the MED-01
+// regression proof: when a "completed" executor run's commit fails, the
+// downgraded commit-failed envelope must still carry the RunEvidence
+// anthropic.Run() assembled — provenance survives a routine commit failure.
+func TestClaudeSubagentMain_CommitFailedPreservesRunEvidence(t *testing.T) {
+	tmp := t.TempDir()
+	evidence := pkgdispatch.RunEvidence{Model: "claude-sonnet-4-6", PromptVersion: "v1"}
+	origSA := newSubagent
+	t.Cleanup(func() { newSubagent = origSA })
+	newSubagent = func(_, _ string, _ map[string]pkgdispatch.PriceOverride) anthropicRunner {
+		return fakeReasonRunner{out: pkgdispatch.EnvelopeOut{
+			APIVersion: pkgdispatch.APIVersionV1Alpha1, Kind: pkgdispatch.KindTaskEnvelopeOut,
+			TaskUID: "t-commit-ev", TerminalReason: pkgdispatch.TerminalReasonCompleted,
+			RunEvidence: &evidence,
+		}}
+	}
+	origEW := ensureWorktreeFunc
+	t.Cleanup(func() { ensureWorktreeFunc = origEW })
+	ensureWorktreeFunc = func(_ pkgdispatch.EnvelopeIn, _, _ string) error { return nil }
+	origCW := commitWorktreeFunc
+	t.Cleanup(func() { commitWorktreeFunc = origCW })
+	commitWorktreeFunc = func(_, _ string) (plumbing.Hash, bool, error) {
+		return plumbing.ZeroHash, false, fmt.Errorf("commit boom")
+	}
+	envelopePath := filepath.Join(tmp, "envelopes", "t-commit-ev", "in.json")
+	writeEnvelopeInFile(t, envelopePath, pkgdispatch.EnvelopeIn{
+		APIVersion: pkgdispatch.APIVersionV1Alpha1, Kind: pkgdispatch.KindTaskEnvelopeIn,
+		TaskUID: "t-commit-ev", Role: "executor", Level: "task",
+		Provider: pkgdispatch.ProviderSpec{Vendor: "anthropic", Model: "claude-sonnet-4-6"},
+	})
+	var stdout, stderr bytes.Buffer
+	_ = run(context.Background(), envelopePath, tmp, &stdout, &stderr)
+	got := readEnvelopeOutFile(t, filepath.Join(filepath.Dir(envelopePath), "out.json"))
+	if got.Result != "commit-failed" {
+		t.Errorf("Result: got %q, want %q", got.Result, "commit-failed")
+	}
+	if got.TerminalReason != pkgdispatch.TerminalReasonToolFailure {
+		t.Errorf("TerminalReason: got %q, want %q", got.TerminalReason, pkgdispatch.TerminalReasonToolFailure)
+	}
+	if got.RunEvidence == nil || got.RunEvidence.Model == "" {
+		t.Errorf("MED-01: RunEvidence must be preserved on commit-failed, got %+v", got.RunEvidence)
+	}
+}
+
+// readEnvelopeOutFile reads and unmarshals an out.json written by run().
+func readEnvelopeOutFile(t *testing.T, outPath string) pkgdispatch.EnvelopeOut {
+	t.Helper()
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read out.json: %v", err)
+	}
+	var got pkgdispatch.EnvelopeOut
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal out.json: %v", err)
+	}
+	return got
+}
