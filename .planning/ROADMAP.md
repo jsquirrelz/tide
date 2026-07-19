@@ -28,7 +28,7 @@ Phase numbering continues from v1.0.8 (last phase was 47); v1.0.9 starts at Phas
 
 - [x] **Phase 48: LangGraph Evaluator Image + Credproxy-TLS Spike** - Read-only LangGraph image behind the unchanged Subagent seam; live TLS trust spike de-risks everything downstream (completed 2026-07-18)
 - [x] **Phase 49: Common Loop Contract + Verdict/Envelope/Persistence Schema** - `LoopPolicy`/`LoopStatus` + `gate_decision` schema + findings size×locality persistence, locked before any consumer logic (completed 2026-07-18)
-- [ ] **Phase 50: Execution-Loop Hardening + Loop-Native Observability** - `loopRunID`/terminal reasons/run-evidence envelope + `loop.*`/`evaluation.*` spans the Task loop will consume
+- [x] **Phase 50: Execution-Loop Hardening + Loop-Native Observability** - `loopRunID`/terminal reasons/run-evidence envelope + `loop.*`/`evaluation.*` spans the Task loop will consume (completed 2026-07-19)
 - [ ] **Phase 51: The Task Loop** - Independent-evaluator-driven verification contract, fresh-attempt-with-evidence-packet, three-tier escalation, concurrency/tracing safety wired at the same dispatch sites
 - [ ] **Phase 52: Per-Level LoopPolicy Parameterization** - The same verification contract runs at every level as a `LoopPolicy` parameterization — plan-check re-plan, Phase/Milestone/Project escalation
 - [ ] **Phase 53: Chart Config + Dashboard Provenance Surfacing** - Chart-first per-level defaults (safe on upgrade) + nested loop provenance on the dashboard
@@ -125,7 +125,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 50-07-PLAN.md — Reporter LLM-span loop-identity threading: Args → tide-reporter flags → EmitSpans indexed loop.run_id/loop.iteration (Wave 3)
+- [x] 50-07-PLAN.md — Reporter LLM-span loop-identity threading: Args → tide-reporter flags → EmitSpans indexed loop.run_id/loop.iteration (Wave 3)
 
 ### Phase 51: The Task Loop
 
@@ -188,7 +188,7 @@ Phases execute in numeric order: 48 → 49 → 50 → 51 → 52 → 53
 | 42–47 (see archive) | v1.0.8 | 32/32 | Complete | 2026-07-17 |
 | 48. LangGraph Evaluator Image + Credproxy-TLS Spike | v1.0.9 | 5/5 | Complete   | 2026-07-18 |
 | 49. Common Loop Contract + Verdict/Envelope/Persistence Schema | v1.0.9 | 4/4 | Complete    | 2026-07-18 |
-| 50. Execution-Loop Hardening + Loop-Native Observability | v1.0.9 | 6/7 | In Progress|  |
+| 50. Execution-Loop Hardening + Loop-Native Observability | v1.0.9 | 7/7 | Complete   | 2026-07-19 |
 | 51. The Task Loop | v1.0.9 | 0/TBD | Not started | - |
 | 52. Per-Level LoopPolicy Parameterization | v1.0.9 | 0/TBD | Not started | - |
 | 53. Chart Config + Dashboard Provenance Surfacing | v1.0.9 | 0/TBD | Not started | - |
