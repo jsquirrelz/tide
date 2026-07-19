@@ -35,14 +35,37 @@ var vecConstructors = map[string]struct{}{
 	"NewSummaryVec":   {},
 }
 
-// Analyzer rejects the literal string "task" appearing in the label slice
-// argument of any prometheus.New*Vec call. The reported diagnostic is
-// positioned at the offending string literal so analysistest `// want`
-// directives sit on the label-slice line, not the call expression.
+// forbiddenLabels is the D-06-locked set of label names that must never
+// appear in a prometheus.New*Vec label slice. "task" is the original
+// Pitfall-17 entry; the remaining eight are run-ID-shaped names — an
+// agent-controlled or per-attempt string reaching any of these as a
+// Prometheus label multiplies series cardinality without bound (OBS-02 /
+// D-06). Loop-native run detail belongs in traces, not metrics (LOOP-03) —
+// metrics stay aggregate with bounded enum labels only (e.g.
+// terminal_reason, exit_reason, loop_kind, evaluator_type, risk_tier, which
+// this analyzer deliberately does NOT reject).
+var forbiddenLabels = map[string]struct{}{
+	"task":        {},
+	"run_id":      {},
+	"loop_run_id": {},
+	"run":         {},
+	"attempt":     {},
+	"attempt_id":  {},
+	"trace_id":    {},
+	"task_uid":    {},
+	"uid":         {},
+}
+
+// Analyzer rejects any of the forbiddenLabels label names appearing in the
+// label slice argument of any prometheus.New*Vec call. The reported
+// diagnostic is positioned at the offending string literal so analysistest
+// `// want` directives sit on the label-slice line, not the call expression.
 var Analyzer = &analysis.Analyzer{
 	Name: "metriccardinality",
-	Doc:  `rejects "task" label literal in prometheus.New*Vec calls (OBS-02 / Pitfall 17 / D-X4)`,
-	Run:  run,
+	Doc: `rejects run-ID-shaped label literals in prometheus.New*Vec calls: ` +
+		`task, run_id, loop_run_id, run, attempt, attempt_id, trace_id, ` +
+		`task_uid, uid (OBS-02 / D-06 / Pitfall 17)`,
+	Run: run,
 }
 
 func run(pass *analysis.Pass) (any, error) {
@@ -83,11 +106,11 @@ func run(pass *analysis.Pass) (any, error) {
 					if err != nil {
 						continue
 					}
-					if unquoted == "task" {
+					if _, forbidden := forbiddenLabels[unquoted]; forbidden {
 						pass.Reportf(bl.Pos(),
-							"metriccardinality: %q label forbidden in prometheus.%s(...) — adds unbounded "+
-								"task-axis cardinality (Pitfall 17 / D-X4)",
-							"task", sel.Sel.Name)
+							"metriccardinality: %q label forbidden in prometheus.%s(...) — run-ID-shaped "+
+								"labels add unbounded per-attempt cardinality (OBS-02 / D-06 / Pitfall 17)",
+							unquoted, sel.Sel.Name)
 					}
 				}
 			}

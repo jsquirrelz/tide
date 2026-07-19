@@ -22,10 +22,14 @@ import (
 	"golang.org/x/tools/go/analysis/analysistest"
 )
 
-// TestMetricCardinality asserts the analyzer fires exactly on the four
-// badlabels.go violations (one per *Vec constructor) and stays silent on
-// the goodlabels.go fixture (which exercises all four constructors with
-// clean label slices, plus a NewCounter-singular call that must be ignored).
+// TestMetricCardinality asserts the analyzer fires exactly on the
+// badlabels.go violations — one per forbidden D-06 label name (task,
+// run_id, loop_run_id, run, attempt, attempt_id, trace_id, task_uid, uid),
+// spread across all four *Vec constructors — and stays silent on the
+// goodlabels.go fixture (which exercises all four constructors with clean
+// label slices, the bounded-enum positive controls terminal_reason/
+// exit_reason/loop_kind/evaluator_type/risk_tier, plus a NewCounter-singular
+// call that must be ignored).
 //
 // Fixtures live under testdata/src/{badlabels,goodlabels}/ so analysistest's
 // GOPATH-style resolver picks them up. The stub
@@ -35,11 +39,13 @@ import (
 // analyzer's go.mod.
 func TestMetricCardinality(t *testing.T) {
 	testdata := analysistest.TestData()
-	// Violation fixture: 4 *Vec calls each carrying a "task" label literal.
-	// Each violation is asserted by an in-file `// want` directive.
+	// Violation fixture: *Vec calls each carrying one of the 9 forbidden
+	// D-06 label literals. Each violation is asserted by an in-file
+	// `// want` directive.
 	analysistest.Run(t, testdata, Analyzer, "badlabels")
-	// Clean fixture: 4 *Vec calls with safe label slices + 1 NewCounter
-	// singular call. Absence of any `// want` directive means analysistest
-	// will fail the test if the analyzer emits a diagnostic here.
+	// Clean fixture: *Vec calls with safe label slices (including the
+	// bounded-enum positive controls) + 1 NewCounter singular call. Absence
+	// of any `// want` directive means analysistest will fail the test if
+	// the analyzer emits a diagnostic here.
 	analysistest.Run(t, testdata, Analyzer, "goodlabels")
 }
