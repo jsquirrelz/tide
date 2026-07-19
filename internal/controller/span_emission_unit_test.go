@@ -1168,3 +1168,333 @@ func TestBuildLevelEnrichmentNilProject(t *testing.T) {
 		t.Errorf("buildLevelEnrichment(nil project) tags = %v, want nil", tags)
 	}
 }
+
+// ─── synthesizeEvaluatorSpan (Phase 51, OBS-03/D-11) ──────────────────────
+//
+// Plain testing.T functions, same rationale as synthesizePlannerSpan's unit
+// tests above: pure/K8s-object inputs never need envtest. No live call site
+// exists yet (Plan 07 wires it) — these tests drive the standalone emitter
+// directly. Run without pulling in the package's Ginkgo BeforeSuite via
+// `go test ./internal/controller/... -run 'EvaluatorSpan|SpanEmission'`
+// (the repo's TestControllers is the sole Ginkgo entry point and does not
+// match that pattern, so envtest never spins up for this command).
+
+func TestSynthesizeEvaluatorSpanNilJob(t *testing.T) {
+	exp := setupSpanExporter(t)
+	gotID, _, gotOK := synthesizeEvaluatorSpan(context.Background(), "task", "task-1", nil, ProviderDefaults{}, nil, pkgdispatch.EnvelopeOut{}, false, "v1", trace.SpanID{})
+	if gotOK {
+		t.Errorf("synthesizeEvaluatorSpan(nil job) ok = true, want false")
+	}
+	if gotID.IsValid() {
+		t.Errorf("synthesizeEvaluatorSpan(nil job) spanID = %v, want zero", gotID)
+	}
+	if len(exp.GetSpans()) != 0 {
+		t.Errorf("synthesizeEvaluatorSpan(nil job) recorded %d spans, want 0", len(exp.GetSpans()))
+	}
+}
+
+// TestSynthesizeEvaluatorSpanNilProjectSkipsEmission — mirrors
+// TestSynthesizePlannerSpanNilProjectSkipsEmission's TRACE-02/Pitfall 5
+// posture: no project, no deterministic TraceID, skip rather than emit an
+// unanchored span.
+func TestSynthesizeEvaluatorSpanNilProjectSkipsEmission(t *testing.T) {
+	exp := setupSpanExporter(t)
+
+	start := mustTime(t, "2026-07-19T10:00:00Z")
+	end := mustTime(t, "2026-07-19T10:05:00Z")
+	job := &batchv1.Job{
+		Status: batchv1.JobStatus{
+			StartTime:      &metav1.Time{Time: start},
+			CompletionTime: &metav1.Time{Time: end},
+			Conditions: []batchv1.JobCondition{
+				{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+
+	gotID, _, gotOK := synthesizeEvaluatorSpan(context.Background(), "task", "task-1", nil, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, "v1", trace.SpanID{})
+	if gotOK {
+		t.Errorf("synthesizeEvaluatorSpan(nil project) ok = true, want false")
+	}
+	if gotID.IsValid() {
+		t.Errorf("synthesizeEvaluatorSpan(nil project) spanID = %v, want zero", gotID)
+	}
+	if len(exp.GetSpans()) != 0 {
+		t.Errorf("synthesizeEvaluatorSpan(nil project) recorded %d spans, want 0 (no deterministic TraceID available)", len(exp.GetSpans()))
+	}
+}
+
+// TestSynthesizeEvaluatorSpanEmitsEvaluatorKind — the OBS-03 happy path:
+// openinference.span.kind=EVALUATOR (not AGENT), tide.role=verifier, and
+// evaluation.result/evaluation.version populated from the verdict — the
+// first real consumer of EvaluationAttributes (defined-but-empty since
+// Phase 50).
+func TestSynthesizeEvaluatorSpanEmitsEvaluatorKind(t *testing.T) {
+	exp := setupSpanExporter(t)
+
+	start := mustTime(t, "2026-07-19T10:00:00Z")
+	end := mustTime(t, "2026-07-19T10:05:00Z")
+	job := &batchv1.Job{
+		Status: batchv1.JobStatus{
+			StartTime:      &metav1.Time{Time: start},
+			CompletionTime: &metav1.Time{Time: end},
+			Conditions: []batchv1.JobCondition{
+				{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+	project := spanEmissionFixtureProject(testProjectUID, "claude-test-model")
+	out := pkgdispatch.EnvelopeOut{
+		Verdict: &pkgdispatch.GateDecision{Verdict: pkgdispatch.VerdictApproved},
+	}
+
+	// A non-zero-value ProviderDefaults (unlike the other tests' zero
+	// literal) — ResolveProvider still resolves from Project.Spec.Subagent
+	// (D-04/D-07-style envelope-independent resolution), but this proves the
+	// emitter genuinely threads helmDefaults through to ResolveProvider
+	// rather than a hardcoded value.
+	helmDefaults := ProviderDefaults{Image: "verifier-fallback-image"}
+
+	gotID, gotSampled, gotOK := synthesizeEvaluatorSpan(context.Background(), "task", "test-task-1", project, helmDefaults, job, out, true, "verifier-v1", trace.SpanID{})
+	if !gotOK {
+		t.Fatalf("synthesizeEvaluatorSpan(succeeded) = false, want true")
+	}
+	if !gotID.IsValid() {
+		t.Errorf("synthesizeEvaluatorSpan(succeeded) spanID = %v, want a valid minted SpanID", gotID)
+	}
+	// The in-memory synchronous exporter samples everything — the real
+	// sampled bit (captured pre-End(), Phase 46 D-02) must reflect that.
+	if !gotSampled {
+		t.Errorf("synthesizeEvaluatorSpan(succeeded) sampled = false, want true")
+	}
+
+	spans := exp.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("synthesizeEvaluatorSpan(succeeded) recorded %d spans, want exactly 1", len(spans))
+	}
+	span := spans[0]
+
+	wantStringAttrs := map[attribute.Key]string{
+		"openinference.span.kind": "EVALUATOR",
+		"tide.role":               "verifier",
+		"tide.invocation.level":   "task",
+		"evaluation.result":       "APPROVED",
+		"evaluation.version":      "verifier-v1",
+	}
+	for key, want := range wantStringAttrs {
+		val, ok := attrValue(span.Attributes, key)
+		if !ok {
+			t.Errorf("span missing attribute %q", key)
+			continue
+		}
+		if val.AsString() != want {
+			t.Errorf("attribute %q = %q, want %q", key, val.AsString(), want)
+		}
+	}
+
+	if _, found := attrValue(span.Attributes, "human_intervention"); found {
+		t.Errorf("human_intervention must be absent for an APPROVED verdict, found it set")
+	}
+}
+
+// TestSynthesizeEvaluatorSpanSiblingOfAgentSpan — the D-11 load-bearing
+// invariant: the EVALUATOR span is a SIBLING of the checked level's AGENT
+// span (both parented under the SAME parentSpanID), never a child of the
+// AGENT span (which would mean parenting the evaluator under the AGENT
+// span's own minted SpanID instead).
+func TestSynthesizeEvaluatorSpanSiblingOfAgentSpan(t *testing.T) {
+	exp := setupSpanExporter(t)
+
+	start := mustTime(t, "2026-07-19T10:00:00Z")
+	end := mustTime(t, "2026-07-19T10:05:00Z")
+	agentJob := &batchv1.Job{
+		Status: batchv1.JobStatus{
+			StartTime:      &metav1.Time{Time: start},
+			CompletionTime: &metav1.Time{Time: end},
+			Conditions: []batchv1.JobCondition{
+				{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+	verifyJob := &batchv1.Job{
+		Status: batchv1.JobStatus{
+			StartTime:      &metav1.Time{Time: start.Add(time.Minute)},
+			CompletionTime: &metav1.Time{Time: end.Add(time.Minute)},
+			Conditions: []batchv1.JobCondition{
+				{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+	project := spanEmissionFixtureProject(testProjectUID, "claude-test-model")
+
+	// The shared parent both the AGENT span and the EVALUATOR span attach to
+	// (e.g. the owning Plan's persisted span ID) — same parentSpanID value
+	// passed to both calls is what makes them siblings.
+	sharedParentSpanID, err := trace.SpanIDFromHex("0102030405060708")
+	if err != nil {
+		t.Fatalf("trace.SpanIDFromHex: %v", err)
+	}
+
+	_, _, agentOK := synthesizePlannerSpan(context.Background(), "task", "task-1", "", project, ProviderDefaults{}, agentJob, pkgdispatch.EnvelopeOut{}, false, sharedParentSpanID)
+	if !agentOK {
+		t.Fatalf("synthesizePlannerSpan (AGENT) = false, want true")
+	}
+	out := pkgdispatch.EnvelopeOut{
+		Verdict: &pkgdispatch.GateDecision{Verdict: pkgdispatch.VerdictRepairable},
+	}
+	_, _, evalOK := synthesizeEvaluatorSpan(context.Background(), "task", "task-1", project, ProviderDefaults{}, verifyJob, out, true, "verifier-v1", sharedParentSpanID)
+	if !evalOK {
+		t.Fatalf("synthesizeEvaluatorSpan = false, want true")
+	}
+
+	spans := exp.GetSpans()
+	if len(spans) != 2 {
+		t.Fatalf("recorded %d spans, want exactly 2 (AGENT + EVALUATOR)", len(spans))
+	}
+
+	var agentSpan, evalSpan tracetest.SpanStub
+	for _, s := range spans {
+		kind, _ := attrValue(s.Attributes, "openinference.span.kind")
+		switch kind.AsString() {
+		case "AGENT":
+			agentSpan = s
+		case "EVALUATOR":
+			evalSpan = s
+		default:
+			t.Fatalf("unexpected span kind %q", kind.AsString())
+		}
+	}
+
+	if agentSpan.Name == "" || evalSpan.Name == "" {
+		t.Fatalf("expected exactly one AGENT span and one EVALUATOR span, got AGENT=%q EVALUATOR=%q", agentSpan.Name, evalSpan.Name)
+	}
+
+	// Both spans share the SAME parent — proving sibling parenting.
+	if agentSpan.Parent.SpanID() != sharedParentSpanID {
+		t.Errorf("AGENT span parent = %v, want %v (shared parent)", agentSpan.Parent.SpanID(), sharedParentSpanID)
+	}
+	if evalSpan.Parent.SpanID() != sharedParentSpanID {
+		t.Errorf("EVALUATOR span parent = %v, want %v (shared parent)", evalSpan.Parent.SpanID(), sharedParentSpanID)
+	}
+
+	// The EVALUATOR span must NOT be parented on the AGENT span's own minted
+	// SpanID — that would make it a child, not a sibling.
+	if evalSpan.Parent.SpanID() == agentSpan.SpanContext.SpanID() {
+		t.Errorf("EVALUATOR span is parented on the AGENT span's own SpanID %v — it must be a SIBLING, not a child", agentSpan.SpanContext.SpanID())
+	}
+
+	// Same trace throughout.
+	if agentSpan.SpanContext.TraceID() != evalSpan.SpanContext.TraceID() {
+		t.Errorf("AGENT and EVALUATOR spans must share one TraceID: agent=%v eval=%v", agentSpan.SpanContext.TraceID(), evalSpan.SpanContext.TraceID())
+	}
+
+	// The two spans are distinct span identities.
+	if agentSpan.SpanContext.SpanID() == evalSpan.SpanContext.SpanID() {
+		t.Errorf("AGENT and EVALUATOR spans must have distinct SpanIDs, both = %v", agentSpan.SpanContext.SpanID())
+	}
+}
+
+// TestSynthesizeEvaluatorSpanHumanInterventionOnBlockedOnly — human_intervention
+// is stamped ONLY on the escalation terminal (VerdictBlocked, ESC-02/ESC-03),
+// never for APPROVED, REPAIRABLE, or a nil Verdict (degraded envelope).
+func TestSynthesizeEvaluatorSpanHumanInterventionOnBlockedOnly(t *testing.T) {
+	start := mustTime(t, "2026-07-19T10:00:00Z")
+	end := mustTime(t, "2026-07-19T10:05:00Z")
+
+	cases := []struct {
+		name    string
+		verdict *pkgdispatch.GateDecision
+		want    bool
+	}{
+		{name: "approved", verdict: &pkgdispatch.GateDecision{Verdict: pkgdispatch.VerdictApproved}, want: false},
+		{name: "repairable", verdict: &pkgdispatch.GateDecision{Verdict: pkgdispatch.VerdictRepairable}, want: false},
+		{name: "blocked", verdict: &pkgdispatch.GateDecision{Verdict: pkgdispatch.VerdictBlocked}, want: true},
+		{name: "nil verdict (degraded)", verdict: nil, want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			exp := setupSpanExporter(t)
+			job := &batchv1.Job{
+				Status: batchv1.JobStatus{
+					StartTime:      &metav1.Time{Time: start},
+					CompletionTime: &metav1.Time{Time: end},
+					Conditions: []batchv1.JobCondition{
+						{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+					},
+				},
+			}
+			project := spanEmissionFixtureProject(testProjectUID, "claude-test-model")
+			out := pkgdispatch.EnvelopeOut{Verdict: tc.verdict}
+
+			_, _, gotOK := synthesizeEvaluatorSpan(context.Background(), "task", "task-1", project, ProviderDefaults{}, job, out, tc.verdict != nil, "v1", trace.SpanID{})
+			if !gotOK {
+				t.Fatalf("synthesizeEvaluatorSpan(%s) = false, want true", tc.name)
+			}
+
+			spans := exp.GetSpans()
+			if len(spans) != 1 {
+				t.Fatalf("recorded %d spans, want exactly 1", len(spans))
+			}
+			_, found := attrValue(spans[0].Attributes, "human_intervention")
+			if found != tc.want {
+				t.Errorf("human_intervention present = %v, want %v", found, tc.want)
+			}
+		})
+	}
+}
+
+// TestSynthesizeEvaluatorSpanDegradedEnvelope — mirrors
+// TestSynthesizePlannerSpanDegradedEnvelope: envReadOK=false still emits a
+// span carrying the degradation marker and no evaluation.result value (nil
+// Verdict), but the model name still resolves (ResolveProvider is
+// envelope-independent).
+func TestSynthesizeEvaluatorSpanDegradedEnvelope(t *testing.T) {
+	exp := setupSpanExporter(t)
+
+	start := mustTime(t, "2026-07-19T10:00:00Z")
+	end := mustTime(t, "2026-07-19T10:05:00Z")
+	job := &batchv1.Job{
+		Status: batchv1.JobStatus{
+			StartTime:      &metav1.Time{Time: start},
+			CompletionTime: &metav1.Time{Time: end},
+			Conditions: []batchv1.JobCondition{
+				{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+	project := spanEmissionFixtureProject(testProjectUID, "claude-test-model")
+
+	// level="plan" (not "task") deliberately — the emitter itself is
+	// level-agnostic even though Phase 51's Task loop is its only wired
+	// caller; Phase 52 parameterizes the same loop contract per level
+	// (plan-check re-plan, etc.), so this also proves the function does not
+	// hardcode "task".
+	_, _, gotOK := synthesizeEvaluatorSpan(context.Background(), "plan", "plan-1", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, "v1", trace.SpanID{})
+	if !gotOK {
+		t.Fatalf("synthesizeEvaluatorSpan(degraded) = false, want true")
+	}
+
+	spans := exp.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("synthesizeEvaluatorSpan(degraded) recorded %d spans, want exactly 1", len(spans))
+	}
+	span := spans[0]
+
+	degraded, ok := attrValue(span.Attributes, "tide.envelope.degraded")
+	if !ok || !degraded.AsBool() {
+		t.Errorf("tide.envelope.degraded attribute = %v (found=%v), want true", degraded, ok)
+	}
+	model, ok := attrValue(span.Attributes, "llm.model_name")
+	if !ok || model.AsString() != "claude-test-model" {
+		t.Errorf("llm.model_name attribute = %v (found=%v), want %q (model resolution is envelope-independent)", model, ok, "claude-test-model")
+	}
+	level, ok := attrValue(span.Attributes, "tide.invocation.level")
+	if !ok || level.AsString() != "plan" {
+		t.Errorf("tide.invocation.level attribute = %v (found=%v), want %q", level, ok, "plan")
+	}
+	evalResult, ok := attrValue(span.Attributes, "evaluation.result")
+	if !ok || evalResult.AsString() != "" {
+		t.Errorf("evaluation.result attribute = %v (found=%v), want empty string (nil Verdict)", evalResult, ok)
+	}
+}

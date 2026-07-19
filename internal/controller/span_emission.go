@@ -292,6 +292,159 @@ func synthesizePlannerSpan(
 	return thisSpanID, sampled, true
 }
 
+// synthesizeEvaluatorSpan synthesizes a retroactive EVALUATOR span for a
+// verifier dispatch's terminal EnvelopeOut (OBS-03, Phase 51 D-11).
+// Structured after synthesizePlannerSpan above — the exact same trace spine
+// (otelai.TraceIDFromUID, trace.NewSpanContext{Remote:true},
+// otel.Tracer("tide.dispatch")) and the same nil-project /
+// TraceIDFromUID-error / unresolvable-Job skip-emission posture (span loss
+// preferred over an unanchored or wrongly-parented span).
+//
+// The EVALUATOR span is a SIBLING of the checked level's AGENT span, never
+// its child: parentSpanID here MUST be the SAME parent span ID the AGENT
+// span's own synthesizePlannerSpan call was given (e.g. the Plan's
+// persisted span ID for a Task-level verify) — not the AGENT span's own
+// minted SpanID. Both spans then share one parent, proving sibling
+// parenting rather than a nested evaluation-inside-execution shape.
+//
+// completedJob is the verifier Job whose terminal Status timestamps bound
+// the span — spanEndTime/StartTime resolution applies identically to a
+// verifier Job (Pitfall 1: CompletionTime is nil on every failed Job).
+//
+// out.Verdict (nilable — degraded envelopes never got a verdict) supplies
+// evaluation.result; evaluatorVersion is the caller-supplied
+// evaluation.version (e.g. the verifier image tag). human_intervention is
+// stamped only when the verdict escalated to VerdictBlocked — the terminal
+// class that hands the Task back to a human (ESC-02/ESC-03) — never for an
+// APPROVED or REPAIRABLE verdict, which the loop handles on its own.
+//
+// This is the standalone emitter only: no live call site exists yet. Plan
+// 07 (51-07) wires the verifier-completion call. No double-emission risk
+// (D-11/OBS-03): SelfInstruments("langgraph")=true means the reporter never
+// synthesizes a competing span for this dispatch — this is the sole
+// loop-native evaluator span once wired.
+func synthesizeEvaluatorSpan(
+	ctx context.Context,
+	level string,
+	levelName string,
+	project *tideprojectv1alpha3.Project,
+	helmDefaults ProviderDefaults,
+	completedJob *batchv1.Job,
+	out pkgdispatch.EnvelopeOut,
+	envReadOK bool,
+	evaluatorVersion string,
+	parentSpanID trace.SpanID,
+) (trace.SpanID, bool, bool) {
+	endTime, ok := spanEndTime(completedJob)
+	if !ok || completedJob.Status.StartTime == nil {
+		return trace.SpanID{}, true, false
+	}
+	startTime := completedJob.Status.StartTime.Time
+
+	// TRACE-02/Pitfall 5, mirrored from synthesizePlannerSpan: no project, no
+	// deterministic TraceID — skip rather than emit an unanchored span.
+	if project == nil {
+		logf.FromContext(ctx).Info("skipping evaluator span emission: nil project (no deterministic TraceID available)", "level", level)
+		return trace.SpanID{}, true, false
+	}
+	traceID, err := otelai.TraceIDFromUID(string(project.UID))
+	if err != nil {
+		logf.FromContext(ctx).Error(err, "skipping evaluator span emission: TraceIDFromUID failed", "level", level, "project", project.Name)
+		return trace.SpanID{}, true, false
+	}
+
+	// Remote:true — parentSpanID is the AGENT span's own parent, reconstructed
+	// from durably-persisted status (possibly another replica's write), never
+	// a locally-held live SpanContext. Reusing that same parent (not the
+	// AGENT span's minted SpanID) is what makes this span a sibling.
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    traceID,
+		SpanID:     parentSpanID,
+		TraceFlags: trace.FlagsSampled,
+		Remote:     true,
+	})
+	ctx = trace.ContextWithSpanContext(ctx, sc)
+
+	// D-04/D-07 parallel: a second, envelope-independent ResolveProvider call.
+	provider := ResolveProvider(project, level, helmDefaults)
+
+	tracer := otel.Tracer("tide.dispatch")
+	spanName := "tide.dispatch." + level + ".verify"
+	_, span := tracer.Start(ctx, spanName, trace.WithTimestamp(startTime))
+
+	span.SetAttributes(otelai.EvaluatorInvocation(provider.Vendor, spanName, "verifier", level)...)
+	span.SetAttributes(otelai.LLMIdentity(provider.Vendor, provider.Model)...)
+	span.SetAttributes(otelai.SessionID(string(project.UID)))
+
+	md, tags := buildLevelEnrichment(project, level, levelName, "")
+	if md != "" {
+		span.SetAttributes(otelai.MetadataJSON(md))
+	}
+	if len(tags) > 0 {
+		span.SetAttributes(otelai.Tags(tags...))
+	}
+
+	// OBS-03: evaluation.result/evaluation.version — the first real consumer
+	// of EvaluationAttributes (defined-but-empty since Phase 50). A nil
+	// Verdict (degraded envelope, verifier crashed before writing out.json)
+	// yields an empty result string rather than a fabricated one.
+	verdictResult := ""
+	if out.Verdict != nil {
+		verdictResult = string(out.Verdict.Verdict)
+	}
+	span.SetAttributes(otelai.EvaluationAttributes(verdictResult, evaluatorVersion)...)
+
+	// human_intervention: stamped only on the escalation terminal
+	// (VerdictBlocked) — the verdict class that hands the attempt to a human
+	// rather than looping again (ESC-02/ESC-03). APPROVED/REPAIRABLE (and a
+	// nil Verdict) never stamp this marker.
+	if out.Verdict != nil && out.Verdict.Verdict == pkgdispatch.VerdictBlocked {
+		span.SetAttributes(otelai.HumanIntervention())
+	}
+
+	// D-05/OBS-01 parallel: loop.* identity, gated on out.AttemptID being
+	// non-empty (mirrors synthesizePlannerSpan's identical gate) —
+	// LoopKindEvaluator distinguishes this from the Execution loop's
+	// LoopKindExecution on the sibling AGENT span.
+	if out.AttemptID != "" {
+		candidateVersion := ""
+		if out.Git != nil {
+			candidateVersion = out.Git.HeadSHA
+		}
+		span.SetAttributes(otelai.LoopAttributes(
+			otelai.LoopKindEvaluator, out.AttemptID, out.LoopRunID,
+			out.Usage.Iterations, candidateVersion, string(out.TerminalReason),
+		)...)
+	}
+
+	if !envReadOK {
+		span.SetAttributes(otelai.EnvelopeDegraded())
+	}
+
+	if isJobFailed(completedJob) {
+		span.SetStatus(codes.Error, out.Reason)
+		if envReadOK {
+			span.SetAttributes(otelai.FailureDetail(out.ExitCode, out.Reason)...)
+		}
+	} else {
+		span.SetStatus(codes.Ok, "")
+	}
+
+	// D-02/Phase 46 parallel: capture the real sampled bit BEFORE End().
+	sampled := span.SpanContext().IsSampled()
+	span.End(trace.WithTimestamp(endTime))
+
+	// 46-REVIEW WR-01 parallel: a tracing-dark run mints no real SpanID (the
+	// no-op TracerProvider propagates the reconstructed parent untouched) —
+	// return emitted=false rather than have the caller persist a fabricated
+	// or parent-colliding SpanID.
+	thisSpanID := span.SpanContext().SpanID()
+	if !thisSpanID.IsValid() || thisSpanID == parentSpanID {
+		return trace.SpanID{}, true, false
+	}
+	return thisSpanID, sampled, true
+}
+
 // buildLevelEnrichment computes the 46 D-05/D-06/OBS-03 metadata/tags
 // enrichment pair shared identically between a level's own AGENT span (via
 // synthesizePlannerSpan above) and every reporter-emitted LLM span for the
