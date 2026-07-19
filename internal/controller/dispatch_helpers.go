@@ -559,24 +559,28 @@ func checkParentApproval(ctx context.Context, c client.Client, ns, parentName, p
 }
 
 // checkDispatchHolds centralizes the planner-tier project-scoped dispatch-holds
-// gate chain shared by MilestoneReconciler, PhaseReconciler, and PlanReconciler
-// (item 7, Phase 41 D-07 — the seed's "finish an extraction the codebase
-// already started"). The order — Billing(30s) → Failure(30s) → Budget(30s) →
-// Import(5s) — and the requeue literals are load-bearing: this is the
-// enforcement point that stops planner Job dispatch (and therefore LLM spend)
-// on BillingHalt / FailureHalt / BudgetBlocked / import-pending. A swap in
-// order or interval is a spend-gate bypass or an over-holding regression, not
-// a cosmetic change (T-41-05a/b).
+// gate chain shared by MilestoneReconciler, PhaseReconciler, PlanReconciler,
+// and (as of Phase 51 D-09) TaskReconciler's gateChecks (item 7, Phase 41 D-07
+// — the seed's "finish an extraction the codebase already started"). The
+// order — Billing(30s) → Failure(30s) → Verify(30s) → Budget(30s) → Import(5s)
+// — and the requeue literals are load-bearing: this is the enforcement point
+// that stops dispatch Job creation (and therefore LLM spend) on BillingHalt /
+// FailureHalt / VerifyHalt / BudgetBlocked / import-pending. A swap in order
+// or interval is a spend-gate bypass or an over-holding regression, not a
+// cosmetic change (T-41-05a/b).
 //
-// TaskReconciler intentionally does NOT call this helper — its chain checks
-// Import SECOND (immediately after parent-approval, before Billing/Failure/
-// Budget) and adds a task-only reservation-headroom hold with no planner-tier
-// counterpart. Normalizing Task onto this order would be a behavior change in
-// a non-breaking phase; see the divergence comment at task_controller.go's
-// gate chain and .planning/todos/pending/2026-07-12-task-dispatch-gate-order-divergence.md.
+// Phase 51 D-09 folds two carried-forward todos: TaskReconciler's gateChecks
+// now DELEGATES to this helper (previously it checked Import SECOND,
+// immediately after parent-approval, before Billing/Failure/Budget — see
+// .planning/todos/pending/2026-07-12-task-dispatch-gate-order-divergence.md,
+// closed). Task still adds two task-only holds with no planner-tier
+// counterpart here — the legacy BudgetExceeded phase fallback and the
+// BUDGET-03 reservation-headroom check — both applied by gateChecks AFTER
+// calling this helper.
 //
 // nil-safe: a nil project is not a hold (matches checkBillingHalt /
-// checkFailureHalt / checkBudgetBlocked's own nil-safe wrappers).
+// checkFailureHalt / checkVerifyHalt / checkBudgetBlocked's own nil-safe
+// wrappers).
 func checkDispatchHolds(ctx context.Context, project *tideprojectv1alpha3.Project, level, objName string) (held bool, result ctrl.Result) {
 	if project == nil {
 		return false, ctrl.Result{}
@@ -595,6 +599,15 @@ func checkDispatchHolds(ctx context.Context, project *tideprojectv1alpha3.Projec
 	// Park (never fail); cleared by `tide resume --retry-failed`.
 	if checkFailureHalt(project) {
 		logf.FromContext(ctx).V(1).Info("dispatch held: project failure halt (conservative profile)",
+			"level", level, "name", objName, "project", project.Name)
+		return true, ctrl.Result{RequeueAfter: 30 * time.Second}
+	}
+	// Phase 51 ESC-02 / D-09: VerifyHalt hold. Gates BOTH tiers (unlike
+	// FailureHalt, which is execution-only) — a BLOCKED verify means the
+	// artifact tree the next dispatch would build on is suspect, at every
+	// level. Park (never fail); cleared by `tide resume`.
+	if checkVerifyHalt(project) {
+		logf.FromContext(ctx).V(1).Info("dispatch held: project verify halt",
 			"level", level, "name", objName, "project", project.Name)
 		return true, ctrl.Result{RequeueAfter: 30 * time.Second}
 	}

@@ -387,19 +387,14 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 		return taskGateResult{}, fmt.Errorf("resolve project: %w", err)
 	}
 
-	// Item 7 (Phase 41 D-07): this gate chain intentionally stays inline and is
-	// NOT a caller of checkDispatchHolds (dispatch_helpers.go). The order here
-	// is Reject → ParentApproval → Import → Billing → Failure → Budget →
-	// reservation-headroom — Import is checked SECOND (immediately after
-	// parent-approval, before Billing/Failure/Budget), whereas the planner tier
-	// (Milestone/Phase/Plan, via checkDispatchHolds) checks Import LAST. Task
-	// also adds a reservation-headroom hold with no planner-tier counterpart.
-	// Normalizing Task onto the planner-tier order would change which hold
-	// message/requeue fires when import-pending coincides with a Billing/
-	// Failure/Budget halt — a behavior change Phase 41's non-breaking boundary
-	// does not permit. See
+	// Item 7 (Phase 41 D-07 → Phase 51 D-09): this gate chain now DELEGATES the
+	// shared project-scoped hold chain to checkDispatchHolds (dispatch_helpers.go)
+	// below, normalizing Task onto the planner tier's order — Billing → Failure →
+	// Verify → Budget → Import — closing
 	// .planning/todos/pending/2026-07-12-task-dispatch-gate-order-divergence.md
-	// for the follow-up decision (normalize vs. declare a permanent outlier).
+	// (Option 1). Task still adds two task-only holds with no planner-tier
+	// counterpart — the legacy BudgetExceeded phase fallback and the BUDGET-03
+	// reservation-headroom check — both run AFTER the delegated chain below.
 
 	// Plan 04-05 reject short-circuit (D-G1 per-level policy enum, T-04-G1
 	// mitigation). Fires BEFORE budget/indegree/dispatch so a rejected Project
@@ -426,69 +421,46 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 		return taskGateResult{shouldHalt: true, result: ctrl.Result{RequeueAfter: 5 * time.Second}}, nil
 	}
 
-	// Phase 28 IMPORT-01: park task dispatch until import completes.
-	// Position: AFTER resolveProject (project is non-nil here — Pitfall 1) and BEFORE
-	// billing/budget/dispatch holds (Pitfall 2 — parking after pool acquire leaks a slot).
-	if project.Spec.ImportSource != nil {
-		c := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha3.ConditionImportComplete)
-		if c == nil || c.Status != metav1.ConditionTrue {
-			logf.FromContext(ctx).V(1).Info("import pending; holding task dispatch",
-				"task", task.Name, "project", project.Name)
-			return taskGateResult{shouldHalt: true, result: ctrl.Result{RequeueAfter: 5 * time.Second}}, nil
-		}
-	}
-
-	// Phase 13 HALT-01 / D-05: third dispatch-entry hold (after CheckRejected +
-	// parent-approval); park, never fail; cleared by tide resume.
-	// Position: BEFORE pool/slot acquisition and BEFORE Job creation (Pitfall 2).
-	// No per-Task condition written (avoids status flapping — operator signal is the
-	// single Project BillingHalt condition).
-	if checkBillingHalt(project) {
-		logf.FromContext(ctx).V(1).Info("dispatch held: project billing halt",
-			"task", task.Name, "project", project.Name)
-		return taskGateResult{shouldHalt: true, result: ctrl.Result{RequeueAfter: 30 * time.Second}}, nil
-	}
-
-	// Phase 25 DISP-02 / D-02b: fifth dispatch-entry hold — conservative failure halt.
-	// Fires only when Project.Spec.FailureProfile==conservative AND a task execution
-	// failure has stamped ConditionFailureHalt=True. Park (never fail); cleared by
-	// `tide resume --retry-failed`. No per-Task condition stamp (operator signal is the
-	// single Project FailureHalt condition — same pattern as BillingHalt).
-	if checkFailureHalt(project) {
-		logf.FromContext(ctx).V(1).Info("dispatch held: project failure halt (conservative profile)",
-			"task", task.Name, "project", project.Name)
-		return taskGateResult{shouldHalt: true, result: ctrl.Result{RequeueAfter: 30 * time.Second}}, nil
-	}
-
-	// Phase 14 BUDGET-02 / D-04: fourth dispatch-entry hold — BudgetBlocked condition.
-	// Cap detection happens here (not in ProjectReconciler) because Status patches from
-	// RollUpUsage do NOT increment metadata.generation and thus do NOT re-enqueue the
-	// ProjectReconciler (watch-predicate gap root cause, 14-RESEARCH.md §Root Cause).
-	// The bidirectional setBudgetBlockedIfNeeded also handles cap-raise recovery: when
-	// IsCapExceeded becomes false it clears the condition so dispatch can resume.
+	// Phase 14 BUDGET-02 / D-04: refresh BudgetBlocked BEFORE the shared chain
+	// below reads it (checkDispatchHolds' Budget arm is read-only). Cap detection
+	// happens here (not in ProjectReconciler) because Status patches from
+	// RollUpUsage do NOT increment metadata.generation and thus do NOT
+	// re-enqueue the ProjectReconciler (watch-predicate gap root cause,
+	// 14-RESEARCH.md §Root Cause). setBudgetBlockedIfNeeded is bidirectional and
+	// also handles cap-raise recovery: when IsCapExceeded becomes false it
+	// clears the condition so dispatch can resume.
 	if err := setBudgetBlockedIfNeeded(ctx, r.Client, project, r.Deps.Reservations.TotalReserved()); err != nil {
 		logf.FromContext(ctx).Error(err, "setBudgetBlockedIfNeeded failed (non-fatal)")
 	}
-	// OR the legacy BudgetExceeded phase check so the Phase machinery (D-04) is preserved
-	// — the condition check is the new primary path; the phase check is the fallback that
-	// ensures tasks parked by the pre-Phase-14 phase gate continue to be held.
-	if (checkBudgetBlocked(project) || project.Status.Phase == tideprojectv1alpha3.PhaseBudgetExceeded) &&
-		!budget.IsBypassed(project, time.Now()) {
-		// No per-Task condition stamp: the operator signal is the single Project
-		// BudgetBlocked condition, same as the other four dispatch gates. A
-		// per-Task stamp here was never cleared once dispatch resumed, so it
-		// outlived the park as stale misinformation on terminal Tasks.
-		logf.FromContext(ctx).V(1).Info("dispatch held: project budget blocked",
+
+	// Phase 51 D-09: delegate Billing → Failure → Verify → Budget → Import to the
+	// shared planner-tier chain (dispatch_helpers.go), normalizing Task onto the
+	// same order and requeue intervals as Milestone/Phase/Plan. This is a
+	// deliberate, tested behavior change from Task's prior Import-checked-SECOND
+	// order — see co_occurring_holds_test.go.
+	if held, result := checkDispatchHolds(ctx, project, "task", task.Name); held {
+		return taskGateResult{shouldHalt: true, result: result}, nil
+	}
+
+	// Task-only: legacy BudgetExceeded phase fallback (pre-Phase-14 mechanism).
+	// checkDispatchHolds has no counterpart for this — the BudgetBlocked
+	// condition check inside it is the primary path; this fallback ensures
+	// tasks parked by the pre-Phase-14 phase gate continue to be held.
+	if project.Status.Phase == tideprojectv1alpha3.PhaseBudgetExceeded && !budget.IsBypassed(project, time.Now()) {
+		logf.FromContext(ctx).V(1).Info("dispatch held: project budget blocked (legacy phase)",
 			"task", task.Name, "project", project.Name,
 			"spent", project.Status.Budget.CostSpentCents,
 			"cap", project.Spec.Budget.AbsoluteCapCents)
 		return taskGateResult{shouldHalt: true, result: ctrl.Result{RequeueAfter: 30 * time.Second}}, nil
 	}
 
-	// Phase 14 BUDGET-03 / D-05: reservation headroom check. Prevents wave-wide
-	// overshoot (run-1 root class) by gating dispatch when committed spend + reserved
-	// + this estimate would exceed the cap. Transient park — no per-Task condition
-	// stamp (not a cap breach, just insufficient headroom at this moment).
+	// Task-only: Phase 14 BUDGET-03 / D-05 reservation headroom check. Prevents
+	// wave-wide overshoot (run-1 root class) by gating dispatch when committed
+	// spend + reserved + this estimate would exceed the cap. checkDispatchHolds
+	// has NO planner-tier counterpart for this (dispatch_helpers.go documents it
+	// as task-only) — it MUST survive this delegation, never be silently
+	// dropped. Transient park — no per-Task condition stamp (not a cap breach,
+	// just insufficient headroom at this moment).
 	if !budget.IsBypassed(project, time.Now()) &&
 		!r.Deps.Reservations.HasHeadroom(project, r.Deps.ReserveEstimateCents) {
 		logf.FromContext(ctx).V(1).Info("dispatch held: insufficient reservation headroom",

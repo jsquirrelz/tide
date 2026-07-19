@@ -1542,6 +1542,23 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 			"project", project.Name)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
+	// Phase 51 D-09 (folds .planning/todos/pending/2026-07-12-project-dispatch-missing-failurehalt-gate.md):
+	// conservative failure halt hold, previously missing from this chain — a
+	// halted project could keep spending on project-planner runs while every
+	// child level was parked. Matches checkDispatchHolds' order/requeue.
+	if checkFailureHalt(project) {
+		logf.FromContext(ctx).V(1).Info("dispatch held: project failure halt (conservative profile)",
+			"project", project.Name)
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+	// Phase 51 ESC-02 / D-09: VerifyHalt hold. Gates the planner tier too (unlike
+	// FailureHalt, which is execution-only) — a BLOCKED verify means the
+	// artifact tree is suspect at every level, including further planning.
+	if checkVerifyHalt(project) {
+		logf.FromContext(ctx).V(1).Info("dispatch held: project verify halt",
+			"project", project.Name)
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
 	// Phase 14 BUDGET-02 / D-04: BudgetBlocked hold (operator cap) — separate from
 	// BillingHalt (provider billing); both may be true simultaneously.
 	// No per-Project condition written (operator signal is the Project BudgetBlocked
