@@ -116,6 +116,25 @@ func TestAgentInvocation(t *testing.T) {
 	}
 }
 
+// TestEvaluatorInvocation — Phase 51 OBS-03/D-11: the EVALUATOR-kind sibling
+// of AgentInvocation, same five-attribute shape but
+// openinference.span.kind=EVALUATOR (routed through semconv.SpanKindEvaluator,
+// never a hand-rolled "EVALUATOR" literal — TestKeysUseSemconvModule guards
+// this at the source-grep level).
+func TestEvaluatorInvocation(t *testing.T) {
+	got := EvaluatorInvocation("langgraph", "tide.dispatch.task.verify", "verifier", "task")
+	want := []attribute.KeyValue{
+		attribute.String("openinference.span.kind", "EVALUATOR"),
+		attribute.String("llm.system", "langgraph"),
+		attribute.String("agent.name", "tide.dispatch.task.verify"),
+		attribute.String("tide.role", "verifier"),
+		attribute.String("tide.invocation.level", "task"),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("EvaluatorInvocation = %v, want %v", got, want)
+	}
+}
+
 // TestLLMOutputMessagesToolCalls — Phase 44 D-03: a message's ToolCalls
 // entries emit spec-native message.tool_calls.<j>.tool_call.{id,function.name,
 // function.arguments} attributes via the module's own
@@ -508,6 +527,17 @@ func TestLoopIteration(t *testing.T) {
 	want := attribute.Int("loop.iteration", 4)
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("LoopIteration(4) = %v, want %v", got, want)
+	}
+}
+
+// TestLoopKindEvaluator — Phase 51 OBS-01/OBS-03: the new loop.kind value
+// for the Task loop's EVALUATOR span, distinct from LoopKindExecution.
+func TestLoopKindEvaluator(t *testing.T) {
+	if LoopKindEvaluator != "evaluator" {
+		t.Errorf("LoopKindEvaluator = %q, want %q", LoopKindEvaluator, "evaluator")
+	}
+	if LoopKindEvaluator == LoopKindExecution {
+		t.Errorf("LoopKindEvaluator must be distinct from LoopKindExecution, both = %q", LoopKindEvaluator)
 	}
 }
 

@@ -247,6 +247,30 @@ func AgentInvocation(system, name, role, level string) []attribute.KeyValue {
 	}
 }
 
+// EvaluatorInvocation returns the five attributes that identify a single
+// orchestrator-side verifier dispatch — the EVALUATOR-kind sibling of
+// AgentInvocation's AGENT-kind span (OBS-03, Phase 51 D-11). Same shape as
+// AgentInvocation, with openinference.span.kind=EVALUATOR
+// (semconv.SpanKindEvaluator) in place of semconv.SpanKindAgent:
+//
+//   - openinference.span.kind=EVALUATOR
+//   - llm.system=<system>       (caller-supplied, matches AgentInvocation's
+//     D-07 convention — never a hardcoded constant)
+//   - agent.name=<name>         (the dispatch span name)
+//   - tide.role=<role>          (POOL-01 vocabulary — "verifier" for the
+//     Task loop's evaluator)
+//   - tide.invocation.level=<level>  (the hierarchy level being checked,
+//     e.g. "task")
+func EvaluatorInvocation(system, name, role, level string) []attribute.KeyValue {
+	return []attribute.KeyValue{
+		attribute.String(semconv.OpenInferenceSpanKind, semconv.SpanKindEvaluator),
+		attribute.String(semconv.LLMSystem, system),
+		attribute.String(semconv.AgentName, name),
+		attribute.String(keyAgentRole, role),
+		attribute.String(keyAgentInvocationLevel, level),
+	}
+}
+
 // ArtifactPath returns a SINGLE attribute referencing the PVC path of a
 // full event/payload log. This is the D-O5 contract: traces carry only the
 // path reference, never the inline payload. Trace consumers fetch the full
@@ -428,6 +452,12 @@ const (
 // LoopKindExecution is the sole loop.kind value Phase 50 emits — the in-Job
 // Execution loop's AGENT span. Phase 51 adds evaluator/task loop kinds.
 const LoopKindExecution = "execution"
+
+// LoopKindEvaluator is the loop.kind value for the Task loop's EVALUATOR
+// span (OBS-01/OBS-03, Phase 51) — the verifier's own loop-native identity,
+// distinct from LoopKindExecution (the in-Job Execution loop's AGENT span it
+// is a sibling of, never a child).
+const LoopKindEvaluator = "evaluator"
 
 // LoopAttributes returns the loop.* attributes identifying a single
 // Execution-loop run (OBS-01, D-05). Primary home is the AGENT-kind span —
