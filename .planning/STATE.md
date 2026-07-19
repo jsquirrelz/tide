@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0.9
 milestone_name: Slack Tide — The Task Loop (Verification-Driven Quality Iteration)
 status: executing
-stopped_at: Completed 51-02-PLAN.md
-last_updated: "2026-07-19T12:36:37.884Z"
+stopped_at: Completed 51-03-PLAN.md
+last_updated: "2026-07-19T12:53:47.432Z"
 last_activity: 2026-07-19
 progress:
   total_phases: 6
   completed_phases: 3
   total_plans: 24
-  completed_plans: 18
+  completed_plans: 19
   percent: 50
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 ## Current Position
 
 Phase: 51 (The Task Loop) — EXECUTING
-Plan: 3 of 8
+Plan: 4 of 8
 Status: Ready to execute
 Last activity: 2026-07-19
 
-Progress: [████████░░] 75%
+Progress: [████████░░] 79%
 
 ## Performance Metrics
 
@@ -103,6 +103,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 51-02]: The out-of-band gate-capture/verdict-assembly path only runs when env.verify is present; a non-verify dispatch keeps the exact pre-existing D-01 trivial-shell behavior
 - [Phase 51-02]: A red gate-command finding forces REPAIRABLE unless the LLM's own text already said BLOCKED — dominance always pulls the verdict toward escalation, never silently up
 - [Phase 51-02]: tools._worktree_dir/GATE_COMMAND_TIMEOUT_SECONDS reused (not duplicated) from tools.py into __main__.py per the plan's factor-not-duplicate instruction
+- [Phase 51-03]: human_intervention stamped only when out.Verdict.Verdict == VerdictBlocked -- never for APPROVED/REPAIRABLE/nil (degraded), narrowest reading of the population contract
+- [Phase 51-03]: synthesizeEvaluatorSpan unit tests placed in span_emission_unit_test.go not span_emission_test.go -- internal/controller's sole Ginkgo entry point is TestControllers, so a -run 'EvaluatorSpan|SpanEmission' filter vacuously passes 0 specs against the envtest file; the unit-test file is the repo's own documented home for pure-function span tests and makes the acceptance command genuinely execute
+- [Phase 51-03]: synthesizeEvaluatorSpan's span name is tide.dispatch.<level>.verify, distinct from the AGENT span's tide.dispatch.<level>, so sibling spans are name-distinguishable in addition to openinference.span.kind
 
 ### Pending Todos
 
@@ -150,11 +153,12 @@ Tech-debt still carried forward: W-2 FailureHalt/gate-order divergences (todos a
 | Phase 50 P07 | 9min | 2 tasks | 7 files |
 | Phase 51 P01 | 15min | 3 tasks | 6 files |
 | Phase 51 P02 | 13min | 2 tasks | 8 files |
+| Phase 51 P03 | 7min | 3 tasks | 7 files |
 
 ## Session Continuity
 
-Last session: 2026-07-19T12:36:37.869Z
-Stopped at: Completed 51-02-PLAN.md
+Last session: 2026-07-19T12:53:47.417Z
+Stopped at: Completed 51-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
