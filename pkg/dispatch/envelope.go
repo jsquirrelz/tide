@@ -108,6 +108,22 @@ type EnvelopeIn struct {
 	// (HARN-02). The orchestrator derives these from Project.Spec.budget.
 	Caps Caps `json:"caps"`
 
+	// LoopRunID is the outer Task-loop run identity, stable across all
+	// repair attempts of one Task (D-01, EXEC-01): the Execution loop's
+	// `loop.parent_run_id`. Derived deterministically as the owning Task's
+	// UID — never minted or persisted. Stamped by the controller at dispatch
+	// time; the executor echoes it verbatim onto EnvelopeOut.
+	LoopRunID string `json:"loopRunID,omitempty"`
+
+	// AttemptID is this individual execution attempt's identity (D-01,
+	// EXEC-01): the Execution loop's `loop.run_id`, matching the per-attempt
+	// Job-name tuple `podjob.JobName(taskUID, attempt) ->
+	// "tide-task-{taskUID}-{attempt}"` (formatted here as
+	// "{taskUID}-{attempt}", without the "tide-task-" prefix). Stamped by the
+	// controller at dispatch time; the executor echoes it verbatim onto
+	// EnvelopeOut. It never mints its own.
+	AttemptID string `json:"attemptID,omitempty"`
+
 	// ProxyEndpoint is the localhost HTTPS endpoint for the signed-token
 	// credential proxy sidecar (D-C1). Subagent sets ANTHROPIC_BASE_URL to
 	// this value; the sidecar holds the real API key.
@@ -193,7 +209,25 @@ type EnvelopeOut struct {
 
 	// Reason carries a structured failure code when ExitCode != 0, e.g.
 	// "forced-failure", "cap-hit", "output-path-violation", "token-expired".
+	// Reason stays free-text diagnostic detail; it is complementary to
+	// TerminalReason below, never a rename of it (D-02).
 	Reason string `json:"reason"`
+
+	// TerminalReason is the machine-checkable exit classification (D-02,
+	// EXEC-02) — see [TerminalReason] for the closed 5-value enum and the
+	// fail-closed "never a silent default" contract. Deliberately carries NO
+	// omitempty: an unset reason MUST be visible as "" on the wire so a
+	// silent-default bug is observable, never hidden by JSON omission.
+	TerminalReason TerminalReason `json:"terminalReason"`
+
+	// LoopRunID mirrors EnvelopeIn.LoopRunID, echoed verbatim by the executor
+	// (D-01, EXEC-01) — the outer Task-loop run identity, stable across
+	// repair attempts of this Task.
+	LoopRunID string `json:"loopRunID,omitempty"`
+
+	// AttemptID mirrors EnvelopeIn.AttemptID, echoed verbatim by the executor
+	// (D-01, EXEC-01) — this individual execution attempt's identity.
+	AttemptID string `json:"attemptID,omitempty"`
 
 	// Usage is the token and cost tally for this task, rolled up by the
 	// controller into Project.Status.budget at Task completion (D-D2).
@@ -247,6 +281,12 @@ type EnvelopeOut struct {
 	// Pointer + omitempty so non-verify dispatches don't serialize a
 	// "verdict: null" placeholder.
 	Verdict *GateDecision `json:"verdict,omitempty"`
+
+	// RunEvidence is the Phase-50 run-evidence contract (D-03, EXEC-03) — see
+	// [RunEvidence] for the field-by-field mapping to the canonical
+	// evals/README.md contract list. Pointer + omitempty so dispatches that
+	// don't populate it don't serialize a "runEvidence: null" placeholder.
+	RunEvidence *RunEvidence `json:"runEvidence,omitempty"`
 }
 
 // IsEnvelopeComplete reports whether env represents a fully-completed dispatch.
@@ -465,6 +505,19 @@ type TerminationStub struct {
 	// high-severity token (currently "blocker" — see [Finding.Severity]).
 	// Zero on any non-verify dispatch.
 	HighSeverityCount int `json:"highSeverityCount,omitempty"`
+
+	// TerminalReason mirrors EnvelopeOut.TerminalReason as a plain string
+	// (D-02) — the tiny termination-message carrier for the machine-checkable
+	// exit classification. Empty only for pre-Phase-50 envelopes; a live
+	// executor always sets EnvelopeOut.TerminalReason, so this is normally
+	// non-empty.
+	TerminalReason string `json:"terminalReason,omitempty"`
+
+	// ChangedFileCount mirrors EnvelopeOut.RunEvidence.ChangedFileTotal
+	// (D-03) — the bounded count-only summary of the changed-file manifest.
+	// The full ChangedFiles array stays on the namespace-local PVC out.json;
+	// never copied here (T-50-01).
+	ChangedFileCount int `json:"changedFileCount,omitempty"`
 }
 
 // highSeverityFindingToken is the Finding.Severity value NewTerminationStub
@@ -501,6 +554,10 @@ func NewTerminationStub(out EnvelopeOut) TerminationStub {
 				stub.HighSeverityCount++
 			}
 		}
+	}
+	stub.TerminalReason = string(out.TerminalReason)
+	if out.RunEvidence != nil {
+		stub.ChangedFileCount = out.RunEvidence.ChangedFileTotal
 	}
 	return stub
 }

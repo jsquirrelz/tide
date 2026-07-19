@@ -41,9 +41,9 @@ func TestTerminalReason_EnvelopeOut_RoundTrip(t *testing.T) {
 			{Path: "pkg/foo/foo_test.go", Status: "A"},
 		},
 		ChangedFileTotal: 2,
-		Model:             "claude-sonnet-4-6",
-		PromptVersion:     "v1",
-		RuntimeVersion:    "claude-code/2.1.178",
+		Model:            "claude-sonnet-4-6",
+		PromptVersion:    "v1",
+		RuntimeVersion:   "claude-code/2.1.178",
 	}
 
 	data, err := json.Marshal(out)
