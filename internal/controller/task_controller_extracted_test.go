@@ -750,7 +750,8 @@ func TestSynthesizeNoEnvelopeOut(t *testing.T) {
 		}
 		// Identity must still survive even when the reason stays unclassified.
 		if out.LoopRunID != "abc" || out.AttemptID != "abc-2" {
-			t.Errorf("identity fields = (%q, %q), want (\"abc\", \"abc-2\") even on unclassified reason", out.LoopRunID, out.AttemptID)
+			t.Errorf("identity fields = (%q, %q), want (\"abc\", \"abc-2\") even unclassified",
+				out.LoopRunID, out.AttemptID)
 		}
 	})
 }
