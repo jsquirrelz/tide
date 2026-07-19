@@ -143,7 +143,9 @@ def test_main_missing_envelope_writes_envelope_missing_stub(tmp_path: Path) -> N
     assert stub["exitCode"] != 0
 
 
-def test_main_rejects_non_anthropic_vendor(tmp_path: Path, envelope_in_dict) -> None:
+def test_main_rejects_wrong_vendor(tmp_path: Path, envelope_in_dict) -> None:
+    """D-02 (Phase 51): the image now presents provider.vendor=="langgraph"
+    only — every other vendor, "openai" here, is refused at startup."""
     in_path = tmp_path / "in.json"
     in_path.write_text(
         json.dumps(envelope_in_dict(provider={"vendor": "openai", "model": "gpt-x"}))
@@ -162,7 +164,9 @@ def test_main_happy_path_writes_trivial_envelope_out(
 ) -> None:
     monkeypatch.setenv("TIDE_WORKTREE_DIR", str(fixture_worktree))
     in_path = tmp_path / "in.json"
-    in_path.write_text(json.dumps(envelope_in_dict()))
+    in_path.write_text(
+        json.dumps(envelope_in_dict(provider={"vendor": "langgraph", "model": "claude-sonnet-4-6"}))
+    )
     stub_path = tmp_path / "termination-log"
 
     fake_model = _fake_model(["the gate command passed"])
@@ -179,6 +183,10 @@ def test_main_happy_path_writes_trivial_envelope_out(
     assert out["result"] == "the gate command passed"
     assert "git" not in out
     assert "childCRDs" not in out
+    # env.verify is absent on this envelope (D-06): no gate ran, so no
+    # verdict is assembled at all — distinct from the fail-closed BLOCKED
+    # case where verify IS present but commands is empty.
+    assert "verdict" not in out
 
     stub = json.loads(stub_path.read_text())
     assert stub["exitCode"] == 0
@@ -186,7 +194,9 @@ def test_main_happy_path_writes_trivial_envelope_out(
 
 def test_main_agent_failure_is_fail_closed(tmp_path: Path, envelope_in_dict) -> None:
     in_path = tmp_path / "in.json"
-    in_path.write_text(json.dumps(envelope_in_dict()))
+    in_path.write_text(
+        json.dumps(envelope_in_dict(provider={"vendor": "langgraph", "model": "claude-sonnet-4-6"}))
+    )
     stub_path = tmp_path / "termination-log"
 
     def _raising_run_agent(model, prompt):  # noqa: ARG001

@@ -56,9 +56,11 @@ class EnvelopeIn:
 
     `verify` mirrors the Go EnvelopeIn.Verify *VerifyContext pointer+omitempty
     field (D-03): None when absent, a plain dict when present. Kept as an
-    untyped dict here — this phase only locks the fail-closed extraction
-    guard, not a typed VerifyContext dataclass (Phase 51 consumes the
-    concrete fields).
+    untyped dict here — Phase 51 is the consumer that reads the concrete
+    `gateCommand` (canonical primary) and `commands` (the resolved ordered
+    pass-criteria list, `[gateCommand] ++ commands` per Plan 06) fields
+    directly off this raw dict; the field itself stays an untyped passthrough
+    rather than growing a typed VerifyContext dataclass.
     """
 
     api_version: str
@@ -147,9 +149,10 @@ def write_envelope_out(
     loop_run_id: str = "",
     attempt_id: str = "",
     run_evidence: dict[str, Any] | None = None,
+    verdict: dict[str, Any] | None = None,
 ) -> None:
     """Write an EnvelopeOut document to path (D-01 scope, extended by
-    Phase 50 D-02/D-03).
+    Phase 50 D-02/D-03, Phase 51 D-06).
 
     Emits apiVersion/kind/exitCode/result/terminalReason (+reason when
     exit_code is nonzero) — no `git`/`childCRDs` keys. Per
@@ -177,6 +180,12 @@ def write_envelope_out(
     at most 100 changedFiles entries (256 bytes per path), at most 10
     commands entries (256 bytes each), and at most 64 bytes each for
     model/promptVersion/runtimeVersion/specID/lockingCommit.
+
+    verdict mirrors EnvelopeOut.Verdict *GateDecision (D-06) — joined as
+    `verdict` only when not None, mirroring Go's pointer+`omitempty` tag.
+    Populated only by verifier dispatches (the caller's responsibility to
+    assemble the dict, e.g. via `GateDecision.model_dump(by_alias=True)`);
+    non-verify dispatches pass None and never serialize a "verdict" key.
     """
     out: dict[str, Any] = {
         "apiVersion": API_VERSION,
@@ -193,6 +202,8 @@ def write_envelope_out(
         out["attemptID"] = attempt_id
     if run_evidence is not None:
         out["runEvidence"] = run_evidence
+    if verdict is not None:
+        out["verdict"] = verdict
 
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)

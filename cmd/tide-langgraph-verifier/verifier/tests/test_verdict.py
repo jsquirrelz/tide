@@ -235,6 +235,12 @@ def test_gate_command_dominance_forces_non_approved_on_red_command(
     proven by injecting a fake LLM that unconditionally returns APPROVED
     alongside one real failing shell command among several passing ones."""
     monkeypatch.setenv("TIDE_WORKTREE_DIR", str(fixture_worktree))
+    # main() mutates os.environ["TIDE_GATE_COMMAND"] directly (a real,
+    # process-wide side effect — it must, to be visible to the agent's own
+    # subprocess calls). setenv (not delenv) here guarantees monkeypatch
+    # registers a restore action regardless of whether the key was already
+    # absent, so main()'s internal mutation cannot leak into later tests.
+    monkeypatch.setenv("TIDE_GATE_COMMAND", "pytest-leak-guard")
     in_path = tmp_path / "in.json"
     in_path.write_text(
         json.dumps(
@@ -273,6 +279,7 @@ def test_gate_command_all_green_plus_llm_approved_stays_approved(
     exits zero AND the LLM judge returns APPROVED, the assembled verdict
     stays APPROVED — dominance only ever pulls a verdict down, never up."""
     monkeypatch.setenv("TIDE_WORKTREE_DIR", str(fixture_worktree))
+    monkeypatch.setenv("TIDE_GATE_COMMAND", "pytest-leak-guard")  # see leak-guard note above
     in_path = tmp_path / "in.json"
     in_path.write_text(
         json.dumps(
@@ -337,9 +344,11 @@ def test_tide_gate_command_env_set_from_canonical_gate_command_before_agent_runs
 ) -> None:
     """TIDE_GATE_COMMAND is set from env.verify.gateCommand (the canonical
     primary) before the agent runs, so the LLM's run_gate_command tool still
-    functions as advisory narration."""
+    functions as advisory narration. Pre-seeding a stale sentinel (via
+    setenv, not delenv — see leak-guard note above) proves main() actually
+    OVERWRITES it, not merely that it happens to be present."""
     monkeypatch.setenv("TIDE_WORKTREE_DIR", str(fixture_worktree))
-    monkeypatch.delenv("TIDE_GATE_COMMAND", raising=False)
+    monkeypatch.setenv("TIDE_GATE_COMMAND", "stale-value-should-be-overwritten")
     in_path = tmp_path / "in.json"
     in_path.write_text(
         json.dumps(
