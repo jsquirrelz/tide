@@ -224,6 +224,32 @@ func synthesizePlannerSpan(
 		span.SetAttributes(otelai.Tags(tags...))
 	}
 
+	// D-05 (50-06 Task 3, OBS-01): loop.* identity, gated on out.AttemptID
+	// being non-empty — planner-level dispatches (never stamped this phase,
+	// D-01) leave AttemptID empty and correctly carry ZERO loop.* attributes
+	// rather than a fabricated empty. candidateVersion is out.Git.HeadSHA
+	// (D-03's locking/head commit, empty when out.Git is nil); exitReason is
+	// out.TerminalReason verbatim (D-02b — loop.exit_reason IS the envelope's
+	// TerminalReason, one source of truth). The otelai helper below already
+	// omits the parent_run_id/candidate_version/exit_reason optionals when
+	// empty, so an unclassified synthetic envelope (50-06 Task 2's
+	// synthesizeNoEnvelopeOut with an unmapped failure reason) yields no
+	// loop.exit_reason rather than an empty one.
+	//
+	// evaluation.result / evaluation.version / human_intervention are NOT
+	// stamped here — Phase 51's EVALUATOR span populates them (CONTEXT
+	// <specifics>: do not fake-populate ahead of the owning phase).
+	if out.AttemptID != "" {
+		candidateVersion := ""
+		if out.Git != nil {
+			candidateVersion = out.Git.HeadSHA
+		}
+		span.SetAttributes(otelai.LoopAttributes(
+			otelai.LoopKindExecution, out.AttemptID, out.LoopRunID,
+			out.Usage.Iterations, candidateVersion, string(out.TerminalReason),
+		)...)
+	}
+
 	// 46 D-03 (planner_correction, see the doc comment above): NO
 	// otelai.TokenCount call at any level — the per-call LLM spans the
 	// reporter emits are the sole llm.token_count.* source. The degraded
