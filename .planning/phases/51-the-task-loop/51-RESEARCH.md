@@ -451,26 +451,28 @@ func SelfInstruments(vendor string) bool {
 | A5 | The verifier image ref reaches the manager via a new `Deps` field/flag in Phase 51 (chart surface is Phase 53) | Runtime State Inventory | Low — a dev-head default flag suffices for the kind proof; CFG-01 formalizes it in Phase 53 |
 | A6 | The empty/absent `verification` posture defaults to "skip verify, preserve exit-0→Succeeded" for backward-compat unless a contract is present | Runtime State / OQ2 | Medium — the alternative (fail-closed require-a-contract) changes behavior for every existing Task. Resolve at plan time |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Where does `VerificationPhase`/`version` live — spec or status?**
+All four open questions were resolved at plan time and encoded in the phase plans (Dimension-11 convention: no open question ships unmarked).
+
+1. **[RESOLVED → Plan 01: governing enum on spec, not status]** Where does `VerificationPhase`/`version` live — spec or status?
    - What we know: D-03 says "recorded on Task.Status"; CEL immutability needs the governing enum readable by a spec transition rule (Pitfall 2).
    - What's unclear: whether to honor the literal status placement (then immutability needs a different mechanism) or move the governing enum to `spec.verification` (recommended) and keep only `lockedSHA` on status.
-   - Recommendation: governing `phase`/`version` on `spec.verification`; `lockedSHA` (a runtime observation) on `Task.Status`. Flag to the planner as an explicit fork; it is within D-03's "exact CEL rule spelling is Claude's discretion".
+   - **Resolution:** Governing `phase`/`version` live on `spec.verification` (so the CEL `oldSelf` transition rule is expressible); only the observed `lockedSHA` lives on `Task.Status`. Encoded in **Plan 51-01** Task 1 (`VerificationSpec` + XValidation marker + `TaskStatus.LockedSHA`). Within D-03's "exact CEL rule spelling is Claude's discretion".
 
-2. **Empty/absent-`verification` posture for existing Tasks.**
+2. **[RESOLVED → Plan 06: skip verify when absent]** Empty/absent-`verification` posture for existing Tasks.
    - What we know: fields are `+optional`; old Tasks have none; the milestone default posture is "off on in-place upgrade" (CFG-02, Phase 53).
    - What's unclear: whether Phase 51's controller skips verify (preserve exit-0→Succeeded) or fail-closes when no contract is present.
-   - Recommendation: skip verify when `verification` is absent (backward-compatible; CFG-02's off-on-upgrade posture lands in Phase 53). A Task WITH a contract always verifies.
+   - **Resolution:** Skip verify when `verification` is absent — preserve today's exit-0→Succeeded (backward-compatible; CFG-02's off-on-upgrade posture lands in Phase 53). A Task WITH a contract always verifies. Encoded in **Plan 51-06** Task 2 (empty-contract skip guard).
 
-3. **How does the verifier capture the deterministic gate exit out-of-band (Pitfall 1)?**
+3. **[RESOLVED → Plan 02: entrypoint out-of-band capture]** How does the verifier capture the deterministic gate exit out-of-band (Pitfall 1)?
    - What we know: `run_gate_command` returns the exit as tool text; D-06 requires the exit to dominate regardless of the LLM.
    - What's unclear: run-the-gate-in-the-entrypoint-once vs. structured tool-return interception.
-   - Recommendation: entrypoint runs the gate command deterministically (it is the same `TIDE_GATE_COMMAND`), captures returncode, and the verdict assembly forces non-APPROVED on non-zero — the LLM's verdict is advisory over the machine result. Emit a `blocker`/`gate-command` finding carrying `exit_code=N` so the controller-side re-check (D-06) has a structural signal.
+   - **Resolution:** The entrypoint runs the resolved pass-criteria commands deterministically out-of-band (iterating `env.verify.commands`), captures each returncode, and the verdict assembly forces non-APPROVED on any non-zero — the LLM's verdict is advisory over the machine result. Emits a `blocker`/`gate-command` finding carrying `exit_code=N` so the controller-side re-check (D-06) has a structural signal. Encoded in **Plan 51-02** Task 2 (multi-command out-of-band execution) + re-checked in **Plan 51-07** Task 1.
 
-4. **`verifierInFlightCount` cap default (single-node-safe).**
+4. **[RESOLVED → Plan 08: cap pinned by the kind test]** `verifierInFlightCount` cap default (single-node-safe).
    - What we know: run-2b OOMed a single-node cluster; planner cap default is 4 (configmap_planner_concurrency_test.go).
-   - Recommendation: a small default (e.g. 2–4, Claude's discretion per D-10) that, combined with the executor cap, stays within a single kind node's memory. The kind concurrent-dispatch test pins it.
+   - **Resolution:** A small default (2–4, Claude's discretion per D-10) that, combined with the executor cap, stays within a single kind node's memory; **Plan 51-08** Task 1's kind concurrent-dispatch test pins the exact value asserted (sourced from Plan 06's summary).
 
 ## Environment Availability
 
