@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0.9
 milestone_name: Slack Tide — The Task Loop (Verification-Driven Quality Iteration)
 status: executing
-stopped_at: Completed 51-03-PLAN.md
-last_updated: "2026-07-19T12:53:47.432Z"
+stopped_at: Completed 51-04-PLAN.md
+last_updated: "2026-07-19T13:08:15.334Z"
 last_activity: 2026-07-19
 progress:
   total_phases: 6
   completed_phases: 3
   total_plans: 24
-  completed_plans: 19
+  completed_plans: 20
   percent: 50
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 ## Current Position
 
 Phase: 51 (The Task Loop) — EXECUTING
-Plan: 4 of 8
+Plan: 5 of 8
 Status: Ready to execute
 Last activity: 2026-07-19
 
-Progress: [████████░░] 79%
+Progress: [████████░░] 83%
 
 ## Performance Metrics
 
@@ -106,6 +106,10 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 51-03]: human_intervention stamped only when out.Verdict.Verdict == VerdictBlocked -- never for APPROVED/REPAIRABLE/nil (degraded), narrowest reading of the population contract
 - [Phase 51-03]: synthesizeEvaluatorSpan unit tests placed in span_emission_unit_test.go not span_emission_test.go -- internal/controller's sole Ginkgo entry point is TestControllers, so a -run 'EvaluatorSpan|SpanEmission' filter vacuously passes 0 specs against the envtest file; the unit-test file is the repo's own documented home for pure-function span tests and makes the acceptance command genuinely execute
 - [Phase 51-03]: synthesizeEvaluatorSpan's span name is tide.dispatch.<level>.verify, distinct from the AGENT span's tide.dispatch.<level>, so sibling spans are name-distinguishable in addition to openinference.span.kind
+- [Phase 51]: [Phase 51-04]: verifierCapsFloorSeconds=900 (Claude's Discretion) — shorter than executor's 1200s floor per TASK-04, sized for a gate-command subprocess run + one LLM judge pass, no code-authoring tool loop
+- [Phase 51]: [Phase 51-04]: TIDE_GATE_COMMAND injection gated on GateCommand != empty only, not on Kind/ReadOnly — mirrors the unconditional-except-non-empty PricingOverridesJSON/TraceParent shape; only Plan 06 is expected to set it
+- [Phase 51]: [Phase 51-04]: BuildJobSpec's Kind switch gained an explicit case JobKindVerifier (name+role=verifier label) so Plan 06 only needs to set opts.Kind — without it a verifier dispatch would silently fall into the executor default branch
+- [Phase 51]: [Phase 51-04]: the RW envelopes/<uid>/ subPath mount is gated on opts.ReadOnly alone (not Kind) — matches how /scratch and ReadOnlyRootFilesystem are already scoped to the general read-only-dispatch variant
 
 ### Pending Todos
 
@@ -154,11 +158,12 @@ Tech-debt still carried forward: W-2 FailureHalt/gate-order divergences (todos a
 | Phase 51 P01 | 15min | 3 tasks | 6 files |
 | Phase 51 P02 | 13min | 2 tasks | 8 files |
 | Phase 51 P03 | 7min | 3 tasks | 7 files |
+| Phase 51 P04 | 5min | 2 tasks | 7 files |
 
 ## Session Continuity
 
-Last session: 2026-07-19T12:53:47.417Z
-Stopped at: Completed 51-03-PLAN.md
+Last session: 2026-07-19T13:08:15.319Z
+Stopped at: Completed 51-04-PLAN.md
 Resume file: None
 
 ## Operator Next Steps

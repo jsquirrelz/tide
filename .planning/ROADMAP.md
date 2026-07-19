@@ -148,7 +148,7 @@ Plans:
 - [x] 51-01-PLAN.md — CRD schema: VerificationSpec + CEL immutability + LoopStatus/lockedSHA + VerifyHalt vocabulary
 - [x] 51-02-PLAN.md — "langgraph" vendor sentinel + verifier-image verdict assembly & deterministic dominance
 - [x] 51-03-PLAN.md — task_verifier.tmpl (coverage-not-conservatism) + EvaluatorInvocation/EVALUATOR-span primitives
-- [ ] 51-04-PLAN.md — podjob verifier Job build: JobKindVerifier + VerifierJobName + TIDE_GATE_COMMAND + RW envelopes/ mount split
+- [x] 51-04-PLAN.md — podjob verifier Job build: JobKindVerifier + VerifierJobName + TIDE_GATE_COMMAND + RW envelopes/ mount split
 
 **Wave 2** *(blocked on 51-01)*
 
@@ -214,6 +214,6 @@ Phases execute in numeric order: 48 → 49 → 50 → 51 → 52 → 53
 | 48. LangGraph Evaluator Image + Credproxy-TLS Spike | v1.0.9 | 5/5 | Complete   | 2026-07-18 |
 | 49. Common Loop Contract + Verdict/Envelope/Persistence Schema | v1.0.9 | 4/4 | Complete    | 2026-07-18 |
 | 50. Execution-Loop Hardening + Loop-Native Observability | v1.0.9 | 7/7 | Complete    | 2026-07-19 |
-| 51. The Task Loop | v1.0.9 | 3/8 | In Progress|  |
+| 51. The Task Loop | v1.0.9 | 4/8 | In Progress|  |
 | 52. Per-Level LoopPolicy Parameterization | v1.0.9 | 0/TBD | Not started | - |
 | 53. Chart Config + Dashboard Provenance Surfacing | v1.0.9 | 0/TBD | Not started | - |
