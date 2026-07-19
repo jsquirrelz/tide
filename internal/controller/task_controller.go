@@ -2099,6 +2099,21 @@ func (r *TaskReconciler) dispatchVerifier(ctx context.Context, task *tideproject
 	attempt := task.Status.Attempt
 	verifierJobName := podjob.VerifierJobName(task.UID, attempt)
 
+	// LO-01: no verifier image configured (TIDE_VERIFIER_IMAGE unset — test
+	// fixtures or a dev cluster without the Helm chart). Building a Job with an
+	// empty container image ref creates an unschedulable Job (ImagePullBackOff /
+	// Invalid spec) that leaves the Task parked in Verifying indefinitely with no
+	// signal. Log and leave the Task benignly parked instead — mirrors the
+	// TIDE_REPORTER_IMAGE / TIDE_PUSH_IMAGE skip (boundary_push.go), and matches
+	// the wiring comment in cmd/manager/main.go. In production the chart always
+	// defaults this, so this is an edge-case safety net. Info (not V(1)) so the
+	// silent disablement is operator-visible at default verbosity.
+	if r.Deps.VerifierImage == "" {
+		logger.Info("verifier image not configured (TIDE_VERIFIER_IMAGE empty); leaving Task parked in Verifying without dispatching a verifier Job",
+			"task", task.Name)
+		return ctrl.Result{}, false, nil
+	}
+
 	// ESC-04/D-10: cap-before-acquire (Pitfall 6). Self-excludes
 	// verifierJobName so a re-reconcile of an already-dispatched verifier
 	// (checkVerifyingState's NotFound-retry path never reaches here once the

@@ -433,6 +433,46 @@ var _ = Describe("Task loop: verifier dispatch (Phase 51 Plan 06, VerifierDispat
 		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "no verifier Job may be created for a contract-less Task")
 	})
 
+	It("leaves a contract-bearing Task parked in Verifying (no unschedulable Job) when VerifierImage is empty (LO-01)", func() {
+		const projName = "vd-proj-noimage"
+		const planRef = "vd-plan-noimage"
+		const taskName = "vd-task-noimage"
+
+		makeProjectForTask(projName)
+		defer cleanupProject(projName)
+
+		task := makeVerifyTask(taskName, planRef, projName, tideprojectv1alpha3.VerificationSpec{
+			Phase: "Locked", Version: 1, GateCommand: "make test-verify",
+		})
+		defer cleanupTask(taskName)
+
+		envReader := newMapEnvReader()
+		r := newVerifyDispatchTaskReconciler(envReader)
+		r.Deps.VerifierImage = "" // TIDE_VERIFIER_IMAGE unset (dev cluster / no chart)
+		name := types.NamespacedName{Name: taskName, Namespace: "default"}
+
+		Expect(reconcileWithRetry(r.Reconcile, name, 4)).To(Succeed())
+		Expect(k8sClient.Get(ctx, name, task)).To(Succeed())
+
+		envReader.SetOut(string(task.UID), pkgdispatch.EnvelopeOut{
+			TaskUID: string(task.UID), ExitCode: 0, Result: "success", CompletedAt: time.Now(),
+		})
+		attempt := completeExecutorJob(ctx, task)
+		waitForJobTerminalInCache(ctx, podjob.JobName(task.UID, attempt))
+
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Get(ctx, name, task)).To(Succeed())
+		Expect(task.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseVerifying),
+			"an empty VerifierImage must leave the Task benignly parked in Verifying, not Failed")
+
+		verifierJobName := podjob.VerifierJobName(task.UID, attempt)
+		var verifierJob batchv1.Job
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: verifierJobName, Namespace: "default"}, &verifierJob)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "an empty VerifierImage must NOT create an unschedulable verifier Job")
+	})
+
 	It("defers verifier dispatch at the ESC-04 concurrency cap without leaking a reservation (Pitfall 6)", func() {
 		const projName = "vd-proj-caphit"
 		const planRef = "vd-plan-caphit"

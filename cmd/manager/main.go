@@ -212,9 +212,10 @@ func main() {
 
 	// TIDE_VERIFIER_IMAGE → TaskReconciler.VerifierImage field (Phase 51 the Task loop).
 	// The read-only tide-langgraph-verifier Job runs the planner-authored gate command(s)
-	// against the ReadOnly worktree and writes a gate_decision verdict. When empty, the
-	// verifier dispatch site logs and skips (mirrors the TIDE_REPORTER_IMAGE skip). Injected
-	// by the chart images.tideLanggraphVerifier block. PROD_OVERRIDE_REQUIRED.
+	// against the ReadOnly worktree and writes a gate_decision verdict. When empty,
+	// dispatchVerifier logs and leaves the Task benignly parked in Verifying rather than
+	// creating an unschedulable Job (LO-01 — mirrors the TIDE_REPORTER_IMAGE/TIDE_PUSH_IMAGE
+	// skip). Injected by the chart images.tideLanggraphVerifier block. PROD_OVERRIDE_REQUIRED.
 	verifierImage := envOrDefault("TIDE_VERIFIER_IMAGE", "ghcr.io/jsquirrelz/tide-langgraph-verifier:v0.1.0-dev")
 
 	// Single source for the cluster-wide workspace PVC name, read by both the
