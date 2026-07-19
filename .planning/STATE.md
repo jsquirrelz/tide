@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0.9
 milestone_name: Slack Tide — The Task Loop (Verification-Driven Quality Iteration)
 status: executing
-stopped_at: Phase 51 context gathered
-last_updated: "2026-07-19T12:02:56.481Z"
-last_activity: 2026-07-19 -- Phase 51 planning complete
+stopped_at: Completed 51-01-PLAN.md
+last_updated: "2026-07-19T12:20:00.666Z"
+last_activity: 2026-07-19
 progress:
   total_phases: 6
   completed_phases: 3
   total_plans: 24
-  completed_plans: 16
+  completed_plans: 17
   percent: 50
 ---
 
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-18)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 51 — the task loop
+**Current focus:** Phase 51 — The Task Loop
 
 ## Current Position
 
-Phase: 51
-Plan: Not started
+Phase: 51 (The Task Loop) — EXECUTING
+Plan: 2 of 8
 Status: Ready to execute
-Last activity: 2026-07-19 -- Phase 51 planning complete
+Last activity: 2026-07-19
 
-Progress: [██████████] 100%
+Progress: [███████░░░] 71%
 
 ## Performance Metrics
 
@@ -97,6 +97,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 50-07]: Doc comments describing --attempt-id/--loop-run-id Args and otelai.LoopIteration avoid the exact literal patterns the plan's acceptance greps count, so prose doesn't double-count alongside the real code line
 - [Phase 50-07]: loopRunID is threaded through EmitSpans for signature symmetry with --loop-run-id and future use but never stamped onto a span attribute this phase — only loop.run_id (from attemptID) and loop.iteration are the D-05 LLM-span correlating subset
 - [Phase 50-07]: golangci-lint's unparam linter does not flag the unused loopRunID parameter on exported EmitSpans — confirmed via a clean make lint run, no nolint suppression needed
+- [Phase 51]: [Phase 51-01] Governing VerificationPhase/Version live on spec.verification (not status) so the CEL oldSelf transition rule is expressible; only lockedSHA (a runtime observation) lives on TaskStatus
+- [Phase 51]: [Phase 51-01] VerificationSpec is a standalone type (Gates/Caps precedent), not inline TaskSpec fields, so the identical shape generalizes to Plan.Spec/Project.Spec with Task > Plan > Project precedence in Phase 52
+- [Phase 51]: [Phase 51-01] The internal/controller shared Ginkgo envtest suite has one Test* entry point (TestControllers) -- a plan verify-command like go test ./internal/controller/... -run <SpecName> vacuously passes without running any specs; use --ginkgo.focus= or the unfiltered suite to genuinely verify
 
 ### Pending Todos
 
@@ -142,12 +145,13 @@ Tech-debt still carried forward: W-2 FailureHalt/gate-order divergences (todos a
 | Phase 50 P05 | 3min | 2 tasks | 2 files |
 | Phase 50 P06 | 10min | 3 tasks | 4 files |
 | Phase 50 P07 | 9min | 2 tasks | 7 files |
+| Phase 51 P01 | 15min | 3 tasks | 6 files |
 
 ## Session Continuity
 
-Last session: 2026-07-19T10:46:56.758Z
-Stopped at: Phase 51 context gathered
-Resume file: .planning/phases/51-the-task-loop/51-CONTEXT.md
+Last session: 2026-07-19T12:20:00.651Z
+Stopped at: Completed 51-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 

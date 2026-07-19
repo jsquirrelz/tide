@@ -29,11 +29,11 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### Task Loop (TASK) — the core
 
-- [ ] **TASK-01**: `TaskSpec` gains a verification contract embodying the committed TASK-template shape — **planner-authored** acceptance-signal `commands` (executed for real by the evaluator, exit codes parsed, never self-reported), `requiredArtifacts`, `evaluator` (type), constraints/prohibited-changes, `maxIterations`, `onExhaustion` — and the contract is **immutable once locked** (Draft→Locked→Superseded + version): a run references the locking commit so `git show <sha>` reproduces exactly what was dispatched, and a fresh attempt re-uses that locked spec
+- [x] **TASK-01**: `TaskSpec` gains a verification contract embodying the committed TASK-template shape — **planner-authored** acceptance-signal `commands` (executed for real by the evaluator, exit codes parsed, never self-reported), `requiredArtifacts`, `evaluator` (type), constraints/prohibited-changes, `maxIterations`, `onExhaustion` — and the contract is **immutable once locked** (Draft→Locked→Superseded + version): a run references the locking commit so `git show <sha>` reproduces exactly what was dispatched, and a fresh attempt re-uses that locked spec
 - [ ] **TASK-02**: A verification result classified **repairable** creates a FRESH attempt seeded with the original spec + a **compact evidence packet** (the relevant failures/diffs/test output) — never the previous agent's entire context
 - [ ] **TASK-03**: **Infrastructure-retry** (rerun the same attempt after eviction/transient failure) is distinct from **quality-iteration** (a new attempt with evaluator feedback): the eviction-retry path is preserved and the blind `maxAttemptsPerTask` quality-retry is superseded by evaluator-driven attempts
 - [ ] **TASK-04**: The evaluator is **logically independent** of the implementation agent (a distinct runtime/process — the LangGraph image), and a **deterministic security, compile, or test failure dominates** any probabilistic LLM-judge approval (a red gate can never be overridden by a judge)
-- [ ] **TASK-05**: The Task loop is bounded by `maxIterations` with `onExhaustion` → escalate / `requireApproval` (never unbounded), and its iteration/cost/budget state is re-derivable and **resumable across a controller restart**
+- [x] **TASK-05**: The Task loop is bounded by `maxIterations` with `onExhaustion` → escalate / `requireApproval` (never unbounded), and its iteration/cost/budget state is re-derivable and **resumable across a controller restart**
 - [ ] **TASK-06**: The Task contract's escalation is **three-tier** — *fresh attempt* (repairable failures return to the Task loop), *system escalation* (a recurring cross-attempt pattern — notably an attempt that edits fixtures/thresholds/the evaluator itself instead of the code — is flagged as systemic, never counted as a pass), *human decision* (spec/architecture/risk changes → `requireApproval`); the **anti-gaming invariant** "do not weaken or delete an evaluator to make a Task pass" is enforced, not merely documented
 
 ### Evaluator Image & Verdict (EVAL)
@@ -48,7 +48,7 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 - [ ] **ESC-01**: The same verification contract runs at every level, parameterized by `LoopPolicy` — **Task** `maxIterations:N` (auto-repair); **Plan/plan-check** `maxIterations:1` (goal-backward rubric — goal alignment, file-touch plausibility, dependency correctness, verification derivability — → re-plan with its **own** counter default 1 and **severity-weighted** stall detection); **Phase/Milestone/Project** `maxIterations:0` (escalate, because a level closes on its **observable outcome**, not on task-completion — the Slice-template principle) — gate policy resolved from **loop level**, not hierarchy position
 - [ ] **ESC-02**: `ConditionVerifyHalt` mirrors `failure_halt.go` file-for-file **including Phase 25's resume time-fence**, gates **both** the planner tier (`checkDispatchHolds`) and the task tier (`TaskReconciler.gateChecks`), and enforces `onExhaustion: requireApproval` through the existing gate machinery
-- [ ] **ESC-03**: A BLOCKED / exhausted verify is a **distinct halt class**, never a reinterpretation of `Failed` wave semantics — a regression test asserts the checked level's phase, wave siblings, and conservative-profile propagation are untouched by a VerifyHalt
+- [x] **ESC-03**: A BLOCKED / exhausted verify is a **distinct halt class**, never a reinterpretation of `Failed` wave semantics — a regression test asserts the checked level's phase, wave siblings, and conservative-profile propagation are untouched by a VerifyHalt
 - [ ] **ESC-04**: Evaluator dispatches are **counted against the concurrency gate** (extend `plannerInFlightCount` or add a dedicated `verifierInFlightCount`, Phase-32 shape) in the **same phase** as the dispatch sites, and `LoopPolicy.BudgetCents` bounds cost through the existing reservation store — preventing a repeat of the run-2b D3 single-node OOM
 
 ### Loop-Native Observability (OBS)
@@ -107,11 +107,11 @@ Locked at roadmap creation 2026-07-18 (`ROADMAP.md`): Phase 48 LangGraph evaluat
 | EXEC-02 | Phase 50 | Complete |
 | EXEC-03 | Phase 50 | Complete |
 | EXEC-04 | Phase 50 | Complete |
-| TASK-01 | Phase 51 | Pending |
+| TASK-01 | Phase 51 | Complete |
 | TASK-02 | Phase 51 | Pending |
 | TASK-03 | Phase 51 | Pending |
 | TASK-04 | Phase 51 | Pending |
-| TASK-05 | Phase 51 | Pending |
+| TASK-05 | Phase 51 | Complete |
 | TASK-06 | Phase 51 | Pending |
 | EVAL-01 | Phase 48 | Complete |
 | EVAL-02 | Phase 48 | Complete |
@@ -120,7 +120,7 @@ Locked at roadmap creation 2026-07-18 (`ROADMAP.md`): Phase 48 LangGraph evaluat
 | EVAL-05 | Phase 49 | Complete |
 | ESC-01 | Phase 52 | Pending |
 | ESC-02 | Phase 51 | Pending |
-| ESC-03 | Phase 51 | Pending |
+| ESC-03 | Phase 51 | Complete |
 | ESC-04 | Phase 51 | Pending |
 | OBS-01 | Phase 50 | Complete |
 | OBS-02 | Phase 50 | Complete |
