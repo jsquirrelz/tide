@@ -18,9 +18,98 @@ package dispatch
 
 import (
 	"encoding/json"
+	"os"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+// TestEnvelopeOut_GoldenFixtureRoundTrip reads the canonical shared golden
+// fixture (the single Go+Python parity anchor Plan 50-05's Python tests also
+// read) and asserts it unmarshals to the expected EnvelopeOut shape. The
+// fixture deliberately pins a non-"completed" TerminalReason
+// ("cap_exceeded") so a silent-default bug in either language surfaces as a
+// value mismatch, not a false positive on the common case. This deliberately
+// does NOT re-marshal-and-byte-compare: Go and Python struct/dict
+// serialization key order is not guaranteed to match (mirrors
+// TestGateDecision_GoldenFixtureRoundTrip in verdict_test.go) — asserting
+// against the canonical decoded values, then proving re-marshal/re-unmarshal
+// value-equivalence, is the stable check.
+func TestEnvelopeOut_GoldenFixtureRoundTrip(t *testing.T) {
+	golden, err := os.ReadFile("testdata/envelope_out_golden.json")
+	if err != nil {
+		t.Fatalf("read golden fixture: %v", err)
+	}
+	var decoded EnvelopeOut
+	if err := json.Unmarshal(golden, &decoded); err != nil {
+		t.Fatalf("unmarshal golden fixture: %v", err)
+	}
+
+	if decoded.TerminalReason != TerminalReasonCapExceeded {
+		t.Errorf("TerminalReason = %q, want %q", decoded.TerminalReason, TerminalReasonCapExceeded)
+	}
+	if decoded.LoopRunID == "" {
+		t.Error("LoopRunID is empty, want non-empty")
+	}
+	if decoded.AttemptID == "" {
+		t.Error("AttemptID is empty, want non-empty")
+	}
+	if !strings.HasPrefix(decoded.AttemptID, decoded.TaskUID+"-") {
+		t.Errorf("AttemptID = %q, want {taskUID}-{n} shape (prefix %q)", decoded.AttemptID, decoded.TaskUID+"-")
+	}
+
+	if decoded.RunEvidence == nil {
+		t.Fatal("RunEvidence is nil, want non-nil")
+	}
+	ev := *decoded.RunEvidence
+	if ev.SpecID == "" {
+		t.Error("RunEvidence.SpecID is empty, want non-empty")
+	}
+	if ev.LockingCommit == "" {
+		t.Error("RunEvidence.LockingCommit is empty, want non-empty")
+	}
+	if len(ev.Commands) == 0 {
+		t.Error("RunEvidence.Commands is empty, want non-empty")
+	}
+	if len(ev.EvaluatorVersions) == 0 {
+		t.Error("RunEvidence.EvaluatorVersions is empty, want non-empty")
+	}
+	if len(ev.ChangedFiles) == 0 {
+		t.Error("RunEvidence.ChangedFiles is empty, want non-empty")
+	}
+	if ev.ChangedFileTotal == 0 {
+		t.Error("RunEvidence.ChangedFileTotal is zero, want non-zero")
+	}
+	if ev.Model == "" {
+		t.Error("RunEvidence.Model is empty, want non-empty")
+	}
+	if ev.PromptVersion == "" {
+		t.Error("RunEvidence.PromptVersion is empty, want non-empty")
+	}
+	if ev.RuntimeVersion == "" {
+		t.Error("RunEvidence.RuntimeVersion is empty, want non-empty")
+	}
+
+	// Re-marshal and re-unmarshal to prove value-equivalence — never a byte
+	// compare (Go/Python serializer key order is not guaranteed to match).
+	remarshaled, err := json.Marshal(decoded)
+	if err != nil {
+		t.Fatalf("re-marshal decoded EnvelopeOut: %v", err)
+	}
+	var reparsed EnvelopeOut
+	if err := json.Unmarshal(remarshaled, &reparsed); err != nil {
+		t.Fatalf("re-unmarshal EnvelopeOut: %v", err)
+	}
+	if reparsed.TerminalReason != decoded.TerminalReason {
+		t.Errorf("re-parsed TerminalReason = %q, want %q", reparsed.TerminalReason, decoded.TerminalReason)
+	}
+	if reparsed.AttemptID != decoded.AttemptID {
+		t.Errorf("re-parsed AttemptID = %q, want %q", reparsed.AttemptID, decoded.AttemptID)
+	}
+	if !reflect.DeepEqual(reparsed.RunEvidence, decoded.RunEvidence) {
+		t.Errorf("re-parsed RunEvidence = %+v, want %+v", reparsed.RunEvidence, decoded.RunEvidence)
+	}
+}
 
 // TestTerminalReason_EnvelopeOut_RoundTrip builds an EnvelopeOut carrying a
 // non-zero TerminalReason, LoopRunID, AttemptID, and a fully-populated

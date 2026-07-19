@@ -1,0 +1,38 @@
+{
+  "apiVersion": "dispatch.tideproject.k8s/v1alpha1",
+  "kind": "TaskEnvelopeOut",
+  "taskUID": "uid-golden-0001",
+  "exitCode": 1,
+  "result": "cap-exceeded during agent loop",
+  "reason": "wall-clock cap exceeded after 50 iterations",
+  "terminalReason": "cap_exceeded",
+  "loopRunID": "uid-golden-0001",
+  "attemptID": "uid-golden-0001-2",
+  "usage": {
+    "inputTokens": 154000,
+    "outputTokens": 8200,
+    "estimatedCostCents": 42,
+    "iterations": 50,
+    "cacheReadTokens": 12000,
+    "cacheCreationTokens": 4000
+  },
+  "artifacts": [],
+  "completedAt": "2026-07-18T12:00:00Z",
+  "git": {
+    "headSHA": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+  },
+  "runEvidence": {
+    "specID": "spec-golden-001",
+    "lockingCommit": "cafebabe1122334455667788990011223344abcd",
+    "commands": ["go test ./...", "go vet ./..."],
+    "evaluatorVersions": ["gate-v1"],
+    "changedFiles": [
+      {"path": "pkg/example/handler.go", "status": "M"},
+      {"path": "pkg/example/handler_test.go", "status": "A"}
+    ],
+    "changedFileTotal": 2,
+    "model": "claude-sonnet-4-6",
+    "promptVersion": "v1",
+    "runtimeVersion": "claude-code/2.1.178"
+  }
+}

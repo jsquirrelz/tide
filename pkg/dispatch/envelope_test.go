@@ -783,13 +783,36 @@ func TestNewTerminationStub_NilGit(t *testing.T) {
 
 // TestNewTerminationStub_StaysSmall asserts that marshalling a TerminationStub
 // built from a deliberately oversized EnvelopeOut (50 ChildCRDs + a 10 KB
-// Result) produces JSON < 4096 bytes (T-09-03 mitigation: the Manager reads
-// the Pod's 4 KB termination message, so the stub MUST fit).
+// Result + a pathological RunEvidence) produces JSON < 4096 bytes (T-09-03 /
+// T-50-01 mitigation: the Manager reads the Pod's 4 KB termination message,
+// so the stub MUST fit).
 func TestNewTerminationStub_StaysSmall(t *testing.T) {
 	// Build a deliberately large EnvelopeOut that would overflow 4 KB if the
 	// full envelope were marshalled to the termination message.
 	out := fullyPopulatedEnvelopeOut()
 	out.Result = strings.Repeat("x", 10*1024) // 10 KB verbose result — excluded from stub
+	out.TerminalReason = TerminalReasonCapExceeded
+	// D-03/T-50-01: a maximally-pathological RunEvidence (500 changed files
+	// with 4KB paths, 50 commands of 10KB each), passed through Bounded()
+	// the same way a real writer would before assigning it — proves the
+	// <4KB stub bound holds even when the full out.json RunEvidence is at
+	// its bounded maximum, not just when it's small.
+	pathologicalChangedFiles := make([]ChangedFile, 500)
+	for i := range pathologicalChangedFiles {
+		pathologicalChangedFiles[i] = ChangedFile{
+			Path:   strings.Repeat("p", 4096),
+			Status: "M",
+		}
+	}
+	pathologicalCommands := make([]string, 50)
+	for i := range pathologicalCommands {
+		pathologicalCommands[i] = strings.Repeat("c", 10*1024)
+	}
+	bounded := RunEvidence{
+		ChangedFiles: pathologicalChangedFiles,
+		Commands:     pathologicalCommands,
+	}.Bounded()
+	out.RunEvidence = &bounded
 	out.ChildCRDs = make([]ChildCRDSpec, 50)
 	for i := range out.ChildCRDs {
 		out.ChildCRDs[i] = ChildCRDSpec{
@@ -831,6 +854,12 @@ func TestNewTerminationStub_StaysSmall(t *testing.T) {
 	if stub.HighSeverityCount != 50 {
 		t.Errorf("HighSeverityCount: got %d, want 50", stub.HighSeverityCount)
 	}
+	if stub.TerminalReason != string(TerminalReasonCapExceeded) {
+		t.Errorf("TerminalReason: got %q, want %q", stub.TerminalReason, TerminalReasonCapExceeded)
+	}
+	if stub.ChangedFileCount != 500 {
+		t.Errorf("ChangedFileCount: got %d, want 500 (pre-truncation ChangedFileTotal survives flattening)", stub.ChangedFileCount)
+	}
 }
 
 // TestTerminationStub_NoForbiddenFields asserts (at compile time via struct
@@ -851,14 +880,25 @@ func TestTerminationStub_NoForbiddenFields(t *testing.T) {
 		GateDecision:      "",
 		FindingsCount:     0,
 		HighSeverityCount: 0,
+		TerminalReason:    "",
+		ChangedFileCount:  0,
 	}
-	// Runtime assertion: marshalled JSON must not contain these keys.
-	stub := NewTerminationStub(fullyPopulatedEnvelopeOut())
+	// Runtime assertion: marshalled JSON must not contain these keys. A
+	// pathological RunEvidence proves "changedFiles"/"commands" (the
+	// unbounded array fields) never reach the termination message even when
+	// the source out.json carries a large manifest (T-50-01/D-03) — only the
+	// bounded ChangedFileCount summary is permitted.
+	out := fullyPopulatedEnvelopeOut()
+	out.RunEvidence = &RunEvidence{
+		ChangedFiles: []ChangedFile{{Path: "pkg/foo/foo.go", Status: "M"}},
+		Commands:     []string{"go test ./..."},
+	}
+	stub := NewTerminationStub(out)
 	data, err := json.Marshal(stub)
 	if err != nil {
 		t.Fatalf("json.Marshal(TerminationStub): %v", err)
 	}
-	for _, forbidden := range []string{`"childCRDs"`, `"result"`, `"artifacts"`} {
+	for _, forbidden := range []string{`"childCRDs"`, `"result"`, `"artifacts"`, `"changedFiles"`, `"commands"`} {
 		if strings.Contains(string(data), forbidden) {
 			t.Errorf("TerminationStub JSON contains forbidden key %s; got: %s", forbidden, string(data))
 		}
@@ -1101,5 +1141,67 @@ func TestNewTerminationStub_ChildCountJSON(t *testing.T) {
 	}
 	if len(data) >= 4096 {
 		t.Errorf("TerminationStub JSON size = %d bytes, want < 4096 (termination-message budget)", len(data))
+	}
+}
+
+// TestEnvelopeOut_NoCorrectnessField is the EXEC-04/D-04 negative guard: the
+// Execution loop reports only that the agent BELIEVES an attempt is complete
+// (TerminalReason == TerminalReasonCompleted) — no EnvelopeOut field may
+// assert Task correctness. That authority is exclusively Phase 51's Task
+// loop (the independent verifier). Mirrors TestTerminationStub_NoForbiddenFields's
+// two-layer shape: a compile-time exhaustive struct literal (adding a field
+// later forces this test to be updated, making a correctness-stamping field
+// addition a reviewed act) plus a runtime JSON-key-absence check.
+func TestEnvelopeOut_NoCorrectnessField(t *testing.T) {
+	// Compile-time assertion: every current EnvelopeOut field is listed
+	// here. Adding a field (e.g. a "TaskCorrect bool") fails this literal to
+	// compile with "unknown field" — intentional.
+	_ = EnvelopeOut{
+		APIVersion:     "",
+		Kind:           "",
+		TaskUID:        "",
+		ExitCode:       0,
+		Result:         "",
+		Reason:         "",
+		TerminalReason: "",
+		LoopRunID:      "",
+		AttemptID:      "",
+		Usage:          Usage{},
+		Artifacts:      nil,
+		CompletedAt:    time.Time{},
+		ChildCRDs:      nil,
+		Git:            nil,
+		ChildCount:     0,
+		SharedContext:  "",
+		Verdict:        nil,
+		RunEvidence:    nil,
+	}
+
+	// Runtime assertion: a fully-populated EnvelopeOut (including Verdict
+	// and RunEvidence) never emits a correctness-asserting JSON key.
+	out := fullyPopulatedEnvelopeOut()
+	out.TerminalReason = TerminalReasonCompleted
+	out.Verdict = &GateDecision{
+		Verdict: VerdictApproved,
+		Summary: "looks fine",
+	}
+	out.RunEvidence = &RunEvidence{
+		SpecID:           "spec-001",
+		LockingCommit:    "abc123",
+		Commands:         []string{"go test ./..."},
+		ChangedFiles:     []ChangedFile{{Path: "pkg/foo/foo.go", Status: "M"}},
+		ChangedFileTotal: 1,
+		Model:            "claude-sonnet-4-6",
+		PromptVersion:    "v1",
+		RuntimeVersion:   "claude-code/2.1.178",
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("json.Marshal(EnvelopeOut): %v", err)
+	}
+	for _, forbidden := range []string{`"taskCorrect"`, `"correctness"`, `"verified"`, `"approved"`, `"passed"`} {
+		if strings.Contains(string(data), forbidden) {
+			t.Errorf("EnvelopeOut JSON contains forbidden correctness-asserting key %s; got: %s", forbidden, string(data))
+		}
 	}
 }
