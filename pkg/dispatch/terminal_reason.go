@@ -60,7 +60,11 @@ const (
 // unset reason for a valid one.
 func (t TerminalReason) Valid() bool {
 	switch t {
-	case TerminalReasonCompleted, TerminalReasonCapExceeded, TerminalReasonBlocked, TerminalReasonToolFailure, TerminalReasonInvalidOutput:
+	case TerminalReasonCompleted,
+		TerminalReasonCapExceeded,
+		TerminalReasonBlocked,
+		TerminalReasonToolFailure,
+		TerminalReasonInvalidOutput:
 		return true
 	default:
 		return false

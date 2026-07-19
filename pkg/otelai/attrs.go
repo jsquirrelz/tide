@@ -438,7 +438,11 @@ const LoopKindExecution = "execution"
 // non-empty — mirroring the sessionID/metadataJSON/tags "absent when empty,
 // never a fabricated empty value" enrichment discipline (46 OBS-02/OBS-03).
 // Callers gate the call itself on a non-empty runID.
-func LoopAttributes(kind, runID, parentRunID string, iteration int, candidateVersion, exitReason string) []attribute.KeyValue {
+func LoopAttributes(
+	kind, runID, parentRunID string,
+	iteration int,
+	candidateVersion, exitReason string,
+) []attribute.KeyValue {
 	out := []attribute.KeyValue{
 		attribute.String(keyLoopKind, kind),
 		attribute.String(keyLoopRunID, runID),
