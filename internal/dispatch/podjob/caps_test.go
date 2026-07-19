@@ -108,6 +108,32 @@ func TestDefaultCaps(t *testing.T) {
 			wantWallClock:  plannerCapsFloorSeconds,
 			wantIterations: 20,
 		},
+		// Verifier branch — Phase 51 TASK-04, deliberately shorter than executor floor
+		{
+			name:          "verifier: nil caps → verify floor",
+			in:            nil,
+			kind:          JobKindVerifier,
+			wantWallClock: verifierCapsFloorSeconds,
+		},
+		{
+			name:          "verifier: zero WallClockSeconds → verify floor",
+			in:            &tidev1alpha3.Caps{WallClockSeconds: 0},
+			kind:          JobKindVerifier,
+			wantWallClock: verifierCapsFloorSeconds,
+		},
+		{
+			name:          "verifier: 60s WallClockSeconds → 60s (operator-set is honored regardless of Kind)",
+			in:            &tidev1alpha3.Caps{WallClockSeconds: 60},
+			kind:          JobKindVerifier,
+			wantWallClock: 60,
+		},
+		{
+			name:           "verifier: zero WallClockSeconds + Iterations preserved across Kind",
+			in:             &tidev1alpha3.Caps{WallClockSeconds: 0, Iterations: 10},
+			kind:           JobKindVerifier,
+			wantWallClock:  verifierCapsFloorSeconds,
+			wantIterations: 10,
+		},
 	}
 
 	for _, tc := range cases {
@@ -176,5 +202,27 @@ func TestDefaultCaps_NilCapsDeadlineMatch(t *testing.T) {
 	if plannerCapsFloorSeconds <= executorCapsFloorSeconds {
 		t.Errorf("planner floor (%ds) must exceed executor floor (%ds); regression on Phase 04.1 P1.3 dual-floor design",
 			plannerCapsFloorSeconds, executorCapsFloorSeconds)
+	}
+
+	// Verifier branch — Phase 51 TASK-04: verify floor + grace
+	verifierCapsForToken := DefaultCaps(nil, JobKindVerifier)
+	verifierCapsForJob := DefaultCaps(nil, JobKindVerifier)
+	verifierTokenValidity := verifierCapsForToken.WallClockSeconds + DefaultWallClockGraceSeconds
+	verifierActiveDeadline := verifierCapsForJob.WallClockSeconds + DefaultWallClockGraceSeconds
+	if verifierTokenValidity != verifierActiveDeadline {
+		t.Errorf("verifier: token validity (%ds) != active deadline (%ds); Phase 51 TASK-04 drift",
+			verifierTokenValidity, verifierActiveDeadline)
+	}
+	if verifierTokenValidity != verifierCapsFloorSeconds+DefaultWallClockGraceSeconds {
+		t.Errorf("verifier: expected nil-caps deadline = %ds (verify floor + grace); got %ds",
+			verifierCapsFloorSeconds+DefaultWallClockGraceSeconds, verifierTokenValidity)
+	}
+
+	// Drift guard — verifier floor MUST be shorter than executor floor (TASK-04 must_have:
+	// "a verify caps floor... shorter than executor's 1200s" — the verifier runs a read-only
+	// gate-command + LLM-judge pass, not a code-authoring tool loop).
+	if verifierCapsFloorSeconds >= executorCapsFloorSeconds {
+		t.Errorf("verifier floor (%ds) must be shorter than executor floor (%ds) per TASK-04",
+			verifierCapsFloorSeconds, executorCapsFloorSeconds)
 	}
 }

@@ -69,3 +69,60 @@ func TestJobName(t *testing.T) {
 		})
 	}
 }
+
+// TestVerifierJobName verifies the deterministic tide-verifier-{uid}-{attempt}
+// format (Phase 51 TASK-04/ESC-04) — the dedup key + role=verifier
+// label-selector target Plan 06's verifierInFlightCount counts against.
+func TestVerifierJobName(t *testing.T) {
+	cases := []struct {
+		name    string
+		uid     types.UID
+		attempt int
+		want    string
+	}{
+		{
+			name:    "basic uid and attempt 1",
+			uid:     types.UID("task-uid-abc"),
+			attempt: 1,
+			want:    "tide-verifier-task-uid-abc-1",
+		},
+		{
+			name:    "uid xyz and attempt 7",
+			uid:     types.UID("xyz"),
+			attempt: 7,
+			want:    "tide-verifier-xyz-7",
+		},
+		{
+			name:    "zero attempt",
+			uid:     types.UID("task-uid-zero"),
+			attempt: 0,
+			want:    "tide-verifier-task-uid-zero-0",
+		},
+		{
+			name:    "large attempt",
+			uid:     types.UID("task-uid-large"),
+			attempt: 999,
+			want:    "tide-verifier-task-uid-large-999",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := VerifierJobName(c.uid, c.attempt)
+			if got != c.want {
+				t.Errorf("VerifierJobName(%q, %d) = %q; want %q", c.uid, c.attempt, got, c.want)
+			}
+		})
+	}
+}
+
+// TestVerifierJobName_DistinctFromJobName verifies the verifier and executor
+// Job names never collide for the same taskUID+attempt tuple — TASK-04's
+// "logically independent process" requirement depends on the two Jobs
+// having distinct identities even when dispatched for the same Task/attempt.
+func TestVerifierJobName_DistinctFromJobName(t *testing.T) {
+	uid := types.UID("task-uid-shared")
+	attempt := 1
+	if VerifierJobName(uid, attempt) == JobName(uid, attempt) {
+		t.Errorf("VerifierJobName(%q, %d) collides with JobName(%q, %d)", uid, attempt, uid, attempt)
+	}
+}
