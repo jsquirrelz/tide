@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0.9
 milestone_name: Slack Tide — The Task Loop (Verification-Driven Quality Iteration)
 status: executing
-stopped_at: Completed 50-04-PLAN.md
-last_updated: "2026-07-19T04:56:03.468Z"
+stopped_at: Completed 50-05-PLAN.md
+last_updated: "2026-07-19T05:08:09.703Z"
 last_activity: 2026-07-19
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 16
-  completed_plans: 13
+  completed_plans: 14
   percent: 33
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 ## Current Position
 
 Phase: 50 (execution-loop-hardening-loop-native-observability) — EXECUTING
-Plan: 5 of 7
+Plan: 6 of 7
 Status: Ready to execute
 Last activity: 2026-07-19
 
-Progress: [████████░░] 81%
+Progress: [█████████░] 88%
 
 ## Performance Metrics
 
@@ -89,6 +89,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 50]: [Phase 50-04] runtimeVersionProbe execs claude --version directly via exec.CommandContext, not through anthropic.Anthropic's execFunc test seam, to avoid overwriting existing tests' captured-args assertions
 - [Phase 50]: [Phase 50-04] cap_exceeded test drives harness.CheckCaps via InputTokens not Iterations — ParseStream never populates Usage.Iterations for any real stream-json transcript (pre-existing gap outside plan scope)
 - [Phase 50]: [Phase 50-04] cmd/claude-subagent's failEnvelope/failOut now take the full EnvelopeIn (not just TaskUID) so LoopRunID/AttemptID echo naturally at every call site with a real envelope
+- [Phase 50-05]: ENVELOPE_OUT_GOLDEN_FIXTURE imports verdict.py's private _repo_root() helper directly rather than duplicating it, per the plan's explicit reuse instruction
+- [Phase 50-05]: Task 1 TDD RED used git checkout -- to revert envelope.py to pre-change state, producing a genuine failing-assertion RED rather than a build-error RED
+- [Phase 50-05]: run_evidence bounding stays Go-side only this phase; the Python writer joins whatever dict the caller passes, matching D-03's scope note that full evidence population is Phase 51
 
 ### Pending Todos
 
@@ -131,11 +134,12 @@ Tech-debt still carried forward: W-2 FailureHalt/gate-order divergences (todos a
 | Phase 50 P02 | 1min | 2 tasks | 2 files |
 | Phase 50 P03 | 7min | 2 tasks | 5 files |
 | Phase 50 P04 | 17min | 3 tasks | 9 files |
+| Phase 50 P05 | 3min | 2 tasks | 2 files |
 
 ## Session Continuity
 
-Last session: 2026-07-19T04:56:03.451Z
-Stopped at: Completed 50-04-PLAN.md
+Last session: 2026-07-19T05:08:09.683Z
+Stopped at: Completed 50-05-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
