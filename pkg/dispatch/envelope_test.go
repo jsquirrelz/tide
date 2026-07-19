@@ -270,6 +270,7 @@ func fullyPopulatedEnvelopeIn() EnvelopeIn {
 		},
 		Verify: &VerifyContext{
 			GateCommand:        "go test ./...",
+			Commands:           []string{"go test ./...", "golangci-lint run"},
 			RequiredArtifacts:  []string{"pkg/foo/foo.go"},
 			EvaluatorRef:       "default-evaluator",
 			EvidencePacketPath: "envelopes/uid-alpha-0001/evidence.json",
@@ -365,13 +366,15 @@ func TestEnvelopeIn_RoundTrip_OmitsVerifyWhenNil(t *testing.T) {
 }
 
 // TestEnvelopeIn_Verify_RoundTrip asserts that a populated VerifyContext
-// (Role="verifier") preserves GateCommand/RequiredArtifacts/EvaluatorRef/
-// EvidencePacketPath through a json round trip (D-03).
+// (Role="verifier") preserves GateCommand/Commands/RequiredArtifacts/
+// EvaluatorRef/EvidencePacketPath through a json round trip (D-03, Phase 51
+// Plan 06's Commands addition).
 func TestEnvelopeIn_Verify_RoundTrip(t *testing.T) {
 	in := fullyPopulatedEnvelopeIn()
 	in.Role = "verifier"
 	in.Verify = &VerifyContext{
 		GateCommand:        "make test-int",
+		Commands:           []string{"make test-int", "make lint"},
 		RequiredArtifacts:  []string{"pkg/dispatch/verdict.go", "pkg/dispatch/envelope.go"},
 		EvaluatorRef:       "langgraph-evaluator",
 		EvidencePacketPath: "envelopes/uid-beta-0002/evidence.json",

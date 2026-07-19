@@ -432,11 +432,24 @@ type Dev struct {
 // The pre-2026-07-18 three-Stage framing is dropped under the loop reframe —
 // grow this per consumer, never a speculative superset.
 type VerifyContext struct {
-	// GateCommand is the planner-authored pass-criterion command(s) to run
-	// for real (exit code parsed, never self-reported). Field name carried
-	// forward from research/ARCHITECTURE.md:146 to avoid Phase 51 template
-	// churn.
+	// GateCommand is the single canonical PRIMARY pass-criterion command —
+	// always Commands[0] below when Commands is non-empty (Plan 06 populates
+	// both in lockstep from the LOCKED spec.verification, never
+	// independently). Exit code parsed, never self-reported. Field name
+	// carried forward from research/ARCHITECTURE.md:146 to avoid Phase 51
+	// template churn.
 	GateCommand string `json:"gateCommand,omitempty"`
+
+	// Commands is the resolved, ordered pass-criteria list the verifier
+	// executes out-of-band (Phase 51 Plan 06, D-01): the union
+	// [GateCommand] ++ the planner-authored spec.verification.commands, so
+	// GateCommand is guaranteed to run first and every additional authored
+	// command also transports and executes — no authored command left
+	// unexecuted. The Plan 02 verifier entrypoint iterates this full list
+	// (env.verify.commands), not GateCommand alone. Omitted from JSON when
+	// empty (non-verify dispatches, or a verify dispatch with no resolved
+	// commands).
+	Commands []string `json:"commands,omitempty"`
 
 	// RequiredArtifacts lists workspace-relative paths the verifier confirms
 	// exist.

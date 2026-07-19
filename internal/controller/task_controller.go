@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -60,6 +61,7 @@ import (
 	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/internal/pool"
+	"github.com/jsquirrelz/tide/internal/subagent/common"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
@@ -371,6 +373,15 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 		return r.checkRunningState(ctx, task)
 	}
 
+	// Step 2b (Phase 51 TASK-01/A4): On Verifying — delegate to
+	// checkVerifyingState. A contract-bearing Task's executor already
+	// exited 0 and dispatched an independent verifier (handleJobCompletion);
+	// this Task must never fall through to a duplicate executor re-dispatch
+	// while verification is outstanding.
+	if task.Status.Phase == tideprojectv1alpha3.LevelPhaseVerifying {
+		return r.checkVerifyingState(ctx, task)
+	}
+
 	// Step 3: Resolve Project.
 	project, err := r.resolveProject(ctx, task)
 	if errors.Is(err, ErrParentUnresolved) {
@@ -618,6 +629,48 @@ func (r *TaskReconciler) checkRunningState(ctx context.Context, task *tideprojec
 		result, err := r.handleJobCompletion(ctx, task, project, &job)
 		return taskGateResult{shouldHalt: true, result: result}, err
 	}
+	return taskGateResult{shouldHalt: true, result: ctrl.Result{}}, nil
+}
+
+// checkVerifyingState handles a Task in Phase=Verifying (Phase 51 TASK-01):
+// looks up the deterministic verifier Job for the current attempt and either
+// retries a deferred dispatch, waits for it to complete, or (BACKWARD half,
+// Plan 07) consumes its verdict.
+//
+// Unlike checkRunningState's executor lookup — where NotFound is a genuine
+// anomaly (Phase=Running is only ever reached AFTER a Job-create attempt
+// succeeded or AlreadyExists'd, in the SAME transaction) — a verifier Job can
+// legitimately be absent here: dispatchVerifier's ESC-04 concurrency cap may
+// have deferred the very first attempt (Pitfall 6 — the Task already
+// transitioned to Verifying before the cap check ran, so nothing retries the
+// dispatch except this handler). NotFound therefore retries dispatchVerifier
+// (idempotent: podjob.VerifierJobName is deterministic and AlreadyExists on
+// Create is treated as success, SUB-03) rather than halting forever.
+//
+// This plan (06) builds ONLY the forward half — dispatch + retry. Consuming a
+// TERMINAL verifier Job's EnvelopeOut.Verdict (ClassifyVerdict, repairOrHalt,
+// haltVerify, the EVALUATOR span) is Plan 07; a terminal verifier Job halts
+// bare here for now (the Job watch already fired this reconcile via
+// Owns(&batchv1.Job{})).
+func (r *TaskReconciler) checkVerifyingState(ctx context.Context, task *tideprojectv1alpha3.Task) (taskGateResult, error) {
+	jobName := podjob.VerifierJobName(task.UID, task.Status.Attempt)
+	var job batchv1.Job
+	if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: jobName}, &job); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return taskGateResult{}, err
+		}
+		project, pErr := r.resolveProject(ctx, task)
+		if errors.Is(pErr, ErrParentUnresolved) {
+			return taskGateResult{shouldHalt: true, result: ctrl.Result{RequeueAfter: 30 * time.Second}}, nil
+		}
+		if pErr != nil {
+			return taskGateResult{}, pErr
+		}
+		result, _, dErr := r.dispatchVerifier(ctx, task, project)
+		return taskGateResult{shouldHalt: true, result: result}, dErr
+	}
+	// Terminal or still-running: Plan 07 wires verdict consumption onto the
+	// terminal branch here. Halt bare either way for this plan's scope.
 	return taskGateResult{shouldHalt: true, result: ctrl.Result{}}, nil
 }
 
@@ -1210,8 +1263,7 @@ func synthesizeNoEnvelopeOut(task *tideprojectv1alpha3.Task, completedJob *batch
 // handleJobCompletion reads the EnvelopeOut, validates output paths, rolls up
 // budget, and patches Task.Status to the terminal state.
 //
-//nolint:unparam // ctrl.Result kept so callers can `return r.handleJobCompletion(...)` in the reconcile chain
-//nolint:gocyclo // flat state machine of mutually-exclusive completion arms; splitting obscures the contract (commit 9cae6bb precedent)
+//nolint:unparam,gocyclo // ctrl.Result kept so callers can `return r.handleJobCompletion(...)` in the reconcile chain; flat state machine of mutually-exclusive completion arms (now including the Phase 51 Verifying transition) — splitting obscures the contract (commit 9cae6bb precedent)
 func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, completedJob *batchv1.Job) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
@@ -1223,7 +1275,22 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 	// still covers every early-return Failed branch below. Settle is a no-op
 	// when Reservations is nil or the UID is not in the store (idempotent —
 	// safe on reconcile replay).
-	defer r.Deps.Reservations.Settle(string(task.UID))
+	//
+	// Phase 51: settleExecutorReservation is flipped false ONLY when this
+	// completion transitions a contract-bearing Task to Verifying and
+	// dispatchVerifier successfully reserves a fresh BudgetCents entry for
+	// task.UID below — settling here would otherwise immediately delete that
+	// entry (both reservations share the same ReservationStore key; no
+	// dedicated per-dispatch-kind key exists). Every other terminal path
+	// (Failed, Succeeded-no-contract, EnvelopeReadFailed above, a cap-hit
+	// deferred verifier dispatch that never reserved) settles exactly as
+	// before.
+	settleExecutorReservation := true
+	defer func() {
+		if settleExecutorReservation {
+			r.Deps.Reservations.Settle(string(task.UID))
+		}
+	}()
 
 	// Read the EnvelopeOut from the PVC-backed reader (Blocker #2/#3 path).
 	out, err := r.Deps.EnvReader.ReadOut(ctx, string(project.UID), string(task.UID))
@@ -1399,6 +1466,29 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 		if hErr := setFailureHaltIfNeeded(ctx, r.Client, project, out.CompletedAt); hErr != nil {
 			logger.Error(hErr, "setFailureHaltIfNeeded failed (non-fatal)", "task", task.Name)
 		}
+	} else if hasVerificationContract(task) {
+		// Phase 51 EXEC-04: the Execution loop believes it is complete but
+		// NEVER stamps Task correctness directly for a contract-bearing
+		// Task — only an independent verifier's consumed verdict can (Plan
+		// 07). Transition to Verifying; the verifier is dispatched below,
+		// AFTER this status patch and the usual roll-up/metrics bookkeeping
+		// (the executor really did run and really did spend tokens,
+		// regardless of what the verifier later decides).
+		task.Status.Phase = tideprojectv1alpha3.LevelPhaseVerifying
+		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
+			Type:               tideprojectv1alpha3.ConditionReconciling,
+			Status:             metav1.ConditionTrue,
+			Reason:             "VerifierDispatched",
+			Message:            "Executor completed; dispatching an independent verifier against the locked verification contract",
+			LastTransitionTime: metav1.Now(),
+		})
+		// TASK-01: stamp the reproducibility anchor — `git show <lockedSHA>`
+		// must reproduce exactly the contract this attempt is dispatched
+		// against. LastPushedSHA is the most recent commit landed on the
+		// per-Project run branch, the closest available observation to "the
+		// commit spec.verification was Locked at" (no finer-grained
+		// per-Lock commit SHA is tracked anywhere in the codebase today).
+		task.Status.LockedSHA = project.Status.Git.LastPushedSHA
 	} else {
 		task.Status.Phase = tideprojectv1alpha3.LevelPhaseSucceeded
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
@@ -1445,6 +1535,21 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 	// brings IsCapExceeded back to false. Non-fatal: the task is already terminal.
 	if err := setBudgetBlockedIfNeeded(ctx, r.Client, project, r.Deps.Reservations.TotalReserved()); err != nil {
 		logger.Error(err, "setBudgetBlockedIfNeeded failed (non-fatal)", "task", task.Name)
+	}
+
+	// Phase 51 TASK-01/ESC-04: contract-bearing Tasks dispatch the verifier
+	// here, AFTER every bookkeeping step above has landed (the executor's
+	// real spend is never conditional on the verify outcome). dispatchVerifier
+	// itself owns the ESC-04 cap check and D-05 reservation (Pitfall 6); when
+	// it reserves a fresh entry for task.UID, suppress this function's own
+	// deferred Settle so that reservation survives past this return (see the
+	// defer's own comment above for why the two share a store key).
+	if task.Status.Phase == tideprojectv1alpha3.LevelPhaseVerifying {
+		result, dispatchReserved, dErr := r.dispatchVerifier(ctx, task, project)
+		if dispatchReserved {
+			settleExecutorReservation = false
+		}
+		return result, dErr
 	}
 
 	return ctrl.Result{}, nil
@@ -1859,6 +1964,237 @@ func (r *TaskReconciler) buildEnvelopeIn(_ context.Context, task *tideprojectv1a
 	data, mErr := json.Marshal(envIn)
 	if mErr != nil {
 		return pkgdispatch.EnvelopeIn{}, nil, fmt.Errorf("marshal envelope in: %w", mErr)
+	}
+	return envIn, data, nil
+}
+
+// verificationPhaseLocked mirrors the CEL-enforced enum value
+// api/v1alpha3.VerificationSpec.Phase carries once a planner locks a Task's
+// verification contract (task_types.go's XValidation transition rule).
+// VerificationSpec.Phase is a plain string with a +kubebuilder:validation:Enum
+// marker — no Go const exists on the type itself — so this local const keeps
+// the literal grep-distinct at its one call site (hasVerificationContract).
+const verificationPhaseLocked = "Locked"
+
+// defaultVerifierConcurrencyCap bounds concurrent verifier Jobs per project
+// (ESC-04/D-10) via the count-based verifierInFlightCount gate — no
+// pool.Pool semaphore is wired for the verifier tier this phase (Plan 06 has
+// no cmd/manager/main.go wiring in scope; the executor/planner tiers' D3 cap
+// checks run independently of, and before, their own PlannerPool.Acquire,
+// which this mirrors). Claude's Discretion (no live-run data yet, mirrors
+// podjob.verifierCapsFloorSeconds' own precedent) — Plan 08's kind
+// concurrent-dispatch test pins/re-tunes the exact value.
+const defaultVerifierConcurrencyCap = 2
+
+// hasVerificationContract reports whether task carries a real, planner-
+// authored verification contract this Task loop must dispatch an
+// independent verifier against (Phase 51 TASK-01, RESEARCH Open Question 2).
+// A contract exists only once BOTH a canonical GateCommand is set AND the
+// contract has been Locked — an empty GateCommand or a still-Draft contract
+// preserves the pre-Phase-51 exit-0 -> Succeeded path (OQ2 backward-compat);
+// dispatching against a Draft (mutable) contract would break TASK-01's
+// git-show reproducibility guarantee.
+func hasVerificationContract(task *tideprojectv1alpha3.Task) bool {
+	v := task.Spec.Verification
+	return v.GateCommand != "" && v.Phase == verificationPhaseLocked
+}
+
+// dispatchVerifier creates the independent, read-only verifier Job for a
+// contract-bearing Task whose executor believed it completed (EXEC-04).
+// Mirrors the executor dispatch flow (createDispatchJob) but is a distinct,
+// separately-pooled dispatch (D-10/TASK-04): the ESC-04 concurrency cap
+// (verifierInFlightCount) is checked BEFORE any reservation or Job create
+// (Pitfall 6 — no slot/reservation leak on cap-hit — the deferred requeue
+// happens before Reserve is ever called), and the deterministic
+// VerifierJobName makes a retry (e.g. after a prior cap-hit deferred
+// dispatch, via checkVerifyingState) idempotent — AlreadyExists on Create is
+// treated as success (SUB-03).
+//
+// Returns reserved=true only when a BudgetCents reservation was made for
+// task.UID THIS call. The caller (handleJobCompletion) uses this to decide
+// whether to suppress its own deferred Settle(task.UID) — which would
+// otherwise immediately clear the fresh verifier reservation this call just
+// made, since both the executor's and the verifier's reservations share the
+// same ReservationStore key (no dedicated per-task BudgetCents field exists
+// yet — VerificationSpec/LoopPolicy is not embedded on TaskSpec this phase;
+// this rides the same flat ReserveEstimateCents estimate the executor
+// dispatch uses, D-05 Option B, per "Cost bounding: BudgetCents rides the
+// existing accounting").
+func (r *TaskReconciler) dispatchVerifier(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project) (result ctrl.Result, reserved bool, err error) {
+	logger := logf.FromContext(ctx)
+	attempt := task.Status.Attempt
+	verifierJobName := podjob.VerifierJobName(task.UID, attempt)
+
+	// ESC-04/D-10: cap-before-acquire (Pitfall 6). Self-excludes
+	// verifierJobName so a re-reconcile of an already-dispatched verifier
+	// (checkVerifyingState's NotFound-retry path never reaches here once the
+	// Job exists) never counts itself.
+	inFlight, cErr := verifierInFlightCount(ctx, r.Client, task.Namespace, project.Name, verifierJobName)
+	if cErr != nil {
+		return ctrl.Result{}, false, fmt.Errorf("verifier in-flight count: %w", cErr)
+	}
+	if inFlight >= defaultVerifierConcurrencyCap {
+		logger.V(1).Info("verifier dispatch deferred: concurrency cap reached",
+			"inFlight", inFlight, "cap", defaultVerifierConcurrencyCap, "task", task.Name)
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, false, nil
+	}
+
+	if r.Deps.ReserveEstimateCents > 0 {
+		r.Deps.Reservations.Reserve(string(task.UID), r.Deps.ReserveEstimateCents)
+		reserved = true
+	}
+	releaseOnError := func() {
+		if reserved {
+			r.Deps.Reservations.Release(string(task.UID))
+			reserved = false
+		}
+	}
+
+	verifierCaps := podjob.DefaultCaps(nil, podjob.JobKindVerifier)
+	wallClock := verifierCaps.WallClockSeconds
+	token, sErr := credproxy.Sign(r.Deps.SigningKey, string(task.UID),
+		time.Duration(wallClock+podjob.DefaultWallClockGraceSeconds)*time.Second)
+	if sErr != nil {
+		releaseOnError()
+		return ctrl.Result{}, false, fmt.Errorf("mint verifier signed token: %w", sErr)
+	}
+
+	_, envInJSON, bErr := r.buildVerifierEnvelopeIn(task, project, attempt, token)
+	if bErr != nil {
+		releaseOnError()
+		return ctrl.Result{}, false, bErr
+	}
+
+	var secretUID string
+	if project.Spec.ProviderSecretRef != "" {
+		var secret corev1.Secret
+		if gErr := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: project.Spec.ProviderSecretRef}, &secret); gErr == nil {
+			secretUID = string(secret.UID)
+		}
+	}
+	agentName, agentEmail := resolveAgentIdentity(project, r.Deps.HelmProviderDefaults)
+	job := podjob.BuildJobSpec(podjob.BuildOptions{
+		Kind:           podjob.JobKindVerifier,
+		Task:           task,
+		ParentObj:      task,
+		Level:          "task",
+		Project:        project,
+		Attempt:        attempt,
+		SignedToken:    token,
+		EnvelopeInJSON: envInJSON,
+		SubagentImage:  r.Deps.VerifierImage,
+		AgentName:      agentName,
+		AgentEmail:     agentEmail,
+		CredproxyImage: r.Deps.CredproxyImage,
+		SecretUID:      secretUID,
+		PVCName:        r.sharedPVCName(),
+		ProjectUID:     string(project.UID),
+		ReadOnly:       true,
+		GateCommand:    task.Spec.Verification.GateCommand,
+	})
+	// BuildJobSpec's JobKindVerifier case stamps role=verifier + task-uid but
+	// not the project label (only role/task-uid — mirrors the executor/
+	// planner cases). verifierInFlightCount's project-scoped List needs it;
+	// stamp it here at the create site, mirroring the git-writer Job label
+	// convention (push_helpers.go stamps owner.LabelProject directly at its
+	// own Job-create call site rather than inside BuildJobSpec).
+	if job.Labels == nil {
+		job.Labels = map[string]string{}
+	}
+	job.Labels[owner.LabelProject] = project.Name
+	if job.Spec.Template.Labels == nil {
+		job.Spec.Template.Labels = map[string]string{}
+	}
+	job.Spec.Template.Labels[owner.LabelProject] = project.Name
+
+	if oErr := owner.EnsureOwnerRef(job, task, r.Scheme); oErr != nil {
+		releaseOnError()
+		return ctrl.Result{}, false, fmt.Errorf("ensure owner ref on verifier job: %w", oErr)
+	}
+	if createErr := r.Create(ctx, job); createErr != nil {
+		if !apierrors.IsAlreadyExists(createErr) {
+			releaseOnError()
+			return ctrl.Result{}, false, fmt.Errorf("create verifier job: %w", createErr)
+		}
+		// AlreadyExists: idempotent success — watch-lag race, or a
+		// checkVerifyingState retry after a prior cap-hit deferred dispatch
+		// that raced a concurrent Create (Pitfall F / SUB-03).
+		logger.Info("verifier job already exists; treating as successful dispatch", "job", job.Name)
+	}
+
+	logger.Info("dispatched verifier", "task", task.Name, "job", job.Name,
+		"gateCommand", task.Spec.Verification.GateCommand)
+	return ctrl.Result{}, reserved, nil
+}
+
+// buildVerifierEnvelopeIn constructs and marshals the EnvelopeIn for a
+// verifier dispatch (Phase 51 TASK-01/TASK-04/D-01). Unlike buildEnvelopeIn
+// (executor): Role="verifier", Provider.Vendor="langgraph" (the verifier is
+// a logically independent process from the implementation agent, TASK-04).
+// VerifyContext.GateCommand carries the canonical single primary command
+// from the LOCKED spec.verification; Commands carries the resolved ordered
+// union [GateCommand] ++ spec.verification.Commands — the full pass-criteria
+// list the verifier executes out-of-band (no authored command left
+// unexecuted).
+//
+// The prompt is rendered HERE, controller-side (Go), via
+// common.LoadPromptTemplate("verifier","task") — the tide-langgraph-verifier
+// image is pure Python and never imports internal/subagent/common (D-03
+// import firewall; cmd/tide-langgraph-verifier/Dockerfile's own header states
+// this explicitly) — mirroring how planner dispatches carry a pre-resolved
+// Prompt rather than a PromptPath (BuildPlannerEnvelope's doc comment).
+func (r *TaskReconciler) buildVerifierEnvelopeIn(task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, attempt int, token string) (pkgdispatch.EnvelopeIn, []byte, error) {
+	verification := task.Spec.Verification
+
+	// D-01: the resolved ordered union — GateCommand first (guaranteed
+	// executed) then every additional authored pass-criterion, so no
+	// authored command is left unexecuted by the verifier's out-of-band
+	// capture (Plan 02's _run_commands_out_of_band iterates this list).
+	var commands []string
+	if verification.GateCommand != "" {
+		commands = append(commands, verification.GateCommand)
+	}
+	commands = append(commands, verification.Commands...)
+
+	envIn := pkgdispatch.EnvelopeIn{
+		APIVersion: pkgdispatch.APIVersionV1Alpha1,
+		Kind:       pkgdispatch.KindTaskEnvelopeIn,
+		TaskUID:    string(task.UID),
+		Role:       "verifier",
+		Level:      "task",
+		// D-01: derived from the task.UID + attempt tuple, never minted —
+		// same shape as the executor's own LoopRunID/AttemptID stamp.
+		LoopRunID: string(task.UID),
+		AttemptID: fmt.Sprintf("%s-%d", task.UID, attempt),
+		Provider: pkgdispatch.ProviderSpec{
+			Vendor: "langgraph",
+			Model:  ResolveProvider(project, "task", r.Deps.HelmProviderDefaults).Model,
+		},
+		ProxyEndpoint: credproxyEndpoint,
+		SignedToken:   token,
+		Verify: &pkgdispatch.VerifyContext{
+			GateCommand:       verification.GateCommand,
+			Commands:          commands,
+			RequiredArtifacts: verification.RequiredArtifacts,
+			EvaluatorRef:      verification.Evaluator,
+			// EvidencePacketPath: "" — first (non-repair) verify. Plan 07
+			// stages a packet path for repair re-checks.
+		},
+	}
+
+	tmpl, tErr := common.LoadPromptTemplate("verifier", "task")
+	if tErr != nil {
+		return pkgdispatch.EnvelopeIn{}, nil, fmt.Errorf("load verifier prompt template: %w", tErr)
+	}
+	var promptBuf bytes.Buffer
+	if xErr := tmpl.Execute(&promptBuf, envIn); xErr != nil {
+		return pkgdispatch.EnvelopeIn{}, nil, fmt.Errorf("render verifier prompt template: %w", xErr)
+	}
+	envIn.Prompt = promptBuf.String()
+
+	data, mErr := json.Marshal(envIn)
+	if mErr != nil {
+		return pkgdispatch.EnvelopeIn{}, nil, fmt.Errorf("marshal verifier envelope: %w", mErr)
 	}
 	return envIn, data, nil
 }

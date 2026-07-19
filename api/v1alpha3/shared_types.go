@@ -488,4 +488,12 @@ const (
 	// LevelPhaseZeroMembers is Wave-only: set by the wave aggregator when a
 	// Wave's TaskRefs is empty (no member Tasks were ever assigned to it).
 	LevelPhaseZeroMembers = "ZeroMembers"
+	// LevelPhaseVerifying is Task-only (Phase 51 TASK-01/EXEC-04): set when
+	// the executor Job exits 0 (belief-complete, never correctness) for a
+	// Task carrying a locked verification contract, and an independent
+	// verifier Job has been dispatched against it. The Execution loop never
+	// stamps LevelPhaseSucceeded directly for a contract-bearing Task —
+	// only the verifier's consumed verdict can (Plan 07). A Task with no
+	// contract preserves the pre-Phase-51 exit-0 -> Succeeded path (OQ2).
+	LevelPhaseVerifying = "Verifying"
 )
