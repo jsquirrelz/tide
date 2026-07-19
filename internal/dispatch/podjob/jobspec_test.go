@@ -965,6 +965,25 @@ func TestBuildJobSpec_EstimatedCostCents_AbsentWhenZero(t *testing.T) {
 	}
 }
 
+// TestBuildJobSpec_EstimatedCostCents_PresentOnVerifierWhenSet verifies the
+// verifier Job also carries tideproject.k8s/estimated-cost so a manager restart
+// while the verifier is in-flight can rederive its reservation (TASK-05/ESC-04):
+// the verifier shares the executor's per-task reservation key, but the
+// terminated executor Job is skipped on rederive, so an unlabeled verifier Job
+// would silently drop the reservation.
+func TestBuildJobSpec_EstimatedCostCents_PresentOnVerifierWhenSet(t *testing.T) {
+	opts := buildVerifierTestOptions()
+	opts.EstimatedCostCents = 250
+	job := BuildJobSpec(opts)
+	got, ok := job.Labels["tideproject.k8s/estimated-cost"]
+	if !ok {
+		t.Fatal("verifier Job labels missing tideproject.k8s/estimated-cost when EstimatedCostCents=250")
+	}
+	if got != "250" {
+		t.Errorf("tideproject.k8s/estimated-cost = %q; want \"250\"", got)
+	}
+}
+
 // TestBuildJobSpec_PricingOverridesJSON_AbsentWhenEmpty verifies that an empty
 // BuildOptions.PricingOverridesJSON does NOT stamp TIDE_PRICING_OVERRIDES_JSON
 // on the subagent container (D-02 transport — clean PodSpec when not configured).

@@ -2182,6 +2182,11 @@ func (r *TaskReconciler) dispatchVerifier(ctx context.Context, task *tideproject
 		ProjectUID:     string(project.UID),
 		ReadOnly:       true,
 		GateCommand:    task.Spec.Verification.GateCommand,
+		// Stamp the estimated-cost label so budget.RederiveReservations can
+		// restore this verifier's reservation after a manager restart while it
+		// is in-flight (it shares the executor's per-task reservation key, but
+		// the terminated executor Job is skipped on rederive — TASK-05/ESC-04).
+		EstimatedCostCents: r.Deps.ReserveEstimateCents,
 	})
 	// BuildJobSpec's JobKindVerifier case stamps role=verifier + task-uid but
 	// not the project label (only role/task-uid — mirrors the executor/

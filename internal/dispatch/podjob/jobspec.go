@@ -293,6 +293,14 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 		jobName = VerifierJobName(opts.Task.UID, opts.Attempt)
 		labels["tideproject.k8s/task-uid"] = string(opts.Task.UID)
 		labels["tideproject.k8s/role"] = "verifier"
+		// D-05: stamp estimated-cost label for restart rederivation via
+		// budget.RederiveReservations. The verifier shares the executor's
+		// per-task reservation key; without this label a restart while the
+		// verifier is in-flight drops the reservation (the terminated executor
+		// Job is skipped, and the active verifier Job would be unlabeled).
+		if opts.EstimatedCostCents > 0 {
+			labels["tideproject.k8s/estimated-cost"] = strconv.FormatInt(opts.EstimatedCostCents, 10)
+		}
 	default: // JobKindExecutor (and legacy callers with Kind=="")
 		if opts.Task != nil {
 			parentUID = string(opts.Task.UID)
