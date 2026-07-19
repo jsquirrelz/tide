@@ -23,6 +23,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -673,6 +674,34 @@ func TestBuildEnvelopeIn_PromptPath(t *testing.T) {
 		}
 		if envIn.Provider.Model != "claude-haiku-4-5" {
 			t.Errorf("EnvelopeIn.Provider.Model = %q, want %q", envIn.Provider.Model, "claude-haiku-4-5")
+		}
+	})
+
+	// D-01 (50-06 Task 1): LoopRunID/AttemptID derive from the same
+	// taskUID+attempt tuple as podjob.JobName — never minted or persisted.
+	t.Run("LoopRunID and AttemptID stamped from task UID + attempt (D-01)", func(t *testing.T) {
+		envIn, _, err := r.buildEnvelopeIn(context.Background(), task, project, 2, "tok")
+		if err != nil {
+			t.Fatalf("buildEnvelopeIn: %v", err)
+		}
+		if envIn.LoopRunID != "uid-prompt" {
+			t.Errorf("EnvelopeIn.LoopRunID = %q, want %q (taskUID, unsuffixed)", envIn.LoopRunID, "uid-prompt")
+		}
+		if envIn.AttemptID != "uid-prompt-2" {
+			t.Errorf("EnvelopeIn.AttemptID = %q, want %q", envIn.AttemptID, "uid-prompt-2")
+		}
+	})
+
+	t.Run("AttemptID suffix tracks the attempt number (stable derivation, no randomness)", func(t *testing.T) {
+		for _, attempt := range []int{1, 3} {
+			envIn, _, err := r.buildEnvelopeIn(context.Background(), task, project, attempt, "tok")
+			if err != nil {
+				t.Fatalf("buildEnvelopeIn(attempt=%d): %v", attempt, err)
+			}
+			want := fmt.Sprintf("uid-prompt-%d", attempt)
+			if envIn.AttemptID != want {
+				t.Errorf("attempt=%d: EnvelopeIn.AttemptID = %q, want %q", attempt, envIn.AttemptID, want)
+			}
 		}
 	})
 }
