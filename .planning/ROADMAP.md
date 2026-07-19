@@ -108,7 +108,16 @@ Plans:
   4. The envelope's completion field reports only that the agent *believes* the attempt is complete — no field or code path lets the Execution loop stamp Task correctness.
   5. Spans carry `loop.kind`/`loop.run_id`/`loop.parent_run_id`/`loop.iteration`/`loop.candidate_version`/`loop.exit_reason`/`evaluation.result`/`evaluation.version`/`human_intervention` plus cost/duration/token usage, and run IDs never appear in a Prometheus label — proven by a label-cardinality test.
 
-**Plans**: TBD
+**Plans**: 7 plans
+
+Plans:
+- [ ] 50-01-PLAN.md — Envelope wire contract: `TerminalReason` enum + `RunEvidence` + loopRunID/attemptID fields + shared golden fixture + EXEC-04 no-correctness-field guard (Wave 1)
+- [ ] 50-02-PLAN.md — `pkg/otelai` loop.*/evaluation.*/human_intervention attribute helpers, deliberately not tide.-prefixed (Wave 1)
+- [ ] 50-03-PLAN.md — Prometheus cardinality dual guard: metriccardinality analyzer + wave_label_test extended to the 9-name run-ID-shaped forbidden list; no new metric (Wave 1)
+- [ ] 50-04-PLAN.md — Executor write-site population: three real write sites set TerminalReason per mapping table, CheckCaps wired (in-pod cap_exceeded), bounded RunEvidence assembly, AST fail-closed guard (Wave 2)
+- [ ] 50-05-PLAN.md — Python envelope mirror: envelope.py + test_envelope.py parity against the shared golden fixture (Wave 2)
+- [ ] 50-06-PLAN.md — Controller identity stamping (buildEnvelopeIn), cap_exceeded synthesis for DeadlineExceeded-killed Jobs, AGENT-span loop.* attributes (Wave 2)
+- [ ] 50-07-PLAN.md — Reporter LLM-span loop-identity threading: Args → tide-reporter flags → EmitSpans indexed loop.run_id/loop.iteration (Wave 3)
 
 ### Phase 51: The Task Loop
 
