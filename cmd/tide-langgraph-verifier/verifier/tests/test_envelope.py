@@ -5,11 +5,32 @@ from __future__ import annotations
 
 import json
 import stat
+import threading
 from pathlib import Path
 
 import pytest
 
 from verifier import envelope
+
+
+def _write_stub_with_timeout(timeout: float = 8.0, **kwargs) -> bool:
+    """Run write_termination_stub on a daemon thread and join with a timeout.
+
+    Returns True if it returned, False if it was still running at `timeout` —
+    the direct regression proof for WR-01 (a spinning truncation loop never
+    joins). Duplicated from test_verdict.py's identical helper — no
+    cross-test-module imports exist in this package today, so this module
+    carries its own copy rather than establishing a new import edge."""
+    done = threading.Event()
+
+    def _run() -> None:
+        envelope.write_termination_stub(**kwargs)
+        done.set()
+
+    worker = threading.Thread(target=_run, daemon=True)
+    worker.start()
+    worker.join(timeout)
+    return done.is_set()
 
 
 def test_read_envelope_in_valid_round_trip(tmp_path: Path, envelope_in_dict) -> None:
@@ -163,21 +184,81 @@ def test_write_envelope_out_terminal_reason_never_defaults(tmp_path: Path) -> No
 
 
 def test_write_termination_stub_with_loop_fields_stays_small(tmp_path: Path) -> None:
-    """Phase 50 D-02/D-03: terminal_reason + changed_file_count join the
-    stub unconditionally and survive truncation of a 10KB reason, staying
-    strictly under the 4096-byte termination-message budget."""
+    """Phase 50 D-02/D-03 + WR-01/WR-02 shape: terminal_reason +
+    changed_file_count join the stub unconditionally and survive truncation
+    of a 10KB reason, staying strictly under the 4096-byte termination-
+    message budget. Uses the daemon-thread timeout guard so a regression to
+    the WR-01 infinite-truncation-loop bug fails fast instead of hanging the
+    whole suite."""
     stub_path = tmp_path / "termination-log"
 
-    envelope.write_termination_stub(
-        stub_path,
+    returned = _write_stub_with_timeout(
+        path=stub_path,
         exit_code=1,
         reason="x" * 10_000,
         terminal_reason="cap_exceeded",
         changed_file_count=500,
     )
 
+    assert returned, "write_termination_stub hung (WR-01 infinite truncation loop)"
     data = stub_path.read_bytes()
     assert len(data) < envelope.TERMINATION_STUB_MAX_BYTES
     parsed = json.loads(data)
     assert parsed["terminalReason"] == "cap_exceeded"
     assert parsed["changedFileCount"] == 500
+    # The 10KB reason must have actually been truncated (never left intact).
+    assert len(parsed["reason"]) < 10_000
+
+
+def test_envelope_out_golden_fixture_parity(tmp_path: Path) -> None:
+    """Phase 50 D-02/D-03: read the SAME Go-authored
+    pkg/dispatch/testdata/envelope_out_golden.json Plan 50-01 wrote — the
+    cross-language parity proof. The fixture deliberately pins a
+    non-"completed" terminalReason so a silent-default bug in either
+    language surfaces as a value mismatch here."""
+    golden = json.loads(envelope.ENVELOPE_OUT_GOLDEN_FIXTURE.read_bytes())
+
+    assert golden["terminalReason"] == "cap_exceeded"
+    assert golden["loopRunID"]
+    assert golden["attemptID"]
+    assert golden["attemptID"].rsplit("-", 1)[-1].isdigit(), (
+        "attemptID must end in a '-<digit>' attempt suffix"
+    )
+
+    run_evidence = golden["runEvidence"]
+    for key in (
+        "specID",
+        "lockingCommit",
+        "commands",
+        "evaluatorVersions",
+        "changedFiles",
+        "changedFileTotal",
+        "model",
+        "promptVersion",
+        "runtimeVersion",
+    ):
+        assert run_evidence.get(key), f"runEvidence.{key} must be non-empty/non-zero"
+
+    first_changed_file = run_evidence["changedFiles"][0]
+    assert "path" in first_changed_file
+    assert "status" in first_changed_file
+
+    # Round-trip: pass the fixture's own values through write_envelope_out
+    # and assert the re-read JSON is value-equivalent for every mirrored key
+    # — never a byte compare, since key order differs across serializers.
+    out_path = tmp_path / "out.json"
+    envelope.write_envelope_out(
+        out_path,
+        exit_code=golden["exitCode"],
+        result=golden["result"],
+        reason=golden.get("reason", ""),
+        terminal_reason=golden["terminalReason"],
+        loop_run_id=golden["loopRunID"],
+        attempt_id=golden["attemptID"],
+        run_evidence=run_evidence,
+    )
+    reread = json.loads(out_path.read_text())
+    assert reread["terminalReason"] == golden["terminalReason"]
+    assert reread["loopRunID"] == golden["loopRunID"]
+    assert reread["attemptID"] == golden["attemptID"]
+    assert reread["runEvidence"] == golden["runEvidence"]
