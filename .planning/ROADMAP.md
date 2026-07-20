@@ -179,14 +179,14 @@ Plans:
   2. Phase/Milestone/Project run with `maxIterations:0` — any verify finding at these levels escalates straight to `requireApproval` rather than auto-repairing, because these levels close on their observable outcome, not task-completion.
   3. Gate policy is resolved from the loop-level field on `LoopPolicy`, not from CRD kind/hierarchy position — one resolver function serves all levels.
 
-**Plans:** 11 plans
+**Plans:** 3/11 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 52-01-PLAN.md — CRD schema: LoopLevel enum + LoopPolicy.Level, Plan.Spec.Verification + per-status LoopStatus embeds, ProjectSpec per-level VerificationDefaults (D-01/D-02/D-06)
-- [ ] 52-02-PLAN.md — podjob verifier generalization: JobKindVerifier → ParentObj, VerifierJobName(level, parentUID, attempt) (Pitfall 1)
-- [ ] 52-03-PLAN.md — Four <level>_verifier.tmpl templates + plan_planner.tmpl RepairFindings block + PromptTemplateVersion v5 (D-09/D-04)
+- [x] 52-01-PLAN.md — CRD schema: LoopLevel enum + LoopPolicy.Level, Plan.Spec.Verification + per-status LoopStatus embeds, ProjectSpec per-level VerificationDefaults (D-01/D-02/D-06)
+- [x] 52-02-PLAN.md — podjob verifier generalization: JobKindVerifier → ParentObj, VerifierJobName(level, parentUID, attempt) (Pitfall 1)
+- [x] 52-03-PLAN.md — Four <level>_verifier.tmpl templates + plan_planner.tmpl RepairFindings block + PromptTemplateVersion v5 (D-09/D-04)
 
 **Wave 2** *(blocked on Wave 1)*
 
@@ -245,5 +245,5 @@ Phases execute in numeric order: 48 → 49 → 50 → 51 → 52 → 53
 | 49. Common Loop Contract + Verdict/Envelope/Persistence Schema | v1.0.9 | 4/4 | Complete    | 2026-07-18 |
 | 50. Execution-Loop Hardening + Loop-Native Observability | v1.0.9 | 7/7 | Complete    | 2026-07-19 |
 | 51. The Task Loop | v1.0.9 | 8/8 | Complete    | 2026-07-20 |
-| 52. Per-Level LoopPolicy Parameterization | v1.0.9 | 0/TBD | Not started | - |
+| 52. Per-Level LoopPolicy Parameterization | v1.0.9 | 3/11 | In Progress|  |
 | 53. Chart Config + Dashboard Provenance Surfacing | v1.0.9 | 0/TBD | Not started | - |
