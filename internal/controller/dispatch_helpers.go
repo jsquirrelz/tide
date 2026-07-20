@@ -329,6 +329,139 @@ func ResolveProvider(project *tideprojectv1alpha3.Project, level string, helmDef
 	}
 }
 
+// projectLevelVerificationDefault returns the Project's per-level
+// verification default for the given dispatch level ("task"|"plan"|
+// "phase"|"milestone"|"project"), or nil when the Project is nil or the
+// matching VerificationDefaults field is unset. Mirrors resolveImage's
+// per-level-key switch (above) over the D-01 Project.Spec.Verification map
+// instead of Subagent.Levels — unlike model/image selection, which keys
+// through levelOverrideKey's planning-role remap, verification is authored
+// per dispatch level directly (Gates precedent: project_types.go:39-51).
+func projectLevelVerificationDefault(project *tideprojectv1alpha3.Project, level string) *tideprojectv1alpha3.VerificationSpec {
+	if project == nil {
+		return nil
+	}
+	switch level {
+	case "task":
+		return project.Spec.Verification.Task
+	case "plan":
+		return project.Spec.Verification.Plan
+	case "phase":
+		return project.Spec.Verification.Phase
+	case "milestone":
+		return project.Spec.Verification.Milestone
+	case "project":
+		return project.Spec.Verification.Project
+	default:
+		return nil
+	}
+}
+
+// resolveAuthoredVerification walks the D-01 Task > Plan > Project
+// precedence chain and returns the authored VerificationSpec for the given
+// level, or the zero value when nothing was authored anywhere (the "stage is
+// off" signal — an empty GateCommand). "Authored" is tested by
+// GateCommand != "", the same activation key hasVerificationContract
+// (task_controller.go) already uses, so a Draft contract with no GateCommand
+// never activates a stage.
+//
+// This is the SINGLE shared precedence walk both ResolveVerificationSpec and
+// ResolveLoopPolicy build on (SC3 — one resolver, not per-level variants).
+func resolveAuthoredVerification(project *tideprojectv1alpha3.Project, plan *tideprojectv1alpha3.Plan, task *tideprojectv1alpha3.Task, level string) tideprojectv1alpha3.VerificationSpec {
+	switch {
+	case level == "task" && task != nil && task.Spec.Verification.GateCommand != "":
+		return task.Spec.Verification
+	case level == "plan" && plan != nil && plan.Spec.Verification.GateCommand != "":
+		return plan.Spec.Verification
+	default:
+		if lvl := projectLevelVerificationDefault(project, level); lvl != nil {
+			return *lvl
+		}
+		return tideprojectv1alpha3.VerificationSpec{}
+	}
+}
+
+// ResolveVerificationSpec is a thin exported wrapper over
+// resolveAuthoredVerification. Dispatch sites call this (not
+// ResolveLoopPolicy) when they need the raw contract fields
+// (GateCommand/Commands/RequiredArtifacts/Evaluator) to build a verifier
+// envelope — ResolveLoopPolicy's job is turning the same authored spec into
+// loop-repeat parameters (MaxIterations/EscalationPolicy), not carrying the
+// contract fields themselves.
+func ResolveVerificationSpec(project *tideprojectv1alpha3.Project, plan *tideprojectv1alpha3.Plan, task *tideprojectv1alpha3.Task, level string) tideprojectv1alpha3.VerificationSpec {
+	return resolveAuthoredVerification(project, plan, task, level)
+}
+
+// ResolveLoopPolicy is the phase's centerpiece (SC3): the ONE resolver
+// function, keyed on level (not CRD kind), that every reconciler calls to
+// decide gate policy — none of the five reconcilers may switch on CRD kind
+// to pick verification behavior after this phase.
+//
+// It walks the same Task > Plan > Project precedence chain as
+// ResolveVerificationSpec (resolveAuthoredVerification), then layers on
+// level-default parameterization (D-02):
+//
+//   - task:  MaxIterations resolves exactly as authored (behavior-preserving
+//     — this is how the Phase 51 Task loop already worked).
+//   - plan:  MaxIterations defaults to 1 when the authored spec leaves it
+//     unset (an authored value still wins) — plan-check gets exactly one
+//     re-plan by default.
+//   - phase/milestone/project: MaxIterations is CLAMPED to 0
+//     UNCONDITIONALLY, even when an authored contract sets it higher. D-07:
+//     there is no repair branch at these levels (REQUIREMENTS' Out-of-Scope
+//     explicitly excludes auto-repair at Phase/Milestone/Project) — the
+//     resolver encodes that as a structural clamp here, not as a
+//     level-specific if-statement repeated at every dispatch call site.
+//
+// EscalationPolicy: an authored OnExhaustion always wins when set. When
+// unset, the default differs by level — task/plan default to
+// EscalationEscalate (preserves Phase 51's uniform Task-loop behavior at
+// defaults, D-02's no-regression bar); phase/milestone/project default to
+// EscalationRequireApproval (ROADMAP SC2: these levels "escalate straight to
+// requireApproval").
+//
+// Level is stamped unconditionally from the level parameter (SC3's
+// "loop-level field on LoopPolicy" is exactly this stamp — the authored
+// VerificationSpec has no Level concept of its own). EvaluatorRef carries
+// through from the resolved spec's Evaluator field.
+//
+// A level with no authored contract anywhere still returns level-default
+// MaxIterations/EscalationPolicy values — callers gate dispatch on
+// ResolveVerificationSpec(...).GateCommand != "" (the "stage is off" signal),
+// not on this function's return value alone.
+func ResolveLoopPolicy(project *tideprojectv1alpha3.Project, plan *tideprojectv1alpha3.Plan, task *tideprojectv1alpha3.Task, level string) tideprojectv1alpha3.LoopPolicy {
+	spec := resolveAuthoredVerification(project, plan, task, level)
+
+	maxIter := spec.MaxIterations
+	switch level {
+	case "plan":
+		if maxIter == 0 {
+			maxIter = 1
+		}
+	case "phase", "milestone", "project":
+		// D-07: no repair branch at these levels — clamp unconditionally,
+		// even when an authored contract set MaxIterations > 0.
+		maxIter = 0
+	}
+
+	escalation := tideprojectv1alpha3.EscalationPolicy(spec.OnExhaustion)
+	if escalation == "" {
+		switch level {
+		case "phase", "milestone", "project":
+			escalation = tideprojectv1alpha3.EscalationRequireApproval
+		default: // "task", "plan"
+			escalation = tideprojectv1alpha3.EscalationEscalate
+		}
+	}
+
+	return tideprojectv1alpha3.LoopPolicy{
+		Level:            tideprojectv1alpha3.LoopLevel(level),
+		MaxIterations:    maxIter,
+		EscalationPolicy: escalation,
+		EvaluatorRef:     spec.Evaluator,
+	}
+}
+
 // BuildPlannerEnvelope constructs and marshals an EnvelopeIn for a
 // planner-level dispatch. Mirrors task_controller.go:buildEnvelopeIn
 // (Phase 2) but at the planner level: sets Role="planner",
