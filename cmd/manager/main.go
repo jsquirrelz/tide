@@ -457,6 +457,13 @@ func main() {
 		PricingOverridesJSON: pricingOverridesJSON,
 		OTLPEndpoint:         otlpEndpoint,
 		OTLPHeadersSecret:    otlpHeadersSecret,
+		// Phase 52 D-03/D-07/D-10: plan-check + phase/milestone/project
+		// level-verify dispatch through the SAME verifier image and the SAME
+		// ReservationStore instance TaskReconciler receives below — one
+		// project-wide budget pool, no second counter (T-52-10).
+		VerifierImage:        verifierImage,
+		Reservations:         reservationStore,
+		ReserveEstimateCents: budgetReservePerDispatchCents,
 	}
 	if err := (&controller.ProjectReconciler{
 		Client:                  mgr.GetClient(),

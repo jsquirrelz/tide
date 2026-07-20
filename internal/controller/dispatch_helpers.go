@@ -227,6 +227,27 @@ type PlannerReconcilerDeps struct {
 	// same auth-enabled collector the manager uses (Phase 47 PHX-02/D-08);
 	// empty = no headers env, mirrors OTLPEndpoint's dark-cluster default.
 	OTLPHeadersSecret string
+
+	// VerifierImage is the image ref for the tide-langgraph-verifier
+	// subagent used by every non-Task verifier dispatch site (plan-check and
+	// phase/milestone/project level-verify, Phase 52 D-03/D-07). Mirrors
+	// TaskReconcilerDeps.VerifierImage exactly — same env var
+	// (TIDE_VERIFIER_IMAGE), same "empty = skip Job creation, park benignly
+	// in Verifying" semantics.
+	VerifierImage string
+
+	// Reservations is the in-process budget pre-charge store. MUST be the
+	// SAME *budget.ReservationStore instance TaskReconciler receives — D-10/
+	// ESC-04 requires one project-wide reservation pool, never a second
+	// counter that could undercount spend (T-52-10). Wired in
+	// cmd/manager/main.go from the identical variable passed to
+	// TaskReconcilerDeps.Reservations.
+	Reservations *budget.ReservationStore
+
+	// ReserveEstimateCents is the flat per-dispatch reservation estimate
+	// verifier dispatches pre-charge against Reservations (mirrors
+	// TaskReconcilerDeps.ReserveEstimateCents). Zero means no pre-charge.
+	ReserveEstimateCents int64
 }
 
 // levelOverrideKey maps a dispatch level (the 5-valued identity string
