@@ -168,31 +168,6 @@ func TestLoopStatus_NoForbiddenFields(t *testing.T) {
 	}
 }
 
-// TestLoopStatus_EmbeddingSites proves each of the Phase 52 embedding sites
-// (PlanStatus, PhaseStatus, MilestoneStatus, ProjectStatus) carries the
-// LoopStatus type itself — never a locally-widened variant — via a runtime
-// reflect.TypeOf check, complementing the package-level compile-time
-// assertions above (defense in depth for the LOOP-03 no-history guard).
-func TestLoopStatus_EmbeddingSites(t *testing.T) {
-	loopStatusType := reflect.TypeOf(tidev1alpha3.LoopStatus{})
-
-	cases := []struct {
-		name  string
-		field reflect.Type
-	}{
-		{"PlanStatus.LoopStatus", reflect.TypeOf(tidev1alpha3.PlanStatus{}.LoopStatus)},
-		{"PhaseStatus.LoopStatus", reflect.TypeOf(tidev1alpha3.PhaseStatus{}.LoopStatus)},
-		{"MilestoneStatus.LoopStatus", reflect.TypeOf(tidev1alpha3.MilestoneStatus{}.LoopStatus)},
-		{"ProjectStatus.LoopStatus", reflect.TypeOf(tidev1alpha3.ProjectStatus{}.LoopStatus)},
-	}
-
-	for _, tc := range cases {
-		if tc.field != loopStatusType {
-			t.Errorf("%s has type %s, want %s (LOOP-03 guard)", tc.name, tc.field, loopStatusType)
-		}
-	}
-}
-
 // testEmbedder is a synthetic, test-only CRD-shaped struct embedding both
 // LoopPolicy and LoopStatus in a Spec/Status split — proving embeddability
 // without touching a real Kind (Phase success criterion #1).
