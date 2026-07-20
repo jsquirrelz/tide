@@ -38,6 +38,18 @@ import (
 	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
+// The four assertions below are Phase 52 D-06's structural guard: each
+// proves PlanStatus/PhaseStatus/MilestoneStatus/ProjectStatus embeds the
+// LoopStatus type itself (the guarded type LOOP-03 pins), never a locally-
+// widened variant. If a future PR redeclares e.g. PlanStatus.LoopStatus as
+// a different type, this fails to compile.
+var (
+	_ tidev1alpha3.LoopStatus = tidev1alpha3.PlanStatus{}.LoopStatus
+	_ tidev1alpha3.LoopStatus = tidev1alpha3.PhaseStatus{}.LoopStatus
+	_ tidev1alpha3.LoopStatus = tidev1alpha3.MilestoneStatus{}.LoopStatus
+	_ tidev1alpha3.LoopStatus = tidev1alpha3.ProjectStatus{}.LoopStatus
+)
+
 func fullyPopulatedLoopPolicy() tidev1alpha3.LoopPolicy {
 	maxDuration := metav1.Duration{Duration: 30 * time.Minute}
 	return tidev1alpha3.LoopPolicy{

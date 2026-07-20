@@ -70,6 +70,14 @@ type LoopPolicy struct {
 	// without an APPROVED evaluation.
 	// +optional
 	EscalationPolicy EscalationPolicy `json:"escalationPolicy,omitempty"`
+
+	// Level identifies which of the five hierarchy levels this LoopPolicy
+	// parameterizes (Phase 52 D-02, SC3's "loop-level field on LoopPolicy").
+	// Stamped by the resolver (ResolveLoopPolicy), never authored directly —
+	// gate policy resolves from this field, not from CRD kind/hierarchy
+	// position, so a single resolver function serves all five levels.
+	// +optional
+	Level LoopLevel `json:"level,omitempty"`
 }
 
 // LoopStatus is the shared, CRD-embeddable observed-state contract for a
@@ -176,6 +184,36 @@ const (
 	// AutonomySupervised: the loop pauses for human confirmation at its
 	// bounded exit/escalation point rather than resolving unattended.
 	AutonomySupervised AutonomyLevel = "supervised"
+)
+
+// LoopLevel identifies which of the five hierarchy levels a LoopPolicy
+// parameterizes (Phase 52 D-02). Gate policy resolution (ResolveLoopPolicy)
+// keys off this field instead of switching on CRD kind, so one resolver
+// function serves Task, Plan, Phase, Milestone, and Project alike.
+// +kubebuilder:validation:Enum=task;plan;phase;milestone;project
+type LoopLevel string
+
+const (
+	// LoopLevelTask: the Task loop (Phase 51) — auto-repair via evaluator-
+	// driven fresh attempts, MaxIterations:N from the Task's own contract.
+	LoopLevelTask LoopLevel = "task"
+
+	// LoopLevelPlan: the plan-check loop (Phase 52) — re-plan on a
+	// REPAIRABLE verdict, MaxIterations:1 by default (its own counter,
+	// distinct from the Task loop's).
+	LoopLevelPlan LoopLevel = "plan"
+
+	// LoopLevelPhase: level-verify at the Phase boundary (Phase 52) —
+	// MaxIterations:0, any non-APPROVED verdict escalates immediately.
+	LoopLevelPhase LoopLevel = "phase"
+
+	// LoopLevelMilestone: level-verify at the Milestone boundary (Phase 52)
+	// — MaxIterations:0, any non-APPROVED verdict escalates immediately.
+	LoopLevelMilestone LoopLevel = "milestone"
+
+	// LoopLevelProject: level-verify at the Project boundary (Phase 52) —
+	// MaxIterations:0, any non-APPROVED verdict escalates immediately.
+	LoopLevelProject LoopLevel = "project"
 )
 
 // EscalationPolicy declares the bounded exit path a loop takes once its

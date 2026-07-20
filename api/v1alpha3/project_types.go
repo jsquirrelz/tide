@@ -50,6 +50,38 @@ type Gates struct {
 	PauseBetweenWaves bool `json:"pauseBetweenWaves,omitempty"`
 }
 
+// VerificationDefaults declares per-level default verification contracts
+// (Phase 52 D-01), mirroring Gates' per-level shape exactly. Resolution
+// precedence is Task > Plan > Project (ResolveLoopPolicy): an explicit
+// contract on the level's own spec (Task.Spec.Verification/
+// Plan.Spec.Verification) wins; otherwise the matching field here applies;
+// otherwise the stage is off (no contract → no verifier dispatch, today's
+// behavior). Fields are pointers (unlike Gates' value strings) so an absent
+// default is distinguishable from an explicitly empty VerificationSpec{}.
+//
+// Pitfall 4 (operator/chart-authoring convention, NOT schema-enforced):
+// entries here should be authored at Phase: "Draft" (or left empty), never
+// "Locked". VerificationSpec's own CEL rule
+// (oldSelf.phase != 'Locked' || self == oldSelf || self.phase ==
+// 'Superseded', task_types.go:90) is type-attached and therefore applies
+// verbatim to these Project-level defaults too — a Locked default cannot
+// later be edited without the Locked->Superseded dance. Flagged explicitly
+// for Phase 53's chart-default authoring so the "off on in-place upgrade"
+// posture doesn't accidentally ship a Locked default that can't be toggled
+// off.
+type VerificationDefaults struct {
+	// +optional
+	Task *VerificationSpec `json:"task,omitempty"`
+	// +optional
+	Plan *VerificationSpec `json:"plan,omitempty"`
+	// +optional
+	Phase *VerificationSpec `json:"phase,omitempty"`
+	// +optional
+	Milestone *VerificationSpec `json:"milestone,omitempty"`
+	// +optional
+	Project *VerificationSpec `json:"project,omitempty"`
+}
+
 // RouteSpec is a (method, path-prefix) tuple used to extend the credproxy
 // upstream allowlist for a Project (Phase 04.1 P4.2). The credproxy sidecar
 // always enforces the hardcoded baseline (POST /v1/messages and
@@ -401,6 +433,14 @@ type ProjectSpec struct {
 	// +optional
 	Gates Gates `json:"gates,omitempty"`
 
+	// Verification declares per-level default verification contracts
+	// (Phase 52 D-01). Task/Plan resolve their own Spec.Verification field
+	// first; an absent field falls back to the matching entry here. See
+	// VerificationDefaults' doc comment for the Pitfall-4 Draft-only
+	// authoring convention.
+	// +optional
+	Verification VerificationDefaults `json:"verification,omitempty"`
+
 	// ProviderSecretRef is the name of the K8s Secret carrying provider credentials (Phase 2+).
 	// +optional
 	ProviderSecretRef string `json:"providerSecretRef,omitempty"`
@@ -550,6 +590,14 @@ type ProjectStatus struct {
 	// deterministic planner-Job name when the caller observes a nil Job object.
 	// +optional
 	ProjectReporterSpawnedUID string `json:"projectReporterSpawnedUID,omitempty"`
+
+	// LoopStatus is the level-verify loop's observed-state contract at the
+	// Project boundary (Phase 52 D-07). Project runs with MaxIterations:0
+	// (LOOP-03-compliant, D-02's resolver), so in practice only
+	// LastEvaluation + ExitReason are populated — there is no repair branch
+	// at this level, any non-APPROVED verdict escalates immediately.
+	// +optional
+	LoopStatus LoopStatus `json:"loopStatus,omitempty"`
 }
 
 // +kubebuilder:object:root=true
