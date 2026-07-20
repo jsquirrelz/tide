@@ -1,0 +1,50 @@
+# Seeds the bare repo /workspace/repo.git on the PVC with the project's run
+# branch + one tip commit, so the level-verify worktree-checkout init container
+# (52-05) has a real branch to check out and run its gate command against.
+# Unlike the Phase-51 Task proof (which hand-seeded /workspace/worktrees/<uid>
+# directly), level-verify provisions its OWN worktree FROM this bare repo — so
+# here we seed the bare repo, not the worktree.
+#
+# Substitute before applying (driving script does this):
+#   BRANCH_PLACEHOLDER       — project.Status.Git.BranchName (tide/run-<proj>-<ts>)
+#   PROJECT_UID_PLACEHOLDER  — .metadata.uid of the Project (PVC subPath prefix)
+#   INCLUDE_VERIFIED         — the heredoc below writes VERIFIED.md only when the
+#                             driving script uncomments it (green-gate variant)
+apiVersion: v1
+kind: Pod
+metadata: {name: bare-repo-seed, namespace: tide-lv-proof}
+spec:
+  restartPolicy: Never
+  securityContext: {runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000}
+  containers:
+  - name: seed
+    image: ghcr.io/jsquirrelz/tide-langgraph-verifier:test
+    imagePullPolicy: Never
+    command: ["/bin/sh","-c"]
+    args:
+    - |
+      set -e
+      export HOME=/tmp
+      git config --global --add safe.directory '*' || true
+      git init --quiet --bare /workspace/repo.git
+      mkdir -p /tmp/seed && cd /tmp/seed && git init --quiet
+      git checkout --quiet -b BRANCH_PLACEHOLDER
+      cat > README.md <<'MD'
+      # tide-lv-proof
+
+      Fixture project for TIDE's Phase-52 level-verify live proof.
+      MD
+      cat > proof.go <<'GO'
+      package proof
+
+      func Proof() string { return "tide-lv-proof" }
+      GO
+      # VERIFIED_MARKER — driving script uncomments the next line for the green variant
+      #echo verified > VERIFIED.md
+      git add -A
+      git -c user.name='TIDE Proof' -c user.email='proof@tideproject.k8s' commit --quiet -m 'seed: level-verify proof tip'
+      git push --quiet /workspace/repo.git BRANCH_PLACEHOLDER
+      echo "SEED_SHA=$(git rev-parse HEAD)"
+      echo seeded OK
+    volumeMounts: [{mountPath: /workspace, name: ws, subPath: PROJECT_UID_PLACEHOLDER/workspace}]
+  volumes: [{name: ws, persistentVolumeClaim: {claimName: tide-projects}}]

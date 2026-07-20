@@ -79,6 +79,58 @@ The full runbook is in `52-11-PLAN.md` (Task 2 how-to-verify). In brief, it driv
 with observed outcomes (or pastes failures), or replies "skip live proof" to
 defer with the phase marked accordingly.
 
+## Task 2 — Live billable proof (OPERATOR-APPROVED, IN PROGRESS — checkpointed)
+
+Operator approved the billable run 2026-07-20. Stood up a fresh `tide-test` kind
+cluster, loaded all 8 dev-head images, deployed the manager via helm (test-image
+overrides + `TIDE_VERIFIER_IMAGE` patch), created the real-key + signing-key
+secrets. **The live gate immediately earned its keep — it surfaced a real
+SHIP-BLOCKER the green suites and Phase 51 both missed** (the 51-08 pattern):
+
+### DEFECT-A (FIXED + committed `8e5f7a49`) — CEL immutability blocks every P/M/P contract
+A Locked verification contract at Phase/Milestone/Project level (`maxIterations:0`)
+could NEVER progress. The controller's full-object `Update()` round-trips the spec
+through Go, where `maxIterations,omitempty` drops the value `0`, so the apiserver
+saw `oldSelf.maxIterations=0` (present) vs `self` absent and the `VerificationSpec`
+CEL `self == oldSelf` immutability rule failed *"verification is immutable once
+Locked"* on **every reconcile** — freezing the Project before it could even set
+its run branch. This blocked the **entire per-level verification feature** at
+exactly the levels Phase 52 adds. The Task level (`maxIterations>=1`) was
+unaffected — which is precisely why Phase 51's Task-loop proof passed and envtest
+missed it (the fake client does not enforce CEL; no test ran a real apiserver
+`Update()` on a Locked-contract Project).
+**Fix:** `0` is a MEANINGFUL value here, not "unset" — dropped `omitempty` + added
+`+kubebuilder:default=0` so the apiserver stores a present `0` even when omitted at
+apply time; stored and round-tripped forms then match and the rule holds. No
+Go-logic change (the resolver already reads the int32 `0` and applies its per-level
+default/clamp). Confirmed live: the exact reproduction (`kubectl patch` removing
+`maxIterations` from a Locked contract) now succeeds, and the fixture Project
+advances to `Running` with a run branch set.
+
+### Checkpoint status (both loops NOT yet driven to a billable verifier dispatch)
+After DEFECT-A's fix the Project runs, but driving the full hierarchy succession to
+the phase-verify (and plan-check) dispatch hit **fixture-completeness friction**,
+not further product defects: (1) the reporter Job needs a per-namespace
+`tide-reporter` ServiceAccount+RBAC (the chart provisions it only for
+chart-configured namespaces; the Phase-51 Task proof never needed the reporter
+because the Task ran without hierarchy succession) — created manually; (2) the
+direct-applied hierarchy (Project→…→Task, adopted via ownerRefs) does not cleanly
+drive Plan→Phase→Milestone→Project succession the way a planner-authored tree does,
+so the Phase never reaches its pre-Succeeded verify seam. Resolving this needs more
+fixture bring-up than one session's budget allowed.
+
+**Spend so far: ~1 cent** (only stub planners ran; NO verifier Job has billed yet —
+the real-model verifier dispatch is the still-unreached step).
+
+**Remaining to close Task 2:** either (a) drive the hierarchy via the stub planners
+end-to-end (needs the stub planner to author a minimal succeeding tree + the
+reporter SA per namespace), or (b) add a fixture that forces the Phase to its
+verify seam directly. Then observe: phase-verify `tide-verifier-phase-*-1` worktree
+init container → gate → non-APPROVED → AwaitingApproval park → `tide approve` →
+Succeeded; and the plan-check REPAIRABLE→re-plan loop. Cluster `tide-test` is left
+UP (deployed dev-head + real-key secrets + DEFECT-A's CRD fix applied) for a
+follow-up session to resume from.
+
 ## Deviations
 
 - Task 1's spec was authored + proven live by the executor, but the executor

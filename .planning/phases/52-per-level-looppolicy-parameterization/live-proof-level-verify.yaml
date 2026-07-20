@@ -1,0 +1,92 @@
+# Phase 52 live proof — LEVEL-VERIFY (phase-level) escalation loop.
+# Drives a Project whose Project.Spec.Verification.Phase default is a Locked
+# contract with a real gate command. After the Phase's child Plan Succeeds
+# (stub Task → Plan succession), the Phase reaches its pre-Succeeded seam and
+# dispatches a phase-level verifier (tide-verifier-phase-<uid>-1): a read-only
+# Job whose SECOND init container (52-05 worktree-checkout) provisions a
+# detached checkout of project.Status.Git.BranchName from the seeded bare repo,
+# then runs the gate command in it. A non-APPROVED verdict parks the Phase at
+# AwaitingApproval (onExhaustion: requireApproval, maxIterations:0 — no repair);
+# `tide approve` resumes it to Succeeded with exactly one verifier Job.
+#
+# Setup order (see the driving script):
+#  1. Apply this file. The Project controller sets Status.Git.BranchName.
+#  2. Read BranchName + Project UID, then seed the bare repo at
+#     /workspace/repo.git on the PVC (subPath <projectUID>/workspace) with that
+#     branch + a tip commit (live-proof-bare-repo-seed.yaml, templated).
+#  3. Watch the Phase reach Verifying → verifier Job → verdict.
+#
+# The gate `test -f VERIFIED.md` is SEMANTICALLY REPAIRABLE-shaped but at
+# maxIterations:0 there is no repair — any non-APPROVED escalates. The seed
+# repo does NOT contain VERIFIED.md, so the gate fails → escalation → park.
+apiVersion: v1
+kind: Namespace
+metadata: {name: tide-lv-proof}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tide-subagent
+  namespace: tide-lv-proof
+automountServiceAccountToken: true
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: tide-projects, namespace: tide-lv-proof}
+spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 1Gi}}}
+---
+# TIDE_SIGNING_KEY + ANTHROPIC_API_KEY secrets are created by the driving
+# script (copied from tide-system / base64 of ~/.tide/anthropic.key).
+apiVersion: tideproject.k8s/v1alpha3
+kind: Project
+metadata: {name: tide-lv-proof-project, namespace: tide-lv-proof}
+spec:
+  schemaRevision: v1alpha3
+  targetRepo: https://github.com/example/tide-lv-proof.git
+  providerSecretRef: tide-provider-secret
+  budget: {absoluteCapCents: 100000}
+  # Real model — the level verifier inherits the task-level model
+  # (ResolveProvider(project,"task")) and makes a real Anthropic call; "stub"
+  # 404s, haiku spirals (Phase-51 lesson). Only the verifier bills.
+  subagent: {model: claude-sonnet-4-6}
+  gates: {milestone: auto, phase: auto, plan: auto, task: auto, pauseBetweenWaves: false}
+  # Phase-level verification contract ONLY — Plan/Task carry no contract so
+  # neither plan-check nor the Task loop fires; this fixture isolates level-verify.
+  verification:
+    phase:
+      phase: Locked
+      version: 1
+      gateCommand: "test -f VERIFIED.md"
+      maxIterations: 0
+      onExhaustion: requireApproval
+---
+apiVersion: tideproject.k8s/v1alpha3
+kind: Milestone
+metadata: {name: tide-lv-proof-milestone, namespace: tide-lv-proof}
+spec: {projectRef: tide-lv-proof-project}
+---
+apiVersion: tideproject.k8s/v1alpha3
+kind: Phase
+metadata: {name: tide-lv-proof-phase, namespace: tide-lv-proof}
+spec: {milestoneRef: tide-lv-proof-milestone}
+---
+apiVersion: tideproject.k8s/v1alpha3
+kind: Plan
+metadata:
+  name: tide-lv-proof-plan
+  namespace: tide-lv-proof
+  labels: {tideproject.k8s/project: tide-lv-proof-project}
+spec: {phaseRef: tide-lv-proof-phase}
+---
+apiVersion: tideproject.k8s/v1alpha3
+kind: Task
+metadata:
+  name: tide-lv-proof-task
+  namespace: tide-lv-proof
+  labels: {tideproject.k8s/project: tide-lv-proof-project, tideproject.k8s/wave-index: "0"}
+spec:
+  planRef: tide-lv-proof-plan
+  promptPath: children/task-01.json
+  filesTouched: [noop.txt]
+  declaredOutputPaths: [noop.txt]
+  dev: {testMode: success}
