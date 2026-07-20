@@ -1,6 +1,8 @@
 # Phase 51 "The Task Loop" — Session Handoff
 
-**Written:** 2026-07-19 · **Status:** code COMPLETE + Layer-A verified; live proof PARTIAL (core loop + fail-closed proven; happy path blocked by one ship-blocker bug)
+**Written:** 2026-07-19 · **CLOSED 2026-07-20:** phase COMPLETE — live proof PASSED both gates (red REPAIRABLE→repair→exhaust→VerifyHalted, green APPROVED→Succeeded), ESC-04 kind spec 1/1 green live, verification re-run APPROVED 5/5 (`8f0accd2`), SECURITY.md SECURED 36/36 (`36e4c6c9`), state advanced to Phase 52. The "one ship-blocker" below turned out to be the first of FIVE stacked latent defects (entrypoint packaging → structured output unwired → recursion cap → template semantics → verdict-relay ship-blocker), all root-fixed in `29e31374` + `076c9637`; full account in `51-HUMAN-UAT.md`. Historical content below.
+
+**Status (superseded):** code COMPLETE + Layer-A verified; live proof PARTIAL (core loop + fail-closed proven; happy path blocked by one ship-blocker bug)
 
 ---
 
