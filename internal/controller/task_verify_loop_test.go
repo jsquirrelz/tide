@@ -379,8 +379,12 @@ var _ = Describe("Task loop: verifier verdict consumption (Phase 51 Plan 07, Ver
 		defer cleanupProject(projName)
 
 		envReader := newMapEnvReader()
+		// Phase 52 D-08: onExhaustion is now genuinely differentiated — this
+		// spec exercises the escalate leg (VerifyHalted + project-wide
+		// ConditionVerifyHalt); the requireApproval leg is covered separately
+		// in task_verify_dispatch_test.go.
 		_, task, attempt := driveToVerifying(ctx, envReader, taskName, planRef, projName, tideprojectv1alpha3.VerificationSpec{
-			Phase: "Locked", Version: 1, GateCommand: "make test-verify", MaxIterations: 3, OnExhaustion: "requireApproval",
+			Phase: "Locked", Version: 1, GateCommand: "make test-verify", MaxIterations: 3, OnExhaustion: "escalate",
 		})
 		defer cleanupTask(taskName)
 
@@ -408,8 +412,10 @@ var _ = Describe("Task loop: verifier verdict consumption (Phase 51 Plan 07, Ver
 		defer cleanupProject(projName)
 
 		envReader := newMapEnvReader()
+		// Phase 52 D-08: escalate leg (VerifyHalted + ConditionVerifyHalt);
+		// the requireApproval leg is covered in task_verify_dispatch_test.go.
 		_, task, attempt := driveToVerifying(ctx, envReader, taskName, planRef, projName, tideprojectv1alpha3.VerificationSpec{
-			Phase: "Locked", Version: 1, GateCommand: "make test-verify", MaxIterations: 3, OnExhaustion: "requireApproval",
+			Phase: "Locked", Version: 1, GateCommand: "make test-verify", MaxIterations: 3, OnExhaustion: "escalate",
 		})
 		defer cleanupTask(taskName)
 
@@ -483,8 +489,11 @@ var _ = Describe("Task loop: verifier verdict consumption (Phase 51 Plan 07, Ver
 		defer cleanupProject(projName)
 
 		envReader := newMapEnvReader()
+		// Phase 52 D-08: this spec pins the escalate leg (VerifyHalted); the
+		// requireApproval leg's exhaustion-then-park-then-approve flow is
+		// covered in task_verify_dispatch_test.go.
 		_, task, attempt := driveToVerifying(ctx, envReader, taskName, planRef, projName, tideprojectv1alpha3.VerificationSpec{
-			Phase: "Locked", Version: 1, GateCommand: "make test-verify", MaxIterations: 1, OnExhaustion: "requireApproval",
+			Phase: "Locked", Version: 1, GateCommand: "make test-verify", MaxIterations: 1, OnExhaustion: "escalate",
 		})
 		defer cleanupTask(taskName)
 
@@ -529,9 +538,13 @@ var _ = Describe("Task loop: anti-gaming structural enforcement (Phase 51 Plan 0
 		defer cleanupProject(projName)
 
 		envReader := newMapEnvReader()
+		// Phase 52 D-08: the anti-gaming SYSTEM escalation now also routes
+		// through the uniform onExhaustion branch (T-52-18, accepted risk) —
+		// this spec pins the escalate leg (ConditionFailed/AntiGamingDetected
+		// + VerifyHalted); onExhaustion:requireApproval would park instead.
 		_, task, attempt := driveExecutorCompletion(ctx, envReader, taskName, planRef, projName,
 			tideprojectv1alpha3.VerificationSpec{
-				Phase: "Locked", Version: 1, GateCommand: "make test-verify", MaxIterations: 3, OnExhaustion: "requireApproval",
+				Phase: "Locked", Version: 1, GateCommand: "make test-verify", MaxIterations: 3, OnExhaustion: "escalate",
 			},
 			pkgdispatch.EnvelopeOut{
 				ExitCode: 0, Result: "success", CompletedAt: time.Now(),
@@ -630,8 +643,11 @@ var _ = Describe("Task loop: verify-exhaustion is a distinct halt class (Phase 5
 		defer cleanupTask(sibName)
 
 		envReader := newMapEnvReader()
+		// Phase 52 D-08: this spec pins the escalate leg (the ESC-03 distinct
+		// halt class + project-wide VerifyHalt); the requireApproval leg is
+		// covered in task_verify_dispatch_test.go.
 		_, task, attempt := driveToVerifying(ctx, envReader, taskName, planRef, projName, tideprojectv1alpha3.VerificationSpec{
-			Phase: "Locked", Version: 1, GateCommand: "make test-verify", MaxIterations: 1, OnExhaustion: "requireApproval",
+			Phase: "Locked", Version: 1, GateCommand: "make test-verify", MaxIterations: 1, OnExhaustion: "escalate",
 		})
 		defer cleanupTask(taskName)
 

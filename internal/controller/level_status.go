@@ -32,12 +32,14 @@ package controller
 
 import (
 	"context"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/gates"
@@ -152,6 +154,81 @@ func consumeApproveAndResume(
 			Message: resumeMessage,
 		},
 	)
+}
+
+// exhaustVerifyLoop is the phase's centerpiece D-08 branch point: the
+// exhaustion/escalation path fed by ResolveLoopPolicy — all five levels
+// route here; per-value differentiation lives here and ONLY here (D-08).
+// Callers (haltVerify today; the Plan/Phase/Milestone/Project level-verify
+// equivalents land in later plans) invoke this to decide what happens once
+// a verification loop reaches a terminal, non-APPROVED outcome (BLOCKED,
+// an unreadable envelope, an anti-gaming escalation, or MaxIterations
+// exhaustion — Task 1's own "uniform: every terminal non-APPROVED exit
+// consults the policy" instruction).
+//
+// This function performs its OWN mutate-then-patch cycle via patchLevelStatus
+// (the same self-contained shape as consumeApproveAndResume/
+// patchTaskAwaitingApproval) — callers MUST invoke it BEFORE mutating
+// anything else on obj's Status (e.g. LoopStatus/CompletedAt), or those
+// earlier mutations would silently be dropped: patchLevelStatus captures its
+// diff base via obj.DeepCopyObject() at call time, so an in-memory mutation
+// made before this call is already "baked into" that base and never reaches
+// the eventual JSON merge patch. A caller needing to ALSO stamp other fields
+// does so in a SEPARATE, subsequent patch (see haltVerify for the two-step
+// shape).
+//
+// policy.EscalationPolicy differentiates:
+//   - EscalationRequireApproval: parks obj at LevelPhaseAwaitingApproval
+//     with a WaveOrLevelPaused condition (Reason=ReasonVerifyExhausted, the
+//     existing gate-machinery vocabulary) — the checked level enforces
+//     requireApproval through the EXISTING gate machinery (ESC-02): the
+//     SAME `tide approve` + consumeApproveAndResume two-step every other
+//     AwaitingApproval park already uses resumes it. Project conditions are
+//     untouched.
+//   - EscalationEscalate (and the empty/default case): the Phase 51
+//     behavior, unchanged — obj moves to LevelPhaseVerifyHalted and
+//     setVerifyHaltIfNeeded freezes new dispatch project-wide via
+//     ConditionVerifyHalt. setVerifyHaltIfNeeded's own error is logged and
+//     tolerated (non-fatal), matching haltVerify's prior posture — the
+//     level's own terminal patch above already landed.
+func exhaustVerifyLoop(
+	ctx context.Context,
+	c client.Client,
+	project *tideprojectv1alpha3.Project,
+	obj client.Object,
+	conditions *[]metav1.Condition,
+	phasePtr *string,
+	level string,
+	policy tideprojectv1alpha3.LoopPolicy,
+	completedAt time.Time,
+	message string,
+) (ctrl.Result, error) {
+	if policy.EscalationPolicy == tideprojectv1alpha3.EscalationRequireApproval {
+		return patchLevelStatus(ctx, c, obj, conditions, phasePtr, tideprojectv1alpha3.LevelPhaseAwaitingApproval, false, ctrl.Result{},
+			metav1.Condition{
+				Type:    tideprojectv1alpha3.ConditionWaveOrLevelPaused,
+				Status:  metav1.ConditionTrue,
+				Reason:  tideprojectv1alpha3.ReasonVerifyExhausted,
+				Message: message,
+			},
+		)
+	}
+
+	result, err := patchLevelStatus(ctx, c, obj, conditions, phasePtr, tideprojectv1alpha3.LevelPhaseVerifyHalted, false, ctrl.Result{},
+		metav1.Condition{
+			Type:    tideprojectv1alpha3.ConditionFailed,
+			Status:  metav1.ConditionTrue,
+			Reason:  tideprojectv1alpha3.ReasonVerifyExhausted,
+			Message: message,
+		},
+	)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if hErr := setVerifyHaltIfNeeded(ctx, c, project, completedAt); hErr != nil {
+		logf.FromContext(ctx).Error(hErr, "setVerifyHaltIfNeeded failed (non-fatal)", "level", level)
+	}
+	return result, nil
 }
 
 // countChildren returns the number of objects in list (after a

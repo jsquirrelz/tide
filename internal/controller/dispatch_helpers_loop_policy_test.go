@@ -192,11 +192,9 @@ func TestResolveLoopPolicy(t *testing.T) {
 // prose referencing the forbidden field names cannot self-invalidate the
 // guard, then asserts zero matches of the forbidden regex.
 //
-// TODO(52-06): task_controller.go still reads Spec.Verification.MaxIterations
-// directly in repairOrHalt (Phase 51's Task loop, pre-dating this resolver).
-// It is excluded here so the guard passes NOW; the Task-migration plan
-// (52-06) migrates that call site onto ResolveLoopPolicy and removes this
-// exclusion as part of its acceptance criteria.
+// Phase 52-06: task_controller.go's repairOrHalt now reads MaxIterations
+// exclusively through ResolveLoopPolicy — the guard covers the whole
+// package except dispatch_helpers.go (the resolver's own home).
 func TestNoDirectVerificationPolicyReads(t *testing.T) {
 	dir := "."
 	entries, err := os.ReadDir(dir)
@@ -207,7 +205,6 @@ func TestNoDirectVerificationPolicyReads(t *testing.T) {
 	forbidden := regexp.MustCompile(`Spec\.Verification\.(MaxIterations|OnExhaustion)`)
 	excluded := map[string]bool{
 		"dispatch_helpers.go": true, // the resolver's own home
-		"task_controller.go":  true, // TODO(52-06): migrated by the Task-migration plan
 	}
 
 	for _, entry := range entries {
