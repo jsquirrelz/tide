@@ -91,6 +91,14 @@ type PhaseStatus struct {
 	// caller observes a nil Job object.
 	// +optional
 	PhaseReporterSpawnedUID string `json:"phaseReporterSpawnedUID,omitempty"`
+
+	// LoopStatus is the level-verify loop's observed-state contract at the
+	// Phase boundary (Phase 52 D-07). Phase runs with MaxIterations:0
+	// (LOOP-03-compliant, D-02's resolver), so in practice only
+	// LastEvaluation + ExitReason are populated — there is no repair branch
+	// at this level, any non-APPROVED verdict escalates immediately.
+	// +optional
+	LoopStatus LoopStatus `json:"loopStatus,omitempty"`
 }
 
 // +kubebuilder:object:root=true

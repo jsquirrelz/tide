@@ -45,6 +45,16 @@ type PlanSpec struct {
 	// dispatching this object's planner Job (D-07 uniform path).
 	// +optional
 	SharedContext string `json:"sharedContext,omitempty"`
+
+	// Verification is the plan-check verification contract (Phase 52 D-01),
+	// the SAME standalone VerificationSpec type task_types.go defines for
+	// Task — zero shape changes, so the type-attached CEL
+	// immutable-once-Locked rule travels here automatically. Resolution
+	// precedence is Task > Plan > Project (ResolveLoopPolicy); an absent
+	// contract here falls back to ProjectSpec.Verification.Plan, else the
+	// plan-check stage is off.
+	// +optional
+	Verification VerificationSpec `json:"verification,omitempty"`
 }
 
 // WaveIntegrationStatus records the bounded auto-retry state of a single
@@ -153,6 +163,18 @@ type PlanStatus struct {
 	// reconcileWaveBoundary advances to a new blocking wave.
 	// +optional
 	WaveIntegration WaveIntegrationStatus `json:"waveIntegration,omitempty"`
+
+	// LoopStatus is the plan-check loop's own observed-state contract
+	// (Phase 52 D-06). Iteration counts quality re-plans ONLY — it is
+	// DISTINCT from WaveIntegration.Attempts (infra-retry ≠ quality-
+	// iteration, Phase 51 D-05 applied one level up: a wave-integration Job
+	// failure is a transient infra retry, not a plan-check evaluator
+	// verdict) and from the planner Job's own attempt identity
+	// (tide-plan-<uid>-<attempt>, a dispatch retry counter, not a loop
+	// iteration counter). LOOP-03: current-iteration summary only, no
+	// accumulating history — see TestLoopStatus_NoForbiddenFields.
+	// +optional
+	LoopStatus LoopStatus `json:"loopStatus,omitempty"`
 }
 
 // +kubebuilder:object:root=true

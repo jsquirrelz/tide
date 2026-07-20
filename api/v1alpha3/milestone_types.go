@@ -95,6 +95,14 @@ type MilestoneStatus struct {
 	// when the caller observes a nil Job object.
 	// +optional
 	MilestoneReporterSpawnedUID string `json:"milestoneReporterSpawnedUID,omitempty"`
+
+	// LoopStatus is the level-verify loop's observed-state contract at the
+	// Milestone boundary (Phase 52 D-07). Milestone runs with
+	// MaxIterations:0 (LOOP-03-compliant, D-02's resolver), so in practice
+	// only LastEvaluation + ExitReason are populated — there is no repair
+	// branch at this level, any non-APPROVED verdict escalates immediately.
+	// +optional
+	LoopStatus LoopStatus `json:"loopStatus,omitempty"`
 }
 
 // +kubebuilder:object:root=true

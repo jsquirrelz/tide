@@ -334,13 +334,22 @@ const (
 	AnnotationFailureResumedAt = "tideproject.k8s/failure-resumed-at"
 )
 
-// Phase 51 condition + reason vocabulary — Task loop verification halt
+// Phase 51/52 condition + reason vocabulary — verification-loop halt
 // (ESC-02/ESC-03). Third generation of the BillingHalt → FailureHalt →
-// VerifyHalt halt-condition mirror.
+// VerifyHalt halt-condition mirror. Originally scoped to the Task loop
+// alone (Phase 51); Phase 52 generalizes it to every level's verification
+// loop (plan-check re-plan exhaustion, Phase/Milestone/Project level-verify
+// escalation) — still ONE halt class, never a per-level sibling family.
 //
 // What SETS it — setVerifyHaltIfNeeded (verify_halt.go) stamps
-// ConditionVerifyHalt=True when a Task's verification loop exhausts
-// LoopPolicy.MaxIterations without an APPROVED evaluator verdict.
+// ConditionVerifyHalt=True when a level's verification loop exhausts its
+// resolved LoopPolicy.MaxIterations without an APPROVED evaluator verdict,
+// OR (D-08) when a level's EscalationPolicy is "escalate" on exhaustion.
+// Call sites: the Task loop's repairOrHalt (task_controller.go, Phase 51),
+// the plan-check loop's re-plan-exhaustion/stall-detection path
+// (plan_controller.go, Phase 52 D-05/D-06), and the Phase/Milestone/Project
+// level-verify pre-Succeeded hook (level_status.go, Phase 52 D-07 —
+// MaxIterations:0 means the first non-APPROVED verdict IS exhaustion).
 //
 // What READS it — checkVerifyHalt is wired into BOTH dispatch chains: the
 // planner-tier checkDispatchHolds AND the Task-tier gateChecks (D-09) —
@@ -488,25 +497,41 @@ const (
 	// LevelPhaseZeroMembers is Wave-only: set by the wave aggregator when a
 	// Wave's TaskRefs is empty (no member Tasks were ever assigned to it).
 	LevelPhaseZeroMembers = "ZeroMembers"
-	// LevelPhaseVerifying is Task-only (Phase 51 TASK-01/EXEC-04): set when
-	// the executor Job exits 0 (belief-complete, never correctness) for a
-	// Task carrying a locked verification contract, and an independent
-	// verifier Job has been dispatched against it. The Execution loop never
-	// stamps LevelPhaseSucceeded directly for a contract-bearing Task —
-	// only the verifier's consumed verdict can (Plan 07). A Task with no
-	// contract preserves the pre-Phase-51 exit-0 -> Succeeded path (OQ2).
+	// LevelPhaseVerifying generalizes across every level's verification loop
+	// (originally scoped to Task alone, Phase 51 TASK-01/EXEC-04;
+	// generalized Phase 52 D-03/D-07). For a Task: set when the executor Job
+	// exits 0 (belief-complete, never correctness) for a Task carrying a
+	// locked verification contract, and an independent verifier Job has
+	// been dispatched against it — the Execution loop never stamps
+	// LevelPhaseSucceeded directly for a contract-bearing Task, only the
+	// verifier's consumed verdict can (Plan 07); a Task with no contract
+	// preserves the pre-Phase-51 exit-0 -> Succeeded path (OQ2). For a Plan:
+	// set once the planner Job has completed and the reporter has finished
+	// materializing child Tasks, gating child Task dispatch on an APPROVED
+	// plan-check verdict (D-03). For Phase/Milestone/Project: set at the
+	// moment the level would otherwise stamp Succeeded, when a resolved
+	// verification contract exists — semantic verification of the
+	// observable outcome runs alongside the existing mechanical merge-
+	// ancestry completeness gate (D-07). A level with no resolved
+	// verification contract skips Verifying entirely (absence of config is
+	// the off-switch).
 	LevelPhaseVerifying = "Verifying"
-	// LevelPhaseVerifyHalted is Task-only (Phase 51 ESC-03): the terminal a
-	// verification loop reaches when it exhausts MaxIterations, hits a BLOCKED
-	// verdict, an unreadable verifier envelope, or an anti-gaming escalation
-	// without an APPROVED verdict. It is a DISTINCT halt class from
-	// LevelPhaseFailed — never a reinterpretation of Failed wave semantics
-	// (ESC-03). Unlike a Failed Task, a VerifyHalted Task does NOT trip the
-	// conservative-profile FailureHalt backstop (gateChecks) and its recovery
-	// path is `tide resume` (clears ConditionVerifyHalt project-wide), not
-	// `tide resume --retry-failed`. The project-wide ConditionVerifyHalt that
-	// haltVerify stamps alongside this phase is what freezes new dispatch;
-	// this phase keeps the halted Task grep-distinguishable from an execution
-	// failure at every phase switch/== call site.
+	// LevelPhaseVerifyHalted generalizes across every level's verification
+	// loop (originally scoped to Task alone, Phase 51 ESC-03; generalized
+	// Phase 52 D-07/D-08): the terminal state a verification loop reaches
+	// when it exhausts its resolved LoopPolicy.MaxIterations, hits a
+	// BLOCKED verdict, an unreadable verifier envelope, or an anti-gaming
+	// escalation without an APPROVED verdict. At MaxIterations:0 levels
+	// (Phase/Milestone/Project, D-07) any non-APPROVED verdict IS
+	// exhaustion — there is no repair branch. It is a DISTINCT halt class
+	// from LevelPhaseFailed — never a reinterpretation of Failed wave
+	// semantics (ESC-03). Unlike a Failed level, a VerifyHalted level does
+	// NOT trip the conservative-profile FailureHalt backstop (gateChecks)
+	// and its recovery path is `tide resume` (clears ConditionVerifyHalt
+	// project-wide), not `tide resume --retry-failed`. The project-wide
+	// ConditionVerifyHalt that haltVerify stamps alongside this phase is
+	// what freezes new dispatch; this phase keeps a halted level
+	// grep-distinguishable from an execution failure at every phase
+	// switch/== call site.
 	LevelPhaseVerifyHalted = "VerifyHalted"
 )
