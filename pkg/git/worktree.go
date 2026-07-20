@@ -77,3 +77,59 @@ func AddWorktree(repoPath, taskUID, runBranch string) (string, error) {
 
 	return worktreeDir, nil
 }
+
+// AddReadOnlyWorktree creates a DETACHED linked working tree rooted at the
+// shared bare repo at repoPath, checked out at runBranch's current tip, and
+// returns the absolute filesystem path of the new working tree.
+//
+// Phase 52 D-07 (RESEARCH.md §"The missing worktree" — Assumption A1, the
+// no-analog new-build): a level-verify dispatch (Phase/Milestone/Project)
+// never commits, so it must NOT mint a branch the way [AddWorktree] does for
+// an executor Task. AddWorktree's `-b tide/wt-<uid>` shape is deliberately
+// avoided here for two reasons:
+//
+//  1. No dangling branches: a verify-only checkout that minted a branch on
+//     every run would leave a `tide/wt-<uid>`-shaped branch behind forever
+//     (RESEARCH's anti-pattern) since nothing ever merges or deletes it.
+//  2. No branch-claim collision: `git worktree add --detach` does not claim
+//     runBranch the way a plain (non-detached) checkout would, so two
+//     different level UIDs can both check out the SAME runBranch
+//     concurrently — a real scenario when a Phase and a Milestone verify at
+//     the same run-branch tip in the same wave. A `-b`-style or plain-branch
+//     checkout would fail the second call with "already checked out".
+//
+// uid is the worktree subdirectory name — the checked level's own UID
+// (mirrors envelopeUID: phase/milestone/project/plan UID, not a task UID).
+// runBranch must already exist on the bare repo. Directory convention
+// mirrors [AddWorktree]: <parent-of-repoPath>/worktrees/<uid>/.
+//
+// Idempotent: a re-call for a uid whose worktree dir already resolves as a
+// valid git worktree (`git -C <dir> rev-parse --git-dir` succeeds) returns
+// the existing dir with nil error and does not re-run `git worktree add` —
+// safe for a retried init container (Phase 52 D-07 wiring).
+func AddReadOnlyWorktree(repoPath, uid, runBranch string) (string, error) {
+	if repoPath == "" {
+		return "", fmt.Errorf("git worktree: empty repoPath")
+	}
+	if uid == "" {
+		return "", fmt.Errorf("git worktree: empty uid")
+	}
+	if runBranch == "" {
+		return "", fmt.Errorf("git worktree: empty branch")
+	}
+
+	worktreeDir := filepath.Join(filepath.Dir(repoPath), "worktrees", uid)
+
+	// Idempotency pre-check: a resolvable .git in worktreeDir means a prior
+	// (possibly retried) call already provisioned this checkout.
+	if err := exec.Command("git", "-C", worktreeDir, "rev-parse", "--git-dir").Run(); err == nil {
+		return worktreeDir, nil
+	}
+
+	cmd := exec.Command("git", "-C", repoPath, "worktree", "add", "--detach", worktreeDir, runBranch)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("git worktree add --detach %s @ %s: %w: %s", uid, runBranch, err, string(out))
+	}
+
+	return worktreeDir, nil
+}

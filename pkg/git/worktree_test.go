@@ -172,7 +172,7 @@ func TestAddWorktreeValidatesArgs(t *testing.T) {
 // TestAddWorktreeValidatesArgs's three-guard shape.
 func TestAddReadOnlyWorktreeValidatesArgs(t *testing.T) {
 	for _, tc := range []struct {
-		name                       string
+		name                      string
 		repoPath, uid, branchName string
 	}{
 		{"empty repoPath", "", "uid", "main"},
