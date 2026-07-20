@@ -179,7 +179,7 @@ Plans:
   2. Phase/Milestone/Project run with `maxIterations:0` — any verify finding at these levels escalates straight to `requireApproval` rather than auto-repairing, because these levels close on their observable outcome, not task-completion.
   3. Gate policy is resolved from the loop-level field on `LoopPolicy`, not from CRD kind/hierarchy position — one resolver function serves all levels.
 
-**Plans:** 6/11 plans executed
+**Plans:** 8/11 plans executed
 
 Plans:
 **Wave 1**
@@ -199,8 +199,8 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3)*
 
-- [ ] 52-07-PLAN.md — Plan-check dispatch/consume: Verifying sub-state + child-dispatch hold + D-10 rails (D-03)
-- [ ] 52-08-PLAN.md — Shared level-verify machinery (level_verify.go) for Phase/Milestone/Project (D-07)
+- [x] 52-07-PLAN.md — Plan-check dispatch/consume: Verifying sub-state + child-dispatch hold + D-10 rails (D-03)
+- [x] 52-08-PLAN.md — Shared level-verify machinery (level_verify.go) for Phase/Milestone/Project (D-07)
 
 **Wave 5** *(blocked on Wave 4)*
 
@@ -245,5 +245,5 @@ Phases execute in numeric order: 48 → 49 → 50 → 51 → 52 → 53
 | 49. Common Loop Contract + Verdict/Envelope/Persistence Schema | v1.0.9 | 4/4 | Complete    | 2026-07-18 |
 | 50. Execution-Loop Hardening + Loop-Native Observability | v1.0.9 | 7/7 | Complete    | 2026-07-19 |
 | 51. The Task Loop | v1.0.9 | 8/8 | Complete    | 2026-07-20 |
-| 52. Per-Level LoopPolicy Parameterization | v1.0.9 | 6/11 | In Progress|  |
+| 52. Per-Level LoopPolicy Parameterization | v1.0.9 | 8/11 | In Progress|  |
 | 53. Chart Config + Dashboard Provenance Surfacing | v1.0.9 | 0/TBD | Not started | - |
