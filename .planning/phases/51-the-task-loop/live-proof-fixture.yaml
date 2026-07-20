@@ -1,0 +1,70 @@
+apiVersion: v1
+kind: Namespace
+metadata: {name: tide-verify-proof}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tide-subagent
+  namespace: tide-verify-proof
+automountServiceAccountToken: true
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: tide-projects, namespace: tide-verify-proof}
+spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 1Gi}}}
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: tide-signing-key, namespace: tide-verify-proof}
+type: Opaque
+data: {TIDE_SIGNING_KEY: <COPY_FROM__kubectl get secret tide-signing-key -n tide-system -o jsonpath={.data.TIDE_SIGNING_KEY}>
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: tide-provider-secret, namespace: tide-verify-proof}
+type: Opaque
+data: {ANTHROPIC_API_KEY: <BASE64_OF_REAL_KEY__cat ~/.tide/anthropic.key | tr -d "\n" | base64>
+---
+apiVersion: tideproject.k8s/v1alpha3
+kind: Project
+metadata: {name: tide-verify-proof-project, namespace: tide-verify-proof}
+spec:
+  schemaRevision: v1alpha3
+  targetRepo: https://github.com/example/tide-verify-proof.git
+  providerSecretRef: tide-provider-secret
+  budget: {absoluteCapCents: 100000}
+  subagent: {model: stub}
+  gates: {milestone: auto, phase: auto, plan: auto, task: auto, pauseBetweenWaves: false}
+---
+apiVersion: tideproject.k8s/v1alpha3
+kind: Milestone
+metadata: {name: tide-verify-proof-milestone, namespace: tide-verify-proof}
+spec: {projectRef: tide-verify-proof-project}
+---
+apiVersion: tideproject.k8s/v1alpha3
+kind: Phase
+metadata: {name: tide-verify-proof-phase, namespace: tide-verify-proof}
+spec: {milestoneRef: tide-verify-proof-milestone}
+---
+apiVersion: tideproject.k8s/v1alpha3
+kind: Plan
+metadata:
+  name: tide-verify-proof-plan
+  namespace: tide-verify-proof
+  labels: {tideproject.k8s/project: tide-verify-proof-project}
+spec: {phaseRef: tide-verify-proof-phase}
+---
+apiVersion: tideproject.k8s/v1alpha3
+kind: Task
+metadata:
+  name: proof-task-red
+  namespace: tide-verify-proof
+  labels: {tideproject.k8s/project: tide-verify-proof-project, tideproject.k8s/wave-index: "0"}
+spec:
+  planRef: tide-verify-proof-plan
+  promptPath: children/task-01.json
+  filesTouched: [proof.go]
+  declaredOutputPaths: [proof.go]
+  dev: {testMode: success}
+  verification: {phase: Locked, gateCommand: "false", maxIterations: 2, onExhaustion: requireApproval}
