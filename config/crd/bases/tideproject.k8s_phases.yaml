@@ -139,6 +139,143 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              loopStatus:
+                description: |-
+                  LoopStatus is the level-verify loop's observed-state contract at the
+                  Phase boundary (Phase 52 D-07). Phase runs with MaxIterations:0
+                  (LOOP-03-compliant, D-02's resolver), so in practice only
+                  LastEvaluation + ExitReason are populated — there is no repair branch
+                  at this level, any non-APPROVED verdict escalates immediately.
+                properties:
+                  conditions:
+                    items:
+                      description: Condition contains details for one aspect of the
+                        current state of this API Resource.
+                      properties:
+                        lastTransitionTime:
+                          description: |-
+                            lastTransitionTime is the last time the condition transitioned from one status to another.
+                            This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                          format: date-time
+                          type: string
+                        message:
+                          description: |-
+                            message is a human readable message indicating details about the transition.
+                            This may be an empty string.
+                          maxLength: 32768
+                          type: string
+                        observedGeneration:
+                          description: |-
+                            observedGeneration represents the .metadata.generation that the condition was set based upon.
+                            For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                            with respect to the current state of the instance.
+                          format: int64
+                          minimum: 0
+                          type: integer
+                        reason:
+                          description: |-
+                            reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                            Producers of specific condition types may define expected values and meanings for this field,
+                            and whether the values are considered a guaranteed API.
+                            The value should be a CamelCase string.
+                            This field may not be empty.
+                          maxLength: 1024
+                          minLength: 1
+                          pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                          type: string
+                        status:
+                          description: status of the condition, one of True, False,
+                            Unknown.
+                          enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                          type: string
+                        type:
+                          description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                          maxLength: 316
+                          pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                          type: string
+                      required:
+                      - lastTransitionTime
+                      - message
+                      - reason
+                      - status
+                      - type
+                      type: object
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - type
+                    x-kubernetes-list-type: map
+                  costCents:
+                    description: |-
+                      CostCents is the cumulative spend (USD cents) across all iterations
+                      of this loop so far, checked against LoopPolicy.BudgetCents.
+                    format: int64
+                    minimum: 0
+                    type: integer
+                  exitReason:
+                    description: |-
+                      ExitReason records the bounded exit/escalation outcome once the loop
+                      has stopped iterating (empty while the loop is still active).
+                    enum:
+                    - approved
+                    - iterationsExhausted
+                    - durationExhausted
+                    - budgetExhausted
+                    - escalated
+                    type: string
+                  iteration:
+                    description: |-
+                      Iteration is the current attempt number (1-indexed once dispatched;
+                      0 before the loop's first iteration).
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  lastEvaluation:
+                    description: |-
+                      LastEvaluation is the bounded verdict summary from the most recent
+                      evaluator/environment feedback — current-iteration only, never a
+                      slice/history of past evaluations (LOOP-03).
+                    properties:
+                      completedAt:
+                        description: CompletedAt is when the evaluator produced this
+                          verdict.
+                        format: date-time
+                        type: string
+                      decision:
+                        description: |-
+                          Decision is the locally-scoped verdict string ("APPROVED",
+                          "REPAIRABLE", or "BLOCKED") — never the imported pkg/dispatch.GateDecision
+                          type, per the two-homes design note above.
+                        enum:
+                        - APPROVED
+                        - REPAIRABLE
+                        - BLOCKED
+                        type: string
+                      findingsCount:
+                        description: |-
+                          FindingsCount is the total number of findings the evaluator reported,
+                          without the findings[] array itself.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      highSeverityCount:
+                        description: |-
+                          HighSeverityCount is the number of findings at the highest severity
+                          tier the evaluator reported.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                    type: object
+                  parentRunID:
+                    description: |-
+                      ParentRunID identifies the run that produced the mutable candidate
+                      this LoopStatus is evaluating, correlating LoopStatus back to the
+                      trace/artifact history where iteration-by-iteration detail lives
+                      (LOOP-03 — that detail is never duplicated into `.status`).
+                    type: string
+                type: object
               phase:
                 type: string
               phaseReporterSpawnedUID:

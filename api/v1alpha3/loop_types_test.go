@@ -38,6 +38,18 @@ import (
 	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
+// The four assertions below are Phase 52 D-06's structural guard: each
+// proves PlanStatus/PhaseStatus/MilestoneStatus/ProjectStatus embeds the
+// LoopStatus type itself (the guarded type LOOP-03 pins), never a locally-
+// widened variant. If a future PR redeclares e.g. PlanStatus.LoopStatus as
+// a different type, this fails to compile.
+var (
+	_ tidev1alpha3.LoopStatus = tidev1alpha3.PlanStatus{}.LoopStatus
+	_ tidev1alpha3.LoopStatus = tidev1alpha3.PhaseStatus{}.LoopStatus
+	_ tidev1alpha3.LoopStatus = tidev1alpha3.MilestoneStatus{}.LoopStatus
+	_ tidev1alpha3.LoopStatus = tidev1alpha3.ProjectStatus{}.LoopStatus
+)
+
 func fullyPopulatedLoopPolicy() tidev1alpha3.LoopPolicy {
 	maxDuration := metav1.Duration{Duration: 30 * time.Minute}
 	return tidev1alpha3.LoopPolicy{
@@ -152,6 +164,31 @@ func TestLoopStatus_NoForbiddenFields(t *testing.T) {
 	for _, forbidden := range []string{`"previousEvaluations"`, `"evaluations"`, `"history"`} {
 		if strings.Contains(string(data), forbidden) {
 			t.Errorf("LoopStatus JSON contains forbidden history-shaped key %s: %s", forbidden, data)
+		}
+	}
+}
+
+// TestLoopStatus_EmbeddingSites proves each of the Phase 52 embedding sites
+// (PlanStatus, PhaseStatus, MilestoneStatus, ProjectStatus) carries the
+// LoopStatus type itself — never a locally-widened variant — via a runtime
+// reflect.TypeOf check, complementing the package-level compile-time
+// assertions above (defense in depth for the LOOP-03 no-history guard).
+func TestLoopStatus_EmbeddingSites(t *testing.T) {
+	loopStatusType := reflect.TypeOf(tidev1alpha3.LoopStatus{})
+
+	cases := []struct {
+		name  string
+		field reflect.Type
+	}{
+		{"PlanStatus.LoopStatus", reflect.TypeOf(tidev1alpha3.PlanStatus{}.LoopStatus)},
+		{"PhaseStatus.LoopStatus", reflect.TypeOf(tidev1alpha3.PhaseStatus{}.LoopStatus)},
+		{"MilestoneStatus.LoopStatus", reflect.TypeOf(tidev1alpha3.MilestoneStatus{}.LoopStatus)},
+		{"ProjectStatus.LoopStatus", reflect.TypeOf(tidev1alpha3.ProjectStatus{}.LoopStatus)},
+	}
+
+	for _, tc := range cases {
+		if tc.field != loopStatusType {
+			t.Errorf("%s has type %s, want %s (LOOP-03 guard)", tc.name, tc.field, loopStatusType)
 		}
 	}
 }
