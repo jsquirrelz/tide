@@ -240,6 +240,21 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 		return ctrl.Result{}, nil
 	}
 
+	// Phase 52 D-07: a Phase parked in Verifying is mid-level-verify — route
+	// straight to the verify state machine before any other state-transition
+	// logic runs this reconcile (mirrors Plan's identical Verifying routing,
+	// plan_controller.go:201-204, one level up). Without this, the idempotency
+	// guard below (which sees the Phase already owns >=1 child Plan) would
+	// silently no-op forever and the verifier Job's completion would never be
+	// consumed.
+	if ph.Status.Phase == tideprojectv1alpha3.LevelPhaseVerifying {
+		project := r.resolveProject(ctx, ph)
+		if handled, res, vErr := maybeRunLevelVerify(ctx, r.Client, r.Scheme, r.Deps, project, r.phaseLevelVerifyTarget(ctx, ph, project)); handled {
+			return res, vErr
+		}
+		return r.patchPhaseSucceeded(ctx, ph)
+	}
+
 	// Step 1a: AwaitingApproval early-return (D-01 parity with milestone_controller.go).
 	// Stops the finding-2 oscillation where a Phase parked at AwaitingApproval would
 	// fall through to the idempotency guard and re-enter the planner dispatch body on
@@ -789,6 +804,13 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 		if expected == 0 {
 			// Genuine leaf — planner authored no Plan children.
 			logger.V(1).Info("boundary push skipped: planner authored no Plan children (leaf)", "phase", ph.Name)
+			// Phase 52 D-07/T-52-31: verify BEFORE the level stamps Succeeded —
+			// handled=true means the level-verify machinery is driving this
+			// Phase's state this reconcile (dispatch/still-verifying/exhausted);
+			// the caller must not also patch Succeeded this pass.
+			if handled, res, vErr := maybeRunLevelVerify(ctx, r.Client, r.Scheme, r.Deps, project, r.phaseLevelVerifyTarget(ctx, ph, project)); handled {
+				return res, vErr
+			}
 			return r.patchPhaseSucceeded(ctx, ph)
 		}
 		observed := r.countChildPlans(ctx, ph)
@@ -803,6 +825,11 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 			return ctrl.Result{}, derr
 		}
 		if detected {
+			// Phase 52 D-07/T-52-31: verify BEFORE the boundary push — an
+			// unverified outcome must not publish.
+			if handled, res, vErr := maybeRunLevelVerify(ctx, r.Client, r.Scheme, r.Deps, project, r.phaseLevelVerifyTarget(ctx, ph, project)); handled {
+				return res, vErr
+			}
 			if err := r.maybeTriggerBoundaryPush(ctx, ph, project); err != nil {
 				if errors.Is(err, errGitWriterBusy) {
 					return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
@@ -828,12 +855,17 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 		return ctrl.Result{}, derr
 	}
 	if detected {
+		// Phase 52 D-07/T-52-31: verify BEFORE the boundary push (fallback path).
+		if handled, res, vErr := maybeRunLevelVerify(ctx, r.Client, r.Scheme, r.Deps, project, r.phaseLevelVerifyTarget(ctx, ph, project)); handled {
+			return res, vErr
+		}
 		if err := r.maybeTriggerBoundaryPush(ctx, ph, project); err != nil {
 			if errors.Is(err, errGitWriterBusy) {
 				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 			}
 			return ctrl.Result{}, err
 		}
+		return r.patchPhaseSucceeded(ctx, ph)
 	} else if r.hasChildPlans(ctx, ph) {
 		logger.V(1).Info("boundary push deferred: child Plans pending (fallback)", "phase", ph.Name)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
@@ -842,10 +874,13 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 		// may have ChildCount>0 (children materializing). Requeue; don't auto-succeed.
 		logger.V(1).Info("boundary push deferred: env reader present but unreadable, waiting (fallback)", "phase", ph.Name)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-	} else {
-		logger.V(1).Info("boundary push skipped: phase has no child Plans (nil-EnvReader fallback)", "phase", ph.Name)
 	}
 
+	logger.V(1).Info("boundary push skipped: phase has no child Plans (nil-EnvReader fallback)", "phase", ph.Name)
+	// Phase 52 D-07/T-52-31: verify BEFORE the level stamps Succeeded (fallback leaf).
+	if handled, res, vErr := maybeRunLevelVerify(ctx, r.Client, r.Scheme, r.Deps, project, r.phaseLevelVerifyTarget(ctx, ph, project)); handled {
+		return res, vErr
+	}
 	return r.patchPhaseSucceeded(ctx, ph)
 }
 
@@ -874,6 +909,40 @@ func (r *PhaseReconciler) patchPhaseFailed(ctx context.Context, ph *tideprojectv
 			Message: message,
 		},
 	)
+}
+
+// phaseLevelVerifyTarget builds the level-verify entry point's target
+// contract for this Phase (Phase 52 D-07/52-10 wiring). ParentSpanID mirrors
+// emitEvaluatorSpanForVerifier's own parent-fetch (task_controller.go:2541-
+// 2548) — a genuinely new Get on the immediate parent Milestone — so the
+// EVALUATOR span lands as a sibling of this Phase's own AGENT span, not its
+// child. Goal reuses Project.Spec.OutcomePrompt (Claude's Discretion): unlike
+// Task, neither PhaseSpec nor MilestoneSpec carries its own authored
+// goal/prompt text field, and reading the phase-brief artifact off the run
+// branch is out of this plan's file scope (files_modified has no pkg/git
+// change) — the Project's outcome prompt is the closest authored goal text
+// reachable from every level's own object graph.
+func (r *PhaseReconciler) phaseLevelVerifyTarget(ctx context.Context, ph *tideprojectv1alpha3.Phase, project *tideprojectv1alpha3.Project) levelVerifyTarget {
+	var parentSpanID trace.SpanID
+	if ph.Spec.MilestoneRef != "" {
+		var parentMs tideprojectv1alpha3.Milestone
+		if err := r.Get(ctx, client.ObjectKey{Namespace: ph.Namespace, Name: ph.Spec.MilestoneRef}, &parentMs); err == nil {
+			parentSpanID = spanIDFromHexOrZero(parentMs.Status.MilestoneTraceSpanID)
+		}
+	}
+	goal := ""
+	if project != nil {
+		goal = project.Spec.OutcomePrompt
+	}
+	return levelVerifyTarget{
+		Obj:          ph,
+		Conditions:   &ph.Status.Conditions,
+		PhasePtr:     &ph.Status.Phase,
+		LoopStatus:   &ph.Status.LoopStatus,
+		Level:        "phase",
+		Goal:         goal,
+		ParentSpanID: parentSpanID,
+	}
 }
 
 func (r *PhaseReconciler) patchPhaseSucceeded(ctx context.Context, ph *tideprojectv1alpha3.Phase) (ctrl.Result, error) {

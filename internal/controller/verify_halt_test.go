@@ -26,12 +26,20 @@ import (
 	"testing"
 	"time"
 
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	batchv1 "k8s.io/api/batch/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
+	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
+	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
 // ---------- checkVerifyHalt ----------
@@ -258,3 +266,80 @@ func TestSetVerifyHaltIfNeeded_UnparseableResumeAnnotation_FallsThroughToStamp(t
 		t.Errorf("expected VerifyHalt=True on unparseable annotation (fail-closed); got %v", cond)
 	}
 }
+
+// ---------- ESC-03 regression extension: the newly-verified levels (Phase 52 Plan 10) ----------
+
+// Envtest Ginkgo spec (not a plain testing.T function) so it is genuinely
+// exercised by `--ginkgo.focus='LevelVerify|VerifyHalt'` — a plain Test*
+// function above would never run under that flag, since -run TestControllers
+// only selects the package's sole Ginkgo entry point (51-01-SUMMARY.md's
+// documented vacuous-focus finding). Mirrors co_occurring_holds_test.go's
+// TestVerifyHalt_DistinctClass_LeavesFailureAndSiblingPhaseUntouched (the
+// Task-level ESC-03 precedent) one level up: drives a REAL phase-level
+// VerifyHalt through the newly-wired maybeRunLevelVerify seam (not a direct
+// setVerifyHaltIfNeeded call) and asserts a SIBLING Phase's status is
+// untouched, ConditionFailureHalt is absent, and Project.Status.Phase
+// (conservative-profile propagation's own read) is untouched.
+var _ = Describe("VerifyHalt at the newly-verified levels (Phase 52 Plan 10, ESC-03 regression)", Label("envtest", "phase52", "esc03"), func() {
+	ctx := context.Background()
+
+	It("a Phase-level VerifyHalt (escalate + BLOCKED) leaves a sibling Phase's status untouched and never stamps ConditionFailureHalt", func() {
+		const projName, msName, phaseName, siblingName = "vh-proj-esc03", "vh-ms-esc03", "vh-ph-esc03", "vh-ph-esc03-sibling"
+		makeVerifyLevelProject(projName, tideprojectv1alpha3.VerificationDefaults{
+			Phase: &tideprojectv1alpha3.VerificationSpec{
+				Phase:        "Locked",
+				Version:      1,
+				GateCommand:  "make test-phase-gate",
+				OnExhaustion: "escalate",
+			},
+		}, tideprojectv1alpha3.Gates{})
+		defer cleanupLevelVerifyObjects(projName, msName, phaseName, phaseName+"-child", siblingName)
+
+		makeVerifyMilestone(msName, projName)
+		makeVerifyPhase(phaseName, msName)
+
+		// The sibling Phase is an unrelated, independent Phase under the SAME
+		// Milestone — declared Pending and never touched by any reconcile in
+		// this spec. ESC-03's invariant: a VerifyHalt stamped for phaseName
+		// must never reach this object.
+		sibling := makeVerifyPhase(siblingName, msName)
+
+		envReader := newMapEnvReader()
+		r := newVerifyDispatchPhaseReconciler(envReader)
+		ph := driveToPhaseVerifying(ctx, r, envReader, phaseName, msName, projName)
+		Expect(ph.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseVerifying))
+
+		envReader.SetOut(string(ph.UID), pkgdispatch.EnvelopeOut{
+			CompletedAt: time.Now(),
+			Verdict:     &pkgdispatch.GateDecision{Verdict: pkgdispatch.VerdictBlocked, Summary: "phase outcome unverifiable"},
+		})
+		completeLevelVerifierJob(ctx, "phase", string(ph.UID), 1)
+
+		name := types.NamespacedName{Name: phaseName, Namespace: "default"}
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Get(ctx, name, ph)).To(Succeed())
+		Expect(ph.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseVerifyHalted),
+			"onExhaustion:escalate + BLOCKED must halt VerifyHalted at the Phase level")
+
+		var project tideprojectv1alpha3.Project
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, &project)).To(Succeed())
+		Expect(checkVerifyHalt(&project)).To(BeTrue(), "expected project-wide ConditionVerifyHalt=True")
+		Expect(checkFailureHalt(&project)).To(BeFalse(),
+			"VerifyHalt must never imply/stamp FailureHalt — distinct halt class (ESC-03), same invariant one level up from Task")
+		Expect(project.Status.Phase).To(BeEmpty(),
+			"Project.Status.Phase must stay untouched by a Phase-level VerifyHalt — conservative-profile FailureHalt propagation reads this field, not ConditionVerifyHalt")
+
+		var gotSibling tideprojectv1alpha3.Phase
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: siblingName, Namespace: "default"}, &gotSibling)).To(Succeed())
+		Expect(gotSibling.Status.Phase).To(Equal(sibling.Status.Phase),
+			"a Phase-level VerifyHalt must never reach a sibling Phase's status — wave-sibling semantics stay untouched (ESC-03)")
+		Expect(gotSibling.Status.Phase).NotTo(Equal(tideprojectv1alpha3.LevelPhaseVerifyHalted))
+
+		var verifierJob batchv1.Job
+		siblingVerifierJobName := podjob.VerifierJobName("phase", string(gotSibling.UID), 1)
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: siblingVerifierJobName, Namespace: "default"}, &verifierJob)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "the sibling Phase must never have a verifier Job dispatched against it")
+	})
+})
