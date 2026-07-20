@@ -1728,6 +1728,14 @@ func (r *PlanReconciler) dispatchPlanRepair(ctx context.Context, plan *tideproje
 	applyPlanLoopStatus(plan, out, "") // loop continues: ExitReason stays empty
 	plan.Status.LoopStatus.Iteration++
 	plan.Status.Phase = ""
+	// WR-03: disarm wave materialization for the re-plan window. Leaving
+	// ValidationState=="Validated" while the just-deleted child Tasks are still
+	// terminating lets reconcileWaveMaterialization (gated on Validated) derive
+	// waves and materialize Wave CRs over vanishing Tasks — transient churn that
+	// self-heals but briefly desyncs the wave view. The fresh planner attempt's
+	// handlePlannerJobCompletion re-stamps Validated (the same seam that armed
+	// it originally, :860) before waves should proceed.
+	plan.Status.ValidationState = ""
 	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
 		Type:               tideprojectv1alpha3.ConditionReconciling,
 		Status:             metav1.ConditionTrue,

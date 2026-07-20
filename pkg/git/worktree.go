@@ -104,9 +104,11 @@ func AddWorktree(repoPath, taskUID, runBranch string) (string, error) {
 // mirrors [AddWorktree]: <parent-of-repoPath>/worktrees/<uid>/.
 //
 // Idempotent: a re-call for a uid whose worktree dir already resolves as a
-// valid git worktree (`git -C <dir> rev-parse --git-dir` succeeds) returns
-// the existing dir with nil error and does not re-run `git worktree add` —
-// safe for a retried init container (Phase 52 D-07 wiring).
+// valid git worktree (`git -C <dir> rev-parse --git-dir` succeeds) does not
+// re-run `git worktree add`; instead it re-points the existing checkout,
+// detached, at the current runBranch tip (WR-02) so a re-verify after the tip
+// advanced never silently reuses a stale checkout — safe for a retried init
+// container (Phase 52 D-07 wiring).
 func AddReadOnlyWorktree(repoPath, uid, runBranch string) (string, error) {
 	if repoPath == "" {
 		return "", fmt.Errorf("git worktree: empty repoPath")
@@ -121,8 +123,17 @@ func AddReadOnlyWorktree(repoPath, uid, runBranch string) (string, error) {
 	worktreeDir := filepath.Join(filepath.Dir(repoPath), "worktrees", uid)
 
 	// Idempotency pre-check: a resolvable .git in worktreeDir means a prior
-	// (possibly retried) call already provisioned this checkout.
+	// (possibly retried) call already provisioned this checkout. Re-point it
+	// detached at the current runBranch tip before returning (WR-02): a linked
+	// worktree shares the bare repo's refs, so <runBranch> resolves to the live
+	// tip — a no-op when already current, a correction if the tip advanced
+	// since the checkout was created. Prevents silently verifying stale content
+	// on any re-verify at a moved tip.
 	if err := exec.Command("git", "-C", worktreeDir, "rev-parse", "--git-dir").Run(); err == nil {
+		repoint := exec.Command("git", "-C", worktreeDir, "checkout", "--detach", runBranch)
+		if out, cErr := repoint.CombinedOutput(); cErr != nil {
+			return "", fmt.Errorf("git worktree re-point %s @ %s: %w: %s", uid, runBranch, cErr, string(out))
+		}
 		return worktreeDir, nil
 	}
 

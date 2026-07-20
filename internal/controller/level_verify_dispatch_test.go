@@ -676,6 +676,12 @@ var _ = Describe("LevelVerify: Phase/Milestone/Project pre-Succeeded verify disp
 			Verdict:     &pkgdispatch.GateDecision{Verdict: pkgdispatch.VerdictApproved, Summary: "project outcome verified"},
 		})
 		completeLevelVerifierJob(ctx, "project", string(project.UID), 1)
+		// The APPROVED fall-through reads the verifier Job's terminal status via
+		// the cached client; wait for the completion patch to propagate to the
+		// cache before asserting, or checkProjectComplete can race it and stay in
+		// Verifying (the 52-09 waitForJobTerminalCacheSync idiom for this exact
+		// status-only-mutation-on-an-already-cached-object race).
+		waitForJobTerminalCacheSync(ctx, verifierJobName, "default")
 
 		handled2, _, complete2, err2 := r.checkProjectComplete(ctx, project)
 		Expect(err2).NotTo(HaveOccurred())

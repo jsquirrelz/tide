@@ -260,6 +260,18 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 		if handled, res, vErr := maybeRunLevelVerify(ctx, r.Client, r.Scheme, r.Deps, project, r.milestoneLevelVerifyTarget(ms, project)); handled {
 			return res, vErr
 		}
+		// Phase 52 WR-01: mirror the synchronous detected-children path
+		// (handleJobCompletion, :903/:934) — an APPROVED verify lands here on
+		// the async verifier-completion reconcile, so issue the boundary push
+		// before succeeding or a contract-bearing Milestone would publish
+		// nothing at its verified boundary. Idempotent (project-UID-keyed +
+		// existence-gated), so re-entry is safe.
+		if err := r.maybeTriggerBoundaryPush(ctx, ms, project); err != nil {
+			if errors.Is(err, errGitWriterBusy) {
+				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+			}
+			return ctrl.Result{}, err
+		}
 		return r.patchMilestoneSucceeded(ctx, ms)
 	}
 

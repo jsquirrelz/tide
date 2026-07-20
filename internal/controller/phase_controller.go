@@ -252,6 +252,20 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 		if handled, res, vErr := maybeRunLevelVerify(ctx, r.Client, r.Scheme, r.Deps, project, r.phaseLevelVerifyTarget(ctx, ph, project)); handled {
 			return res, vErr
 		}
+		// Phase 52 WR-01: an APPROVED verify returns handled=false and lands
+		// here on the async verifier-completion reconcile — the synchronous
+		// detected-children path issues maybeTriggerBoundaryPush before
+		// succeeding (handleJobCompletion, :833), but that path returned early
+		// when it dispatched the verifier, so without this the contract-bearing
+		// clean-APPROVED case would succeed without ever publishing its verified
+		// boundary (the non-contract path always does). The push is
+		// project-UID-keyed + existence-gated (idempotent), so re-entry is safe.
+		if err := r.maybeTriggerBoundaryPush(ctx, ph, project); err != nil {
+			if errors.Is(err, errGitWriterBusy) {
+				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+			}
+			return ctrl.Result{}, err
+		}
 		return r.patchPhaseSucceeded(ctx, ph)
 	}
 
