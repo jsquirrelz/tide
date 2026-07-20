@@ -1070,12 +1070,44 @@ func TestBuildJobSpec_TraceparentEnvPresentWhenSet(t *testing.T) {
 func TestBuildJobSpec_Verifier_NameUsesVerifierJobName(t *testing.T) {
 	opts := buildVerifierTestOptions()
 	job := BuildJobSpec(opts)
-	want := VerifierJobName(opts.Task.UID, opts.Attempt)
+	want := VerifierJobName(opts.Level, string(opts.ParentObj.GetUID()), opts.Attempt)
 	if job.Name != want {
 		t.Errorf("verifier job.Name = %q; want %q", job.Name, want)
 	}
 	if job.Name == JobName(opts.Task.UID, opts.Attempt) {
 		t.Error("verifier job.Name collides with the executor's JobName form")
+	}
+}
+
+// TestBuildJobSpec_Verifier_NonTaskParentObj_NoPanic proves the Pitfall-1
+// nil-panic regression fix (RESEARCH.md Pitfall 1): a JobKindVerifier
+// dispatch for a non-Task level (Task: nil, ParentObj: a Plan) must build
+// successfully — not panic on a nil opts.Task dereference — and stamp
+// tideproject.k8s/level with the dispatched level.
+func TestBuildJobSpec_Verifier_NonTaskParentObj_NoPanic(t *testing.T) {
+	opts := buildVerifierTestOptions()
+	plan := &tidev1alpha3.Plan{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "plan-alpha",
+			Namespace: "default",
+			UID:       types.UID("plan-uid-test"),
+		},
+	}
+	opts.Task = nil
+	opts.ParentObj = plan
+	opts.Level = "plan"
+
+	job := BuildJobSpec(opts) // must not panic
+
+	wantName := VerifierJobName("plan", string(plan.UID), opts.Attempt)
+	if job.Name != wantName {
+		t.Errorf("verifier job.Name = %q; want %q", job.Name, wantName)
+	}
+	if got := job.Labels["tideproject.k8s/level"]; got != "plan" {
+		t.Errorf("verifier job label level = %q; want \"plan\"", got)
+	}
+	if got := job.Labels["tideproject.k8s/plan-uid"]; got != string(plan.UID) {
+		t.Errorf("verifier job label plan-uid = %q; want %q", got, plan.UID)
 	}
 }
 
