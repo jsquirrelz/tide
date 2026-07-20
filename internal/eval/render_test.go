@@ -185,9 +185,13 @@ func TestNoMapInterpolation(t *testing.T) {
 					"nondeterminism — add stable-key-order serialization per PROMPT-05 "+
 					"before using .Params in a template", tc.name)
 			}
-			// Assert no {{range}} action — a range over a map produces
-			// nondeterministic key ordering in Go text/template output.
-			if strings.Contains(text, "{{range") || strings.Contains(text, "{{ range") {
+			// Assert no {{range}} action over anything but the one known-safe
+			// slice field — a range over a map produces nondeterministic key
+			// ordering in Go text/template output. {{range .RepairFindings}}
+			// (plan_planner.tmpl, Phase 52 D-04) ranges []RepairFinding, a
+			// slice, not a map, so it is explicitly excluded from this guard.
+			withoutSafeRanges := strings.ReplaceAll(text, "{{range .RepairFindings}}", "")
+			if strings.Contains(withoutSafeRanges, "{{range") || strings.Contains(withoutSafeRanges, "{{ range") {
 				t.Errorf("template %s contains a {{range}} action; if this iterates a "+
 					"map, key-order nondeterminism contaminates the stable prefix — "+
 					"verify the range target is a slice (safe) or add stable-key-order "+
