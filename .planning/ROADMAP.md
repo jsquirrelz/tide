@@ -179,7 +179,37 @@ Plans:
   2. Phase/Milestone/Project run with `maxIterations:0` — any verify finding at these levels escalates straight to `requireApproval` rather than auto-repairing, because these levels close on their observable outcome, not task-completion.
   3. Gate policy is resolved from the loop-level field on `LoopPolicy`, not from CRD kind/hierarchy position — one resolver function serves all levels.
 
-**Plans**: TBD
+**Plans:** 11 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 52-01-PLAN.md — CRD schema: LoopLevel enum + LoopPolicy.Level, Plan.Spec.Verification + per-status LoopStatus embeds, ProjectSpec per-level VerificationDefaults (D-01/D-02/D-06)
+- [ ] 52-02-PLAN.md — podjob verifier generalization: JobKindVerifier → ParentObj, VerifierJobName(level, parentUID, attempt) (Pitfall 1)
+- [ ] 52-03-PLAN.md — Four <level>_verifier.tmpl templates + plan_planner.tmpl RepairFindings block + PromptTemplateVersion v5 (D-09/D-04)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 52-04-PLAN.md — ResolveLoopPolicy resolver + SC3 static guard + PlannerReconcilerDeps VerifierImage/Reservations plumbing (D-02)
+- [ ] 52-05-PLAN.md — Read-only detached worktree provisioning: pkg/git helper + tide-push checkout mode + verifier init container (Pitfall 2)
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 52-06-PLAN.md — Task migration onto the resolver + shared exhaustVerifyLoop onExhaustion split + findAwaitingProject (D-08)
+
+**Wave 4** *(blocked on Wave 3)*
+
+- [ ] 52-07-PLAN.md — Plan-check dispatch/consume: Verifying sub-state + child-dispatch hold + D-10 rails (D-03)
+- [ ] 52-08-PLAN.md — Shared level-verify machinery (level_verify.go) for Phase/Milestone/Project (D-07)
+
+**Wave 5** *(blocked on Wave 4)*
+
+- [ ] 52-09-PLAN.md — Re-plan mechanics: repairOrHaltPlan stall detection + delete-then-recreate + findings-seeded fresh attempt (D-04/D-05/D-06)
+- [ ] 52-10-PLAN.md — Wire the three pre-Succeeded seams + LevelVerify specs + ESC-03 regression (SC2)
+
+**Wave 6** *(blocked on Wave 5)*
+
+- [ ] 52-11-PLAN.md — kind worktree live proof (non-billable) + operator-gated billable loop checkpoint (51-08 precedent)
 
 ### Phase 53: Chart Config + Dashboard Provenance Surfacing
 
