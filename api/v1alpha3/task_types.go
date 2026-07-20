@@ -135,9 +135,22 @@ type VerificationSpec struct {
 	// MaxIterations bounds the Task loop's repeat policy: the maximum
 	// number of evaluator-driven fresh attempts the loop may dispatch
 	// before halting (D-07/TASK-05).
+	//
+	// NOT omitempty, with an explicit default of 0: 0 is a MEANINGFUL value
+	// (the Phase/Milestone/Project escalate-levels resolve to maxIterations:0),
+	// not "unset". With omitempty a stored 0 vanishes on a controller's Go
+	// round-trip Update() while the apiserver's stored copy keeps it, so the
+	// VerificationSpec CEL `self == oldSelf` immutability rule below sees
+	// present-0 vs absent and fails "verification is immutable once Locked" on
+	// every reconcile — blocking a Locked phase/milestone/project contract
+	// from ever progressing (a live-proof finding; envtest's fake client does
+	// not enforce CEL). The default forces the apiserver to store a present 0
+	// even when the field is omitted at apply time, so stored and
+	// round-tripped forms are byte-identical and the rule holds.
 	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:default=0
 	// +optional
-	MaxIterations int32 `json:"maxIterations,omitempty"`
+	MaxIterations int32 `json:"maxIterations"`
 
 	// OnExhaustion declares the bounded exit path once MaxIterations is
 	// reached without an APPROVED evaluation. In Phase 51 BOTH enum values
