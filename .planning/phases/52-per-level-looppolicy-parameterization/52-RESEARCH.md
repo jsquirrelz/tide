@@ -891,9 +891,15 @@ dead field (`OnExhaustion`).
 genuinely open design choices this research could evidence but not fully
 resolve from existing code alone.
 
-## Open Questions
+## Open Questions (RESOLVED at plan time — 2026-07-20)
+
+> All three questions were resolved when the 52-* plans were authored; each
+> entry below carries its resolution. Kept for the audit trail.
 
 1. **What image runs the new level-verify worktree-checkout init container?**
+   - **RESOLVED → 52-05:** reuse the `tide-push` image with a new checkout
+     mode ("RESEARCH Open Question 1's cheaper option") wired through the
+     existing `BuildOptions`/`BuildJobSpec` init-container composition point.
    - What we know: `pkg/git.AddWorktree` already exists (Go, uses the
      system `git` CLI) and is currently only invoked from
      `cmd/claude-subagent` (the executor image) via `internal/harness`. The
@@ -909,6 +915,10 @@ resolve from existing code alone.
      composition point.
 
 2. **Does the Task verifier's Job name change shape?**
+   - **RESOLVED → 52-02:** yes — three-segment
+     `tide-verifier-<level>-<parentUID>-<attempt>`; the plan-time grep
+     confirmed all existing Job-name assertions are podjob-local only, so
+     no compat shim / `level=="task"` special case is needed.
    - What we know: `VerifierJobName(taskUID, attempt)` → `tide-verifier-
      <taskUID>-<attempt>` today; the recommended generalization is
      `VerifierJobName(level, parentUID, attempt)` → `tide-verifier-<level>-
@@ -925,6 +935,10 @@ resolve from existing code alone.
 
 3. **Does `Plan.Status.LoopStatus.Iteration` double as the planner-attempt
    counter, or are they two separate numbers?**
+   - **RESOLVED → 52-09:** one number for Plan — `LoopStatus.Iteration`
+     doubles as the planner-attempt counter, since Plan planner Jobs have
+     no pre-existing infra-retry path to preserve (unlike Task's
+     Attempt/Iteration split).
    - What we know: D-06 locks `LoopStatus.Iteration` to "quality re-plans
      only," explicitly distinct from planner infra-retry identity. The
      Job-name attempt number (`tide-plan-<uid>-<attempt>`) has historically
