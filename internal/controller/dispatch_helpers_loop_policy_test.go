@@ -239,8 +239,8 @@ func TestNoDirectVerificationPolicyReads(t *testing.T) {
 func stripGoLineComments(src string) string {
 	lines := strings.Split(src, "\n")
 	for i, line := range lines {
-		if idx := strings.Index(line, "//"); idx >= 0 {
-			lines[i] = line[:idx]
+		if before, _, found := strings.Cut(line, "//"); found {
+			lines[i] = before
 		}
 	}
 	return strings.Join(lines, "\n")
