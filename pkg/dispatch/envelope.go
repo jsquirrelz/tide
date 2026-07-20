@@ -60,7 +60,11 @@ type EnvelopeIn struct {
 	Role string `json:"role"`
 
 	// Level is the hierarchy level this task operates at:
-	// "milestone" | "phase" | "plan" | "task".
+	// "project" | "milestone" | "phase" | "plan" | "task". "project" was
+	// missing from this list pre-Phase-52 even though it was already a live
+	// dispatch value (project_controller.go's own project-level planner
+	// dispatch sets Level: "project") and podjob.BuildOptions.Level's own doc
+	// comment correctly lists all five — this comment was simply stale.
 	Level string `json:"level"`
 
 	// Prompt is the full prompt body the subagent should act on.

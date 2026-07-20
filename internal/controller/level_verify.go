@@ -115,6 +115,47 @@ type levelVerifierRenderData struct {
 	LevelGoal string
 }
 
+// levelVerifyDecisionKind is the outcome of levelVerifyDecision's pure guard
+// evaluation (Task 2 — extracted so the guard is directly unit-testable
+// without a fake client.Client/context, per the plan's explicit "structure
+// the pure guard as a small testable function" instruction).
+type levelVerifyDecisionKind int
+
+const (
+	// levelVerifyInactive: no resolved-and-Locked contract for this level —
+	// the off-switch; caller proceeds to patch{Level}Succeeded unchanged.
+	levelVerifyInactive levelVerifyDecisionKind = iota
+	// levelVerifyConverged: LoopStatus.ExitReason is already set — the
+	// post-approval convergence guard (T-52-25); caller proceeds to
+	// patch{Level}Succeeded unchanged.
+	levelVerifyConverged
+	// levelVerifyNeedsDispatch: active, not concluded, not yet
+	// Phase==Verifying — patch the transition and dispatch a fresh verifier
+	// Job.
+	levelVerifyNeedsDispatch
+	// levelVerifyAlreadyVerifying: active, not concluded, already
+	// Phase==Verifying — Get the deterministic Job and branch on its state.
+	levelVerifyAlreadyVerifying
+)
+
+// levelVerifyDecision is the pure guard maybeRunLevelVerify evaluates before
+// any I/O: given the resolved VerificationSpec (ResolveVerificationSpec is
+// itself pure — no ctx/client params), the level's current LoopStatus, and
+// its current phase string, decides which of the four mutually-exclusive
+// branches applies. nil-safe on loopStatus.
+func levelVerifyDecision(spec tideprojectv1alpha3.VerificationSpec, loopStatus *tideprojectv1alpha3.LoopStatus, phase string) levelVerifyDecisionKind {
+	if spec.GateCommand == "" || spec.Phase != verificationPhaseLocked {
+		return levelVerifyInactive
+	}
+	if loopStatus != nil && loopStatus.ExitReason != "" {
+		return levelVerifyConverged
+	}
+	if phase != tideprojectv1alpha3.LevelPhaseVerifying {
+		return levelVerifyNeedsDispatch
+	}
+	return levelVerifyAlreadyVerifying
+}
+
 // maybeRunLevelVerify is the single entry point the pre-Succeeded seams call
 // (phase_controller.go/milestone_controller.go/project_controller.go, wired
 // in 52-10) immediately before they would otherwise call
@@ -133,20 +174,16 @@ func maybeRunLevelVerify(
 	target levelVerifyTarget,
 ) (handled bool, res ctrl.Result, err error) {
 	spec := ResolveVerificationSpec(project, nil, nil, target.Level)
-	if spec.GateCommand == "" || spec.Phase != verificationPhaseLocked {
-		// Not active: no authored-and-Locked contract anywhere in the D-01
-		// Task > Plan > Project precedence chain for this level. Absence of
-		// config is the off-switch (today's behavior, unchanged).
-		return false, ctrl.Result{}, nil
-	}
-	if target.LoopStatus != nil && target.LoopStatus.ExitReason != "" {
-		// Post-approval convergence guard (T-52-25): an already-concluded
-		// loop (APPROVED, or an operator's approve-resume accepting a prior
-		// escalation) never re-dispatches a verifier.
-		return false, ctrl.Result{}, nil
+	phase := ""
+	if target.PhasePtr != nil {
+		phase = *target.PhasePtr
 	}
 
-	if target.PhasePtr == nil || *target.PhasePtr != tideprojectv1alpha3.LevelPhaseVerifying {
+	switch levelVerifyDecision(spec, target.LoopStatus, phase) {
+	case levelVerifyInactive, levelVerifyConverged:
+		return false, ctrl.Result{}, nil
+
+	case levelVerifyNeedsDispatch:
 		if _, pErr := patchLevelStatus(ctx, c, target.Obj, target.Conditions, target.PhasePtr,
 			tideprojectv1alpha3.LevelPhaseVerifying, false, ctrl.Result{},
 			metav1.Condition{
@@ -160,26 +197,28 @@ func maybeRunLevelVerify(
 		}
 		result, dErr := dispatchLevelVerifier(ctx, c, scheme, deps, project, target, spec)
 		return true, result, dErr
-	}
 
-	jobName := podjob.VerifierJobName(target.Level, string(target.Obj.GetUID()), 1)
-	var job batchv1.Job
-	if gErr := c.Get(ctx, client.ObjectKey{Namespace: target.Obj.GetNamespace(), Name: jobName}, &job); gErr != nil {
-		if !apierrors.IsNotFound(gErr) {
-			return true, ctrl.Result{}, gErr
+	default: // levelVerifyAlreadyVerifying
+		jobName := podjob.VerifierJobName(target.Level, string(target.Obj.GetUID()), 1)
+		var job batchv1.Job
+		if gErr := c.Get(ctx, client.ObjectKey{Namespace: target.Obj.GetNamespace(), Name: jobName}, &job); gErr != nil {
+			if !apierrors.IsNotFound(gErr) {
+				return true, ctrl.Result{}, gErr
+			}
+			// NotFound is a legitimate "cap-hit deferred the dispatch" state
+			// (mirrors checkVerifyingState's identical NotFound-retry
+			// posture) — retry dispatchLevelVerifier; VerifierJobName is
+			// deterministic and AlreadyExists on Create is treated as
+			// success (SUB-03).
+			result, dErr := dispatchLevelVerifier(ctx, c, scheme, deps, project, target, spec)
+			return true, result, dErr
 		}
-		// NotFound is a legitimate "cap-hit deferred the dispatch" state
-		// (mirrors checkVerifyingState's identical NotFound-retry posture) —
-		// retry dispatchLevelVerifier; VerifierJobName is deterministic and
-		// AlreadyExists on Create is treated as success (SUB-03).
-		result, dErr := dispatchLevelVerifier(ctx, c, scheme, deps, project, target, spec)
-		return true, result, dErr
+		if isJobTerminal(&job) {
+			return handleLevelVerifierCompletion(ctx, c, deps, project, target, &job)
+		}
+		// Still running: nothing to do this reconcile.
+		return true, ctrl.Result{}, nil
 	}
-	if isJobTerminal(&job) {
-		return handleLevelVerifierCompletion(ctx, c, deps, project, target, &job)
-	}
-	// Still running: nothing to do this reconcile.
-	return true, ctrl.Result{}, nil
 }
 
 // dispatchLevelVerifier creates the independent, read-only verifier Job for
