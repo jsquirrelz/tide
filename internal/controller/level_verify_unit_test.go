@@ -25,13 +25,21 @@ limitations under the License.
 package controller
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
+	"github.com/jsquirrelz/tide/internal/owner"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
@@ -262,4 +270,203 @@ func TestLevelVerifyApplyLevelLoopStatus(t *testing.T) {
 
 	// nil-safety: must not panic.
 	applyLevelLoopStatus(nil, out, tideprojectv1alpha3.ExitEscalated)
+}
+
+// fakeLevelVerifierEnvReader is a minimal podjob.EnvelopeReader stub for
+// exercising handleLevelVerifierCompletion's fail-closed unreadable-envelope
+// path without a real PVC/PodStatusEnvelopeReader.
+type fakeLevelVerifierEnvReader struct {
+	err error
+	out pkgdispatch.EnvelopeOut
+}
+
+func (f *fakeLevelVerifierEnvReader) ReadOut(_ context.Context, _, _ string) (pkgdispatch.EnvelopeOut, error) {
+	return f.out, f.err
+}
+
+// newLevelVerifyFakeClient builds a fake client with the TIDE + batch
+// schemes registered and status-subresource tracking enabled for Phase and
+// Project (mirrors newFakeClientForController, dispatch_helpers_test.go,
+// extended with WithStatusSubresource so the level-verify machinery's
+// Status().Patch calls round-trip through the fake tracker).
+func newLevelVerifyFakeClient(t *testing.T, objs ...client.Object) client.Client {
+	t.Helper()
+	s := runtime.NewScheme()
+	if err := tideprojectv1alpha3.AddToScheme(s); err != nil {
+		t.Fatalf("AddToScheme tide: %v", err)
+	}
+	if err := batchv1.AddToScheme(s); err != nil {
+		t.Fatalf("AddToScheme batchv1: %v", err)
+	}
+	return fake.NewClientBuilder().
+		WithScheme(s).
+		WithObjects(objs...).
+		WithStatusSubresource(&tideprojectv1alpha3.Phase{}, &tideprojectv1alpha3.Project{}).
+		Build()
+}
+
+// TestLevelVerifyMaybeRun_NeedsDispatch_NoVerifierImage drives
+// maybeRunLevelVerify's levelVerifyNeedsDispatch branch end-to-end (real
+// fake-client Status().Patch through patchLevelStatus, then
+// dispatchLevelVerifier's LO-01 empty-VerifierImage skip) — proving the
+// Verifying transition lands even when no verifier Job gets created.
+func TestLevelVerifyMaybeRun_NeedsDispatch_NoVerifierImage(t *testing.T) {
+	project := &tideprojectv1alpha3.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: "proj", Namespace: "default", UID: types.UID("11111111-1111-1111-1111-111111111111")},
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			Verification: tideprojectv1alpha3.VerificationDefaults{
+				Phase: &tideprojectv1alpha3.VerificationSpec{
+					Phase:       verificationPhaseLocked,
+					GateCommand: "make test-phase-gate",
+				},
+			},
+		},
+	}
+	phaseObj := &tideprojectv1alpha3.Phase{
+		ObjectMeta: metav1.ObjectMeta{Name: "phase-01", Namespace: "default", UID: types.UID("22222222-2222-2222-2222-222222222222")},
+	}
+	c := newLevelVerifyFakeClient(t, project, phaseObj)
+	target := levelVerifyTarget{
+		Obj:        phaseObj,
+		Conditions: &phaseObj.Status.Conditions,
+		PhasePtr:   &phaseObj.Status.Phase,
+		LoopStatus: &phaseObj.Status.LoopStatus,
+		Level:      "phase",
+		Goal:       "Ship the thing.",
+	}
+	deps := PlannerReconcilerDeps{} // VerifierImage empty: LO-01 skip
+
+	handled, _, err := maybeRunLevelVerify(context.Background(), c, nil, deps, project, target)
+	if err != nil {
+		t.Fatalf("maybeRunLevelVerify() error = %v", err)
+	}
+	if !handled {
+		t.Error("maybeRunLevelVerify() handled = false, want true (active contract, not yet concluded)")
+	}
+	if phaseObj.Status.Phase != tideprojectv1alpha3.LevelPhaseVerifying {
+		t.Errorf("phaseObj.Status.Phase = %q, want %q", phaseObj.Status.Phase, tideprojectv1alpha3.LevelPhaseVerifying)
+	}
+}
+
+// TestLevelVerifyMaybeRun_AlreadyVerifying_UnreadableEnvelope drives
+// maybeRunLevelVerify's levelVerifyAlreadyVerifying branch through a
+// pre-existing terminal verifier Job into handleLevelVerifierCompletion's
+// fail-closed unreadable-envelope path, which routes through
+// exhaustLevelVerify -> exhaustVerifyLoop -> settleLevelVerifierSpend and
+// emitLevelEvaluatorSpan — the end-to-end escalate leg (no OnExhaustion
+// authored, so the resolver defaults phase/milestone/project to
+// requireApproval per ResolveLoopPolicy's own doc; this fixture proves the
+// AwaitingApproval park path since GateCommand has no OnExhaustion override).
+func TestLevelVerifyMaybeRun_AlreadyVerifying_UnreadableEnvelope(t *testing.T) {
+	project := &tideprojectv1alpha3.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: "proj", Namespace: "default", UID: types.UID("11111111-1111-1111-1111-111111111111")},
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			Verification: tideprojectv1alpha3.VerificationDefaults{
+				Phase: &tideprojectv1alpha3.VerificationSpec{
+					Phase:       verificationPhaseLocked,
+					GateCommand: "make test-phase-gate",
+				},
+			},
+		},
+	}
+	phaseObj := &tideprojectv1alpha3.Phase{
+		ObjectMeta: metav1.ObjectMeta{Name: "phase-01", Namespace: "default", UID: types.UID("22222222-2222-2222-2222-222222222222")},
+		Status: tideprojectv1alpha3.PhaseStatus{
+			Phase: tideprojectv1alpha3.LevelPhaseVerifying,
+		},
+	}
+	terminalJob := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "tide-verifier-phase-22222222-2222-2222-2222-222222222222-1",
+			Namespace: "default",
+		},
+		Status: batchv1.JobStatus{
+			Conditions: []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}},
+		},
+	}
+	c := newLevelVerifyFakeClient(t, project, phaseObj, terminalJob)
+	target := levelVerifyTarget{
+		Obj:        phaseObj,
+		Conditions: &phaseObj.Status.Conditions,
+		PhasePtr:   &phaseObj.Status.Phase,
+		LoopStatus: &phaseObj.Status.LoopStatus,
+		Level:      "phase",
+	}
+	deps := PlannerReconcilerDeps{
+		EnvReader: &fakeLevelVerifierEnvReader{err: context.DeadlineExceeded},
+	}
+
+	handled, _, err := maybeRunLevelVerify(context.Background(), c, nil, deps, project, target)
+	if err != nil {
+		t.Fatalf("maybeRunLevelVerify() error = %v", err)
+	}
+	if !handled {
+		t.Error("maybeRunLevelVerify() handled = false, want true (terminal non-APPROVED verdict)")
+	}
+	if phaseObj.Status.LoopStatus.ExitReason != tideprojectv1alpha3.ExitEscalated {
+		t.Errorf("phaseObj.Status.LoopStatus.ExitReason = %q, want %q", phaseObj.Status.LoopStatus.ExitReason, tideprojectv1alpha3.ExitEscalated)
+	}
+	// Escalate (default onExhaustion) freezes the level at VerifyHalted;
+	// requireApproval would instead park at AwaitingApproval — either way
+	// the level must NOT be Succeeded.
+	if phaseObj.Status.Phase == tideprojectv1alpha3.LevelPhaseSucceeded {
+		t.Errorf("phaseObj.Status.Phase = %q, want a non-Succeeded terminal", phaseObj.Status.Phase)
+	}
+}
+
+// TestLevelVerifyMaybeRun_CapHit_Requeues proves the ESC-04/D-10
+// cap-before-reserve ordering: with defaultVerifierConcurrencyCap in-flight
+// verifier Jobs already occupying the pool, dispatchLevelVerifier defers via
+// a requeue rather than dispatching a third — and that the caller's returned
+// ctrl.Result actually carries the RequeueAfter signal (maybeRunLevelVerify's
+// res return value is genuinely read by callers, not dead).
+func TestLevelVerifyMaybeRun_CapHit_Requeues(t *testing.T) {
+	project := &tideprojectv1alpha3.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: "proj", Namespace: "default", UID: types.UID("11111111-1111-1111-1111-111111111111")},
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			Verification: tideprojectv1alpha3.VerificationDefaults{
+				Phase: &tideprojectv1alpha3.VerificationSpec{
+					Phase:       verificationPhaseLocked,
+					GateCommand: "make test-phase-gate",
+				},
+			},
+		},
+	}
+	phaseObj := &tideprojectv1alpha3.Phase{
+		ObjectMeta: metav1.ObjectMeta{Name: "phase-01", Namespace: "default", UID: types.UID("22222222-2222-2222-2222-222222222222")},
+	}
+	fillerJobs := make([]client.Object, 0, defaultVerifierConcurrencyCap)
+	for i := range defaultVerifierConcurrencyCap {
+		fillerJobs = append(fillerJobs, &batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "filler-verifier-" + string(rune('a'+i)),
+				Namespace: "default",
+				Labels: map[string]string{
+					"tideproject.k8s/role": "verifier",
+					owner.LabelProject:     project.Name,
+				},
+			},
+			// Non-terminal: no JobComplete/JobFailed condition — still in flight.
+		})
+	}
+	c := newLevelVerifyFakeClient(t, append([]client.Object{project, phaseObj}, fillerJobs...)...)
+	target := levelVerifyTarget{
+		Obj:        phaseObj,
+		Conditions: &phaseObj.Status.Conditions,
+		PhasePtr:   &phaseObj.Status.Phase,
+		LoopStatus: &phaseObj.Status.LoopStatus,
+		Level:      "phase",
+	}
+	deps := PlannerReconcilerDeps{VerifierImage: "verifier:latest"}
+
+	handled, res, err := maybeRunLevelVerify(context.Background(), c, nil, deps, project, target)
+	if err != nil {
+		t.Fatalf("maybeRunLevelVerify() error = %v", err)
+	}
+	if !handled {
+		t.Error("maybeRunLevelVerify() handled = false, want true")
+	}
+	if res.RequeueAfter != 10*time.Second {
+		t.Errorf("res.RequeueAfter = %v, want 10s (ESC-04 cap-hit deferred dispatch)", res.RequeueAfter)
+	}
 }

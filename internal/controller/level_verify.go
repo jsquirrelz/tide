@@ -454,12 +454,12 @@ func handleLevelVerifierCompletion(
 	if rErr != nil {
 		synthOut := synthesizeNoLevelVerifyEnvelopeOut(target.Obj, verifierJob)
 		emitLevelEvaluatorSpan(ctx, target, project, deps.HelmProviderDefaults, verifierJob, synthOut, false)
-		result, hErr := exhaustLevelVerify(ctx, c, deps, project, target, synthOut, rErr.Error(), "VerifierEnvelopeUnreadable", tideprojectv1alpha3.ExitEscalated)
+		result, hErr := exhaustLevelVerify(ctx, c, deps, project, target, synthOut, rErr.Error(), "VerifierEnvelopeUnreadable")
 		return true, result, hErr
 	}
 	if out.Verdict == nil {
 		emitLevelEvaluatorSpan(ctx, target, project, deps.HelmProviderDefaults, verifierJob, out, true)
-		result, hErr := exhaustLevelVerify(ctx, c, deps, project, target, out, "verifier envelope carried no verdict (fail-closed BLOCKED)", "VerifierVerdictMissing", tideprojectv1alpha3.ExitEscalated)
+		result, hErr := exhaustLevelVerify(ctx, c, deps, project, target, out, "verifier envelope carried no verdict (fail-closed BLOCKED)", "VerifierVerdictMissing")
 		return true, result, hErr
 	}
 
@@ -473,7 +473,7 @@ func handleLevelVerifierCompletion(
 	// trusting out.Verdict.Verdict's raw decoded string directly.
 	raw, mErr := json.Marshal(out.Verdict)
 	if mErr != nil {
-		result, hErr := exhaustLevelVerify(ctx, c, deps, project, target, out, mErr.Error(), "VerifierVerdictMarshalFailed", tideprojectv1alpha3.ExitEscalated)
+		result, hErr := exhaustLevelVerify(ctx, c, deps, project, target, out, mErr.Error(), "VerifierVerdictMarshalFailed")
 		return true, result, hErr
 	}
 
@@ -482,7 +482,7 @@ func handleLevelVerifierCompletion(
 		if hasDeterministicFailure(out.Verdict) {
 			// D-06 defence-in-depth: a red gate-command Finding dominates
 			// even a top-level APPROVED verdict, controller-side.
-			result, hErr := exhaustLevelVerify(ctx, c, deps, project, target, out, out.Verdict.Summary, "VerifyBlocked", tideprojectv1alpha3.ExitEscalated)
+			result, hErr := exhaustLevelVerify(ctx, c, deps, project, target, out, out.Verdict.Summary, "VerifyBlocked")
 			return true, result, hErr
 		}
 		base, ok := target.Obj.DeepCopyObject().(client.Object)
@@ -500,10 +500,10 @@ func handleLevelVerifierCompletion(
 		// convergence guard in maybeRunLevelVerify.
 		return false, ctrl.Result{}, nil
 	case pkgdispatch.VerdictRepairable:
-		result, hErr := exhaustLevelVerify(ctx, c, deps, project, target, out, out.Verdict.Summary, "VerifyRepairable", tideprojectv1alpha3.ExitEscalated)
+		result, hErr := exhaustLevelVerify(ctx, c, deps, project, target, out, out.Verdict.Summary, "VerifyRepairable")
 		return true, result, hErr
 	default: // pkgdispatch.VerdictBlocked, and ClassifyVerdict's own fail-closed default.
-		result, hErr := exhaustLevelVerify(ctx, c, deps, project, target, out, out.Verdict.Summary, "VerifyBlocked", tideprojectv1alpha3.ExitEscalated)
+		result, hErr := exhaustLevelVerify(ctx, c, deps, project, target, out, out.Verdict.Summary, "VerifyBlocked")
 		return true, result, hErr
 	}
 }
@@ -521,6 +521,12 @@ func handleLevelVerifierCompletion(
 // BEFORE this function's mutations, so those mutations must land in a
 // separate patch or they would be silently dropped (see exhaustVerifyLoop's
 // own doc comment).
+//
+// exitReason is always tideprojectv1alpha3.ExitEscalated — unlike Task's
+// haltVerify (which also reaches ExitIterationsExhausted via repairOrHalt),
+// D-07's MaxIterations:0 clamp means these levels have no iteration to
+// exhaust: every non-APPROVED terminal here IS an immediate escalation, so
+// the exit reason is hardcoded rather than threaded as a parameter.
 func exhaustLevelVerify(
 	ctx context.Context,
 	c client.Client,
@@ -529,8 +535,8 @@ func exhaustLevelVerify(
 	target levelVerifyTarget,
 	out pkgdispatch.EnvelopeOut,
 	message, conditionReason string,
-	exitReason tideprojectv1alpha3.ExitReason,
 ) (ctrl.Result, error) {
+	const exitReason = tideprojectv1alpha3.ExitEscalated
 	var completedAt time.Time
 	if !out.CompletedAt.IsZero() {
 		completedAt = out.CompletedAt
