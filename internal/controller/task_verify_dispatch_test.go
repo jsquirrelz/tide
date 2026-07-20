@@ -38,6 +38,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -46,6 +47,7 @@ import (
 	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
+	"github.com/jsquirrelz/tide/internal/gates"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
@@ -547,5 +549,173 @@ var _ = Describe("Task loop: verifier dispatch (Phase 51 Plan 06, VerifierDispat
 
 		Expect(r.Deps.Reservations.TotalReserved()).To(Equal(int64(0)),
 			"the executor's own reservation must settle (not leak) when the verifier dispatch defers on the cap, per Pitfall 6")
+	})
+})
+
+// countTaskJobs lists every Job (executor + verifier) carrying the given
+// Task's UID label, so a spec can assert the Job count is unchanged across
+// an approve-driven reconcile (T-52-15: no resurrect-the-executor Job).
+func countTaskJobs(ctx context.Context, taskUID string) int {
+	var jobs batchv1.JobList
+	ExpectWithOffset(1, k8sClient.List(ctx, &jobs, client.InNamespace("default"),
+		client.MatchingLabels{"tideproject.k8s/task-uid": taskUID})).To(Succeed())
+	return len(jobs.Items)
+}
+
+var _ = Describe("Task loop: onExhaustion differentiation at MaxIterations exhaustion (Phase 52 D-08, RequireApproval)", Label("envtest", "phase52", "esc01", "requireapproval"), func() {
+	ctx := context.Background()
+
+	It("requireApproval parks at AwaitingApproval (no project halt), then Succeeds on tide approve with no executor re-dispatch", func() {
+		const projName, planRef, taskName = "ra-proj-park", "ra-plan-park", "ra-task-park"
+		makeProjectForTask(projName)
+		defer cleanupProject(projName)
+
+		envReader := newMapEnvReader()
+		_, task, attempt := driveToVerifying(ctx, envReader, taskName, planRef, projName, tideprojectv1alpha3.VerificationSpec{
+			Phase: "Locked", Version: 1, GateCommand: "make test-verify", MaxIterations: 1, OnExhaustion: "requireApproval",
+		})
+		defer cleanupTask(taskName)
+
+		envReader.SetOut(string(task.UID), pkgdispatch.EnvelopeOut{
+			TaskUID: string(task.UID), ExitCode: 0, Result: "verified", CompletedAt: time.Now(),
+			Verdict: &pkgdispatch.GateDecision{
+				Verdict:  pkgdispatch.VerdictRepairable,
+				Findings: []pkgdispatch.Finding{{Dimension: "correctness", Severity: "advisory"}},
+			},
+		})
+		completeVerifierJob(ctx, task, attempt)
+
+		r := newVerifyDispatchTaskReconciler(envReader)
+		name := types.NamespacedName{Name: taskName, Namespace: "default"}
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Get(ctx, name, task)).To(Succeed())
+		Expect(task.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseAwaitingApproval),
+			"onExhaustion: requireApproval must park the Task, not freeze the project (D-08)")
+		Expect(task.Status.LoopStatus.ExitReason).NotTo(BeEmpty())
+		Expect(task.Status.Attempt).To(Equal(attempt), "an exhausted loop must never mint a further attempt")
+
+		var project tideprojectv1alpha3.Project
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, &project)).To(Succeed())
+		Expect(meta.IsStatusConditionTrue(project.Status.Conditions, tideprojectv1alpha3.ConditionVerifyHalt)).To(BeFalse(),
+			"a requireApproval park must NOT freeze the project via ConditionVerifyHalt — that is the escalate leg's job")
+
+		jobCountBeforeApprove := countTaskJobs(ctx, string(task.UID))
+
+		// tide approve: write the canonical approve-task annotation (same
+		// gates package idiom cmd/tide/approve.go's patchApproveLevel uses).
+		var current tideprojectv1alpha3.Task
+		Expect(k8sClient.Get(ctx, name, &current)).To(Succeed())
+		patch := client.MergeFrom(current.DeepCopy())
+		if current.Annotations == nil {
+			current.Annotations = map[string]string{}
+		}
+		current.Annotations[gates.AnnotationApprovePrefix+"task"] = "true"
+		Expect(k8sClient.Patch(ctx, &current, patch)).To(Succeed())
+
+		// gateChecks' Step 1b reads via r.Client (mgrClient, the CACHED
+		// client) — wait for the informer cache to observe the annotation
+		// before reconciling, or the check races the cache (51-06-SUMMARY.md's
+		// own documented cap-hit-test fix applies here identically).
+		Eventually(func() bool {
+			var t tideprojectv1alpha3.Task
+			if err := mgrClient.Get(ctx, name, &t); err != nil {
+				return false
+			}
+			return gates.CheckApprove(&t, "task")
+		}, 5*time.Second, 50*time.Millisecond).Should(BeTrue())
+
+		// Two logical steps: the first reconcile consumes the annotation and
+		// resumes to Running (consumeApproveAndResume); the second hits the
+		// post-approval sentinel and closes the loop via
+		// markVerifiedSucceeded. Both read/write through r.Client (mgrClient,
+		// the CACHED client) — repeatedly reconciling under Eventually (not a
+		// fixed-count reconcileWithRetry) absorbs the informer-cache
+		// propagation lag between the two steps' own Patch calls, mirroring
+		// this file's waitForJobTerminalInCache idiom.
+		Eventually(func(g Gomega) {
+			_, rErr := r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			g.Expect(rErr).NotTo(HaveOccurred())
+			g.Expect(k8sClient.Get(ctx, name, task)).To(Succeed())
+			g.Expect(task.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseSucceeded))
+		}, 5*time.Second, 50*time.Millisecond).Should(Succeed(),
+			"an approved verify-exhausted Task must proceed to Succeeded — accept-the-findings semantics")
+		Expect(task.Status.LoopStatus.ExitReason).To(Equal(tideprojectv1alpha3.ExitApproved))
+
+		_, hasApprove := task.Annotations[gates.AnnotationApprovePrefix+"task"]
+		Expect(hasApprove).To(BeFalse(), "the one-shot approve annotation must be consumed")
+
+		Expect(countTaskJobs(ctx, string(task.UID))).To(Equal(jobCountBeforeApprove),
+			"the executor must NEVER be re-dispatched after an operator approve-resume (T-52-15)")
+	})
+
+	It("explicit onExhaustion: escalate halts VerifyHalted and stamps project-wide ConditionVerifyHalt", func() {
+		const projName, planRef, taskName = "ra-proj-escalate", "ra-plan-escalate", "ra-task-escalate"
+		makeProjectForTask(projName)
+		defer cleanupProject(projName)
+
+		envReader := newMapEnvReader()
+		_, task, attempt := driveToVerifying(ctx, envReader, taskName, planRef, projName, tideprojectv1alpha3.VerificationSpec{
+			Phase: "Locked", Version: 1, GateCommand: "make test-verify", MaxIterations: 1, OnExhaustion: "escalate",
+		})
+		defer cleanupTask(taskName)
+
+		envReader.SetOut(string(task.UID), pkgdispatch.EnvelopeOut{
+			TaskUID: string(task.UID), ExitCode: 0, Result: "verified", CompletedAt: time.Now(),
+			Verdict: &pkgdispatch.GateDecision{
+				Verdict:  pkgdispatch.VerdictRepairable,
+				Findings: []pkgdispatch.Finding{{Dimension: "correctness", Severity: "advisory"}},
+			},
+		})
+		completeVerifierJob(ctx, task, attempt)
+
+		r := newVerifyDispatchTaskReconciler(envReader)
+		name := types.NamespacedName{Name: taskName, Namespace: "default"}
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Get(ctx, name, task)).To(Succeed())
+		Expect(task.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseVerifyHalted))
+		Expect(task.Status.LoopStatus.ExitReason).To(Equal(tideprojectv1alpha3.ExitIterationsExhausted))
+
+		var project tideprojectv1alpha3.Project
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, &project)).To(Succeed())
+		Expect(meta.IsStatusConditionTrue(project.Status.Conditions, tideprojectv1alpha3.ConditionVerifyHalt)).To(BeTrue(),
+			"onExhaustion: escalate must freeze the project — the Phase 51 shape, now via the explicit value")
+	})
+
+	It("unset onExhaustion defaults to escalate (default-escalate regression pin, D-02)", func() {
+		const projName, planRef, taskName = "ra-proj-default", "ra-plan-default", "ra-task-default"
+		makeProjectForTask(projName)
+		defer cleanupProject(projName)
+
+		envReader := newMapEnvReader()
+		_, task, attempt := driveToVerifying(ctx, envReader, taskName, planRef, projName, tideprojectv1alpha3.VerificationSpec{
+			Phase: "Locked", Version: 1, GateCommand: "make test-verify", MaxIterations: 1,
+		})
+		defer cleanupTask(taskName)
+
+		envReader.SetOut(string(task.UID), pkgdispatch.EnvelopeOut{
+			TaskUID: string(task.UID), ExitCode: 0, Result: "verified", CompletedAt: time.Now(),
+			Verdict: &pkgdispatch.GateDecision{
+				Verdict:  pkgdispatch.VerdictRepairable,
+				Findings: []pkgdispatch.Finding{{Dimension: "correctness", Severity: "advisory"}},
+			},
+		})
+		completeVerifierJob(ctx, task, attempt)
+
+		r := newVerifyDispatchTaskReconciler(envReader)
+		name := types.NamespacedName{Name: taskName, Namespace: "default"}
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Get(ctx, name, task)).To(Succeed())
+		Expect(task.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseVerifyHalted),
+			"D-02: unset onExhaustion must remain identical to Phase 51's escalate-only behavior")
+
+		var project tideprojectv1alpha3.Project
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, &project)).To(Succeed())
+		Expect(meta.IsStatusConditionTrue(project.Status.Conditions, tideprojectv1alpha3.ConditionVerifyHalt)).To(BeTrue())
 	})
 })

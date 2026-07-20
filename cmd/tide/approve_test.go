@@ -94,6 +94,50 @@ func TestApproveLevelDiscoversAwaitingMilestone(t *testing.T) {
 	}
 }
 
+// makeProjectAwaiting builds a Project fixture parked at
+// Status.Phase="AwaitingApproval" (Phase 52 D-08's requireApproval park —
+// or, forward-looking, a future project-level gate-policy park).
+func makeProjectAwaiting(name string) *tidev1alpha3.Project {
+	return &tidev1alpha3.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Spec: tidev1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
+			TargetRepo: "https://example.com/repo.git",
+		},
+		Status: tidev1alpha3.ProjectStatus{Phase: "AwaitingApproval"},
+	}
+}
+
+// TestApproveLevelDiscoversAwaitingProjectFirst proves findAwaitingProject
+// sits at the FRONT of approveLevel's chain (RESEARCH Security row 3 /
+// Phase 52 D-08): when BOTH the Project and a Milestone are parked at
+// AwaitingApproval simultaneously, the approve annotation lands on the
+// Project — the hierarchy root — never the downstream Milestone.
+func TestApproveLevelDiscoversAwaitingProjectFirst(t *testing.T) {
+	p := makeProjectAwaiting("my-project")
+	ms := makeMilestoneAwaiting("ms-alpha", "my-project")
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(p, ms).Build()
+
+	if err := approveRun(context.Background(), c, "default", "my-project", "", nil); err != nil {
+		t.Fatalf("approveRun: %v", err)
+	}
+
+	var gotProj tidev1alpha3.Project
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "my-project"}, &gotProj); err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if v := gotProj.Annotations["tideproject.k8s/approve-project"]; v != "true" {
+		t.Errorf("expected approve-project=true on Project; got %q (annotations=%v)", v, gotProj.Annotations)
+	}
+
+	var gotMS tidev1alpha3.Milestone
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "ms-alpha"}, &gotMS); err != nil {
+		t.Fatalf("get milestone: %v", err)
+	}
+	if _, has := gotMS.Annotations["tideproject.k8s/approve-milestone"]; has {
+		t.Errorf("Milestone must NOT be approved while the Project itself is parked; annotations=%v", gotMS.Annotations)
+	}
+}
+
 func TestApproveWaveFormatRejection(t *testing.T) {
 	p := makeProject("my-project")
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(p).Build()

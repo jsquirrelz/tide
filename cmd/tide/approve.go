@@ -142,9 +142,10 @@ func approveWave(ctx context.Context, c client.Client, ns, projectName, waveFlag
 	return nil
 }
 
-// approveLevel walks the child CRDs of the Project looking for one in
-// Status.Phase=AwaitingApproval. Order: Milestone → Phase → Plan → Task. The
-// first matching child receives the approve-<level>=true annotation.
+// approveLevel walks the child CRDs of the Project (and the Project itself)
+// looking for one in Status.Phase=AwaitingApproval. Order: Project →
+// Milestone → Phase → Plan → Task. The first matching level receives the
+// approve-<level>=true annotation.
 //
 // D-07 guard (Option A, DEBT-03): the guard is narrowed to the approval target.
 // The AwaitingApproval target is discovered FIRST; refusal fires only if THAT
@@ -160,7 +161,9 @@ func approveWave(ctx context.Context, c client.Client, ns, projectName, waveFlag
 //
 // Per the plan: discovers level from child CRDs (not from Project.Status
 // conditions directly, since the AwaitingApproval state lives on the child
-// itself per plan 04-05's patchMilestoneAwaitingApproval / etc.).
+// itself per plan 04-05's patchMilestoneAwaitingApproval / etc.) — except
+// Project itself, which has no parent to walk and is checked directly via
+// findAwaitingProject.
 func approveLevel(ctx context.Context, c client.Client, ns, projectName string) error {
 	var proj tidev1alpha3.Project
 	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
@@ -170,9 +173,17 @@ func approveLevel(ctx context.Context, c client.Client, ns, projectName string) 
 		return fmt.Errorf("get project: %w", err)
 	}
 
-	// Option A (DEBT-03): discover the AwaitingApproval target FIRST in
-	// dependency-order. Milestone → Phase → Plan → Task. The first matching
-	// child is the one the operator is gating on.
+	// Option A (DEBT-03), extended Phase 52 (RESEARCH Security row 3): discover
+	// the AwaitingApproval target FIRST in dependency-order, root to leaf —
+	// Project → Milestone → Phase → Plan → Task. The first matching level is
+	// the one the operator is gating on. Project is checked first: it is the
+	// hierarchy root, so a confused-deputy approve can never target a
+	// downstream level while an upstream Project-level park is outstanding.
+	if obj, level, err := findAwaitingProject(ctx, c, ns, projectName); err != nil {
+		return err
+	} else if obj != nil {
+		return approveLevelTarget(ctx, c, obj, level, projectName)
+	}
 	if obj, level, err := findAwaitingMilestone(ctx, c, ns, projectName); err != nil {
 		return err
 	} else if obj != nil {
@@ -225,6 +236,8 @@ func approveLevelTarget(ctx context.Context, c client.Client, obj client.Object,
 	// both AwaitingApproval status and a Failed condition simultaneously).
 	var targetPhase string
 	switch v := obj.(type) {
+	case *tidev1alpha3.Project:
+		targetPhase = v.Status.Phase
 	case *tidev1alpha3.Milestone:
 		targetPhase = v.Status.Phase
 	case *tidev1alpha3.Phase:
@@ -316,6 +329,14 @@ func findFailedLevel(ctx context.Context, c client.Client, ns, projectName strin
 func buildFailureDetail(obj client.Object) string {
 	var reason, message string
 	switch v := obj.(type) {
+	case *tidev1alpha3.Project:
+		c := meta.FindStatusCondition(v.Status.Conditions, tidev1alpha3.ConditionWaveOrLevelPaused)
+		if c == nil && len(v.Status.Conditions) > 0 {
+			c = &v.Status.Conditions[0]
+		}
+		if c != nil {
+			reason, message = c.Reason, c.Message
+		}
 	case *tidev1alpha3.Milestone:
 		c := meta.FindStatusCondition(v.Status.Conditions, tidev1alpha3.ConditionWaveOrLevelPaused)
 		if c == nil && len(v.Status.Conditions) > 0 {
@@ -353,6 +374,25 @@ func buildFailureDetail(obj client.Object) string {
 		return ""
 	}
 	return fmt.Sprintf(" (reason: %s: %s)", reason, message)
+}
+
+// findAwaitingProject Gets the single named Project and returns it with
+// level "project" when Status.Phase is "AwaitingApproval". Unlike its four
+// siblings (findAwaitingMilestone/Phase/Plan/Task), Project is the hierarchy
+// root — there is no parent CRD to walk, so this Gets the Project directly
+// by name rather than List+filter by owner.LabelProject.
+func findAwaitingProject(ctx context.Context, c client.Client, ns, projectName string) (client.Object, string, error) {
+	var proj tidev1alpha3.Project
+	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, "", nil
+		}
+		return nil, "", fmt.Errorf("get project: %w", err)
+	}
+	if proj.Status.Phase == tidev1alpha3.LevelPhaseAwaitingApproval {
+		return &proj, "project", nil
+	}
+	return nil, "", nil
 }
 
 // findAwaitingMilestone lists Milestones in the namespace, filtered to the

@@ -383,8 +383,61 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 		return taskGateResult{shouldHalt: true, result: ctrl.Result{}}, nil
 	}
 
+	// Step 1b (Phase 52 D-08): a Task parked at AwaitingApproval via
+	// exhaustVerifyLoop's requireApproval branch — LoopStatus.ExitReason
+	// non-empty is the reachability signal (applyLoopStatus's Phase 51-07
+	// contract: it is stamped only at a verify-loop terminal/park
+	// transition, never cleared back to "" while the loop is active) — must
+	// be RE-EVALUATED every reconcile, exactly like checkReadinessGates' own
+	// Spec.Gates.Task-keyed gate-policy park below (Step 5). Unlike that
+	// path, THIS park is triggered by loop exhaustion, not gate policy, so
+	// it needs its own re-check here: without it, dispatch would silently
+	// resume on the very next reconcile regardless of operator approval,
+	// since checkReadinessGates' gate-policy branch only fires when
+	// Spec.Gates.Task/the project default is explicitly "approve"/"pause"
+	// (PolicyAuto — the common default — skips it entirely). Re-uses the
+	// SAME tideproject.k8s/approve-task annotation + consumeApproveAndResume
+	// two-step every other AwaitingApproval park already uses (D-08's
+	// "existing gate machinery" instruction, ESC-02) — an ordinary
+	// gate-policy park's own LoopStatus.ExitReason always stays empty, so
+	// this branch never fires for it.
+	if task.Status.Phase == tideprojectv1alpha3.LevelPhaseAwaitingApproval && task.Status.LoopStatus.ExitReason != "" {
+		if !gates.CheckApprove(task, "task") {
+			return taskGateResult{shouldHalt: true, result: ctrl.Result{}}, nil
+		}
+		result, err := consumeApproveAndResume(ctx, r.Client, task, &task.Status.Conditions, &task.Status.Phase, "task",
+			"Operator approved; verify-exhaustion park lifted")
+		return taskGateResult{shouldHalt: true, result: result}, err
+	}
+
 	// Step 2: On Running — delegate to checkRunningState.
 	if task.Status.Phase == tideprojectv1alpha3.LevelPhaseRunning {
+		// T-52-15 post-approval sentinel: task.Status.LoopStatus.ExitReason is
+		// stamped by applyLoopStatus/exhaustVerifyLoop exactly once the verify
+		// loop has taken a terminal or park decision — the live Task loop
+		// itself NEVER leaves it non-empty while dispatch is genuinely active
+		// (Phase 51-07's applyLoopStatus contract). So a Running Task
+		// reconciling with a NON-EMPTY ExitReason is only reachable one way:
+		// Step 1b's consumeApproveAndResume just resumed a parked
+		// (requireApproval-exhausted) Task, which patches Phase back to
+		// Running without ever touching LoopStatus. Route straight to
+		// markVerifiedSucceeded (accept-the-findings semantics) BEFORE
+		// checkRunningState can look up and re-process the executor Job that
+		// already completed this attempt — otherwise handleJobCompletion
+		// would re-run and re-dispatch a verifier against a Job the loop
+		// already consumed (T-52-15: resurrecting paid work without human
+		// intent).
+		if task.Status.LoopStatus.ExitReason != "" {
+			project, pErr := r.resolveProject(ctx, task)
+			if errors.Is(pErr, ErrParentUnresolved) {
+				return taskGateResult{shouldHalt: true, result: ctrl.Result{RequeueAfter: 30 * time.Second}}, nil
+			}
+			if pErr != nil {
+				return taskGateResult{}, pErr
+			}
+			result, mErr := r.markVerifiedSucceeded(ctx, task, project, pkgdispatch.EnvelopeOut{})
+			return taskGateResult{shouldHalt: true, result: result}, mErr
+		}
 		return r.checkRunningState(ctx, task)
 	}
 
@@ -2528,55 +2581,81 @@ func (r *TaskReconciler) finishVerifierTerminal(ctx context.Context, task *tidep
 	}
 }
 
-// haltVerify stamps the Task terminal (Failed) on a fail-closed verify
-// outcome — an unreadable envelope, a missing Verdict, a classified BLOCKED
-// verdict, an anti-gaming escalation, or MaxIterations exhaustion without an
-// APPROVED verdict — and escalates project-wide via setVerifyHaltIfNeeded
-// (ESC-02/ESC-03), mirroring gateChecks' existing setFailureHaltIfNeeded-on-
-// Failed-terminal pattern (this file's own CR-02 precedent). exitReason and
-// conditionReason are caller-chosen (haltVerify never guesses the class of
-// halt) so ExitIterationsExhausted (repairOrHalt's exhaustion leg) stays
-// grep-distinguishable from ExitEscalated (BLOCKED / unreadable / anti-gaming).
+// haltVerify handles the fail-closed non-APPROVED exit of the verify loop —
+// an unreadable envelope, a missing Verdict, a classified BLOCKED verdict,
+// an anti-gaming escalation, or MaxIterations exhaustion without an APPROVED
+// verdict. exitReason and conditionReason are caller-chosen (haltVerify
+// never guesses the class of halt) so ExitIterationsExhausted (repairOrHalt's
+// exhaustion leg) stays grep-distinguishable from ExitEscalated (BLOCKED /
+// unreadable / anti-gaming).
+//
+// The terminal patch itself delegates to exhaustVerifyLoop (level_status.go)
+// — Phase 52 D-08's ONE branch point: onExhaustion differentiates
+// requireApproval (park at AwaitingApproval through the existing gate
+// machinery, ESC-02) from escalate (Task's default — the unchanged Phase 51
+// Failed-stamp/VerifyHalted + project-wide ConditionVerifyHalt behavior via
+// setVerifyHaltIfNeeded, mirroring gateChecks' existing
+// setFailureHaltIfNeeded-on-Failed-terminal pattern, this file's own CR-02
+// precedent). "BLOCKED verdicts route through the same call" per the plan:
+// every one of haltVerify's callers (BLOCKED, unreadable envelope, marshal
+// failure, anti-gaming escalation, MaxIterations exhaustion) is a terminal
+// non-APPROVED exit and consults policy.EscalationPolicy uniformly — at
+// Task defaults (onExhaustion unset) this resolves to escalate, identical
+// to Phase 51 (D-02's no-regression bar).
 func (r *TaskReconciler) haltVerify(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, out pkgdispatch.EnvelopeOut, message, conditionReason string, exitReason tideprojectv1alpha3.ExitReason) (ctrl.Result, error) {
-	logger := logf.FromContext(ctx)
-	patch := client.MergeFrom(task.DeepCopy())
-	// ESC-03 (HI-01): a verify-exhaustion is a DISTINCT halt class, never a
-	// reinterpretation of Failed wave semantics. Driving it through
-	// LevelPhaseFailed made the next reconcile's gateChecks Failed
-	// short-circuit stamp the conservative-profile ConditionFailureHalt on
-	// top of ConditionVerifyHalt — an over-halt that stranded the project on
-	// `tide resume` alone (it needed `--retry-failed` too, a verb the
-	// VerifyHalt path never surfaced). LevelPhaseVerifyHalted keeps the
-	// terminal grep-distinguishable and out of the Failed backstop; the
-	// ConditionFailed condition below still carries the caller's Reason for
-	// audit trails and dashboards.
-	task.Status.Phase = tideprojectv1alpha3.LevelPhaseVerifyHalted
-	meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha3.ConditionFailed,
-		Status:             metav1.ConditionTrue,
-		Reason:             conditionReason,
-		Message:            message,
-		LastTransitionTime: metav1.Now(),
-	})
-	applyLoopStatus(task, out, exitReason)
 	var completedAt time.Time
 	if !out.CompletedAt.IsZero() {
 		completedAt = out.CompletedAt
-		ct := metav1.NewTime(out.CompletedAt)
+	}
+
+	// exhaustVerifyLoop performs its own mutate-then-patch cycle and MUST run
+	// before this function's own Status mutations below — see its doc
+	// comment for why an earlier mutation would be silently dropped by its
+	// DeepCopy-based patch base.
+	policy := ResolveLoopPolicy(project, nil, task, "task")
+	result, err := exhaustVerifyLoop(ctx, r.Client, project, task, &task.Status.Conditions, &task.Status.Phase, "task", policy, completedAt, message)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// The caller-specific ConditionFailed reason (AntiGamingDetected,
+	// VerifyIterationsExhausted, VerifyBlocked, ...) + LoopStatus/ExitReason
+	// + CompletedAt — a second, focused patch (mirrors
+	// consumeApproveAndResume's own two-step shape in level_status.go).
+	// Skipped on the requireApproval leg: exhaustVerifyLoop already parked
+	// the Task with its own WaveOrLevelPaused/ReasonVerifyExhausted
+	// condition, and stamping ConditionFailed=True on a merely-parked (not
+	// failed) Task would contradict that state.
+	patch := client.MergeFrom(task.DeepCopy())
+	if policy.EscalationPolicy != tideprojectv1alpha3.EscalationRequireApproval {
+		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
+			Type:               tideprojectv1alpha3.ConditionFailed,
+			Status:             metav1.ConditionTrue,
+			Reason:             conditionReason,
+			Message:            message,
+			LastTransitionTime: metav1.Now(),
+		})
+	}
+	applyLoopStatus(task, out, exitReason)
+	if !completedAt.IsZero() {
+		ct := metav1.NewTime(completedAt)
 		task.Status.CompletedAt = &ct
 	}
 	if pErr := r.Status().Patch(ctx, task, patch); pErr != nil {
 		return ctrl.Result{}, pErr
 	}
-	// ESC-02/ESC-03: a BLOCKED/exhausted verify means the artifact tree the
-	// next dispatch would build on is suspect — halt project-wide, not just
-	// this Task. CR-02 time-fence lives inside setVerifyHaltIfNeeded itself.
-	if hErr := setVerifyHaltIfNeeded(ctx, r.Client, project, completedAt); hErr != nil {
-		logger.Error(hErr, "setVerifyHaltIfNeeded failed (non-fatal)", "task", task.Name)
-	}
+
 	r.settleVerifierSpend(ctx, task, project, out)
-	r.finishVerifierTerminal(ctx, task, project, out, "verify-halt")
-	return ctrl.Result{}, nil
+	// finishVerifierTerminal emits the Task-level completion/failure metric
+	// counter — deliberately skipped on the requireApproval leg: the Task
+	// hasn't reached its REAL terminal yet (it is parked, not done), and the
+	// post-approval sentinel's markVerifiedSucceeded call fires it exactly
+	// once when the loop genuinely closes (approved or later escalated).
+	// Firing it here too would double-count.
+	if policy.EscalationPolicy != tideprojectv1alpha3.EscalationRequireApproval {
+		r.finishVerifierTerminal(ctx, task, project, out, "verify-halt")
+	}
+	return result, nil
 }
 
 // markVerifiedSucceeded is the sole path that stamps a contract-bearing
@@ -2640,9 +2719,14 @@ func (r *TaskReconciler) repairOrHalt(ctx context.Context, task *tideprojectv1al
 		intersectsProtectedRefs(task.Status.LastAttemptEvidence.ChangedFiles, protectedPathsFor(task)) {
 		return r.escalateSystem(ctx, task, project, out)
 	}
-	if task.Status.Attempt >= int(task.Spec.Verification.MaxIterations) {
+	// Phase 52 SC3: gate policy resolves through ResolveLoopPolicy, never a
+	// raw task.Spec.Verification read — behavior-preserving at Task defaults
+	// (D-02): MaxIterations resolves exactly as authored, same
+	// Attempt>=MaxIterations comparison (MaxIterations=1 allows zero repairs).
+	policy := ResolveLoopPolicy(project, nil, task, "task")
+	if task.Status.Attempt >= int(policy.MaxIterations) {
 		return r.haltVerify(ctx, task, project, out,
-			fmt.Sprintf("verification loop exhausted MaxIterations=%d without an APPROVED verdict", task.Spec.Verification.MaxIterations),
+			fmt.Sprintf("verification loop exhausted MaxIterations=%d without an APPROVED verdict", policy.MaxIterations),
 			"VerifyIterationsExhausted", tideprojectv1alpha3.ExitIterationsExhausted)
 	}
 	return r.dispatchRepairAttempt(ctx, task, project, out)
