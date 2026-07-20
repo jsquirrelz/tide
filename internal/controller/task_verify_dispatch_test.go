@@ -367,7 +367,7 @@ var _ = Describe("Task loop: verifier dispatch (Phase 51 Plan 06, VerifierDispat
 			"a contract-bearing Task must transition to Verifying, never Succeeded, on executor exit-0 (EXEC-04)")
 		Expect(task.Status.LockedSHA).To(Equal(wantLockedSHA))
 
-		verifierJobName := podjob.VerifierJobName(task.UID, attempt)
+		verifierJobName := podjob.VerifierJobName("task", string(task.UID), attempt)
 		var verifierJob batchv1.Job
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: verifierJobName, Namespace: "default"}, &verifierJob)).To(Succeed())
 		Expect(verifierJob.Labels["tideproject.k8s/role"]).To(Equal("verifier"))
@@ -427,7 +427,7 @@ var _ = Describe("Task loop: verifier dispatch (Phase 51 Plan 06, VerifierDispat
 		Expect(task.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseSucceeded),
 			"a contract-less Task must keep the pre-Phase-51 exit-0 -> Succeeded path")
 
-		verifierJobName := podjob.VerifierJobName(task.UID, attempt)
+		verifierJobName := podjob.VerifierJobName("task", string(task.UID), attempt)
 		var verifierJob batchv1.Job
 		err = k8sClient.Get(ctx, types.NamespacedName{Name: verifierJobName, Namespace: "default"}, &verifierJob)
 		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "no verifier Job may be created for a contract-less Task")
@@ -467,7 +467,7 @@ var _ = Describe("Task loop: verifier dispatch (Phase 51 Plan 06, VerifierDispat
 		Expect(task.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseVerifying),
 			"an empty VerifierImage must leave the Task benignly parked in Verifying, not Failed")
 
-		verifierJobName := podjob.VerifierJobName(task.UID, attempt)
+		verifierJobName := podjob.VerifierJobName("task", string(task.UID), attempt)
 		var verifierJob batchv1.Job
 		err = k8sClient.Get(ctx, types.NamespacedName{Name: verifierJobName, Namespace: "default"}, &verifierJob)
 		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "an empty VerifierImage must NOT create an unschedulable verifier Job")
@@ -540,7 +540,7 @@ var _ = Describe("Task loop: verifier dispatch (Phase 51 Plan 06, VerifierDispat
 		Expect(k8sClient.Get(ctx, name, task)).To(Succeed())
 		Expect(task.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseVerifying))
 
-		verifierJobName := podjob.VerifierJobName(task.UID, attempt)
+		verifierJobName := podjob.VerifierJobName("task", string(task.UID), attempt)
 		var verifierJob batchv1.Job
 		err = k8sClient.Get(ctx, types.NamespacedName{Name: verifierJobName, Namespace: "default"}, &verifierJob)
 		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "no verifier Job may be created while the ESC-04 cap is saturated")

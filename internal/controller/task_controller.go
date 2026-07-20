@@ -662,7 +662,7 @@ func (r *TaskReconciler) checkRunningState(ctx context.Context, task *tideprojec
 // (idempotent: podjob.VerifierJobName is deterministic and AlreadyExists on
 // Create is treated as success, SUB-03) rather than halting forever.
 func (r *TaskReconciler) checkVerifyingState(ctx context.Context, task *tideprojectv1alpha3.Task) (taskGateResult, error) {
-	jobName := podjob.VerifierJobName(task.UID, task.Status.Attempt)
+	jobName := podjob.VerifierJobName("task", string(task.UID), task.Status.Attempt)
 	var job batchv1.Job
 	if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: jobName}, &job); err != nil {
 		if !apierrors.IsNotFound(err) {
@@ -2099,7 +2099,7 @@ func hasVerificationContract(task *tideprojectv1alpha3.Task) bool {
 func (r *TaskReconciler) dispatchVerifier(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project) (result ctrl.Result, reserved bool, err error) {
 	logger := logf.FromContext(ctx)
 	attempt := task.Status.Attempt
-	verifierJobName := podjob.VerifierJobName(task.UID, attempt)
+	verifierJobName := podjob.VerifierJobName("task", string(task.UID), attempt)
 
 	// LO-01: no verifier image configured (TIDE_VERIFIER_IMAGE unset — test
 	// fixtures or a dev cluster without the Helm chart). Building a Job with an

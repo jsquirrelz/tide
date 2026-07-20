@@ -253,7 +253,7 @@ func waitForJobTerminalInCache(ctx context.Context, jobName string) {
 // via checkVerifyingState. The Job must already exist (dispatched by a prior
 // reconcile via dispatchVerifier).
 func completeVerifierJob(ctx context.Context, task *tideprojectv1alpha3.Task, attempt int) {
-	jobName := podjob.VerifierJobName(task.UID, attempt)
+	jobName := podjob.VerifierJobName("task", string(task.UID), attempt)
 	var job batchv1.Job
 	ExpectWithOffset(1, k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: "default"}, &job)).To(Succeed())
 	jobPatch := client.MergeFrom(job.DeepCopy())
@@ -548,7 +548,7 @@ var _ = Describe("Task loop: anti-gaming structural enforcement (Phase 51 Plan 0
 
 		// No verifier Job was ever dispatched — the escalation fired first, so
 		// no verifier could return APPROVED and bless the gaming attempt.
-		verifierJobName := podjob.VerifierJobName(task.UID, attempt)
+		verifierJobName := podjob.VerifierJobName("task", string(task.UID), attempt)
 		var vJob batchv1.Job
 		err := k8sClient.Get(ctx, types.NamespacedName{Name: verifierJobName, Namespace: "default"}, &vJob)
 		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "a gaming attempt must never dispatch a verifier that could bless it")
@@ -712,7 +712,7 @@ var _ = Describe("Task loop: infra-retry stays distinct from quality-iteration (
 			"a non-terminal Job re-observe (infra-retry path) must never mint a new attempt or dispatch a verifier")
 		Expect(task.Status.Attempt).To(Equal(beforeAttempt))
 
-		verifierJobName := podjob.VerifierJobName(task.UID, beforeAttempt)
+		verifierJobName := podjob.VerifierJobName("task", string(task.UID), beforeAttempt)
 		var verifierJob batchv1.Job
 		err = k8sClient.Get(ctx, types.NamespacedName{Name: verifierJobName, Namespace: "default"}, &verifierJob)
 		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "no verifier Job may dispatch while the executor attempt is still non-terminal")
