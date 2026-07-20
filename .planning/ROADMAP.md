@@ -29,7 +29,7 @@ Phase numbering continues from v1.0.8 (last phase was 47); v1.0.9 starts at Phas
 - [x] **Phase 48: LangGraph Evaluator Image + Credproxy-TLS Spike** - Read-only LangGraph image behind the unchanged Subagent seam; live TLS trust spike de-risks everything downstream (completed 2026-07-18)
 - [x] **Phase 49: Common Loop Contract + Verdict/Envelope/Persistence Schema** - `LoopPolicy`/`LoopStatus` + `gate_decision` schema + findings size×locality persistence, locked before any consumer logic (completed 2026-07-18)
 - [x] **Phase 50: Execution-Loop Hardening + Loop-Native Observability** - `loopRunID`/terminal reasons/run-evidence envelope + `loop.*`/`evaluation.*` spans the Task loop will consume (completed 2026-07-19)
-- [ ] **Phase 51: The Task Loop** - Independent-evaluator-driven verification contract, fresh-attempt-with-evidence-packet, three-tier escalation, concurrency/tracing safety wired at the same dispatch sites
+- [x] **Phase 51: The Task Loop** - Independent-evaluator-driven verification contract, fresh-attempt-with-evidence-packet, three-tier escalation, concurrency/tracing safety wired at the same dispatch sites (completed 2026-07-20)
 - [ ] **Phase 52: Per-Level LoopPolicy Parameterization** - The same verification contract runs at every level as a `LoopPolicy` parameterization — plan-check re-plan, Phase/Milestone/Project escalation
 - [ ] **Phase 53: Chart Config + Dashboard Provenance Surfacing** - Chart-first per-level defaults (safe on upgrade) + nested loop provenance on the dashboard
 
@@ -164,7 +164,7 @@ Plans:
 
 **Wave 5** *(blocked on 51-06/07)*
 
-- [ ] 51-08-PLAN.md — ESC-04 kind concurrent-dispatch test + live Task-loop proof (human-verify checkpoint) — Task 1 DONE (kind spec, `5dfed19c`); Task 2 OPEN (billable live-run checkpoint, not executed — see STATE.md Blockers/Concerns)
+- [x] 51-08-PLAN.md — ESC-04 kind concurrent-dispatch test + live Task-loop proof (human-verify checkpoint) — Task 1 DONE (kind spec, `5dfed19c`); Task 2 OPEN (billable live-run checkpoint, not executed — see STATE.md Blockers/Concerns)
 
 **Research flag**: yes — two genuinely open calls gate this phase's plan: (1) where the per-level `GateCommand` ("pass criterion command") is declared in the CRD schema — a new `Plan.Spec`/`Project.Spec` field vs. a convention-based lookup, a real requirements decision with no existing source; (2) whether the LangGraph runtime needs a new `Vendor` sentinel (e.g. `"langgraph"`) in `pkg/dispatch.SelfInstruments`/`ResolveProvider(...).Vendor` or can reuse `"anthropic"` with a runtime discriminator — must be locked before this phase's `SelfInstruments` wiring.
 
@@ -214,6 +214,6 @@ Phases execute in numeric order: 48 → 49 → 50 → 51 → 52 → 53
 | 48. LangGraph Evaluator Image + Credproxy-TLS Spike | v1.0.9 | 5/5 | Complete   | 2026-07-18 |
 | 49. Common Loop Contract + Verdict/Envelope/Persistence Schema | v1.0.9 | 4/4 | Complete    | 2026-07-18 |
 | 50. Execution-Loop Hardening + Loop-Native Observability | v1.0.9 | 7/7 | Complete    | 2026-07-19 |
-| 51. The Task Loop | v1.0.9 | 7/8 | In Progress|  |
+| 51. The Task Loop | v1.0.9 | 8/8 | Complete    | 2026-07-20 |
 | 52. Per-Level LoopPolicy Parameterization | v1.0.9 | 0/TBD | Not started | - |
 | 53. Chart Config + Dashboard Provenance Surfacing | v1.0.9 | 0/TBD | Not started | - |
