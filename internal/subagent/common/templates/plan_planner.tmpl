@@ -96,6 +96,11 @@ Markdown is the human-review surface; the JSON files are the machine contract.
 {{if .SharedContext}}
 {{.SharedContext}}
 {{end}}
+{{- if .RepairFindings}}
+A prior plan-check attempt was rejected — this is your one re-plan attempt.
+Address EVERY finding below in the fresh plan, not just the first one:
+{{range .RepairFindings}}  - [{{.Severity}}/{{.Confidence}}] {{.Summary}}
+{{end}}{{end}}
 
 TaskUID: {{.TaskUID}}
 Your task dir: /workspace/envelopes/{{.TaskUID}}/  (children/  out.json  worktrees/...)

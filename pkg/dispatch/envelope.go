@@ -187,6 +187,37 @@ type EnvelopeIn struct {
 	// Executor dispatches (role="executor") never populate this field (CACHE-02
 	// lock) — the executor template does not reference it.
 	SharedContext string `json:"sharedContext,omitempty"`
+
+	// RepairFindings carries a prior plan-check verdict's findings, condensed
+	// to severity/confidence/summary, when this dispatch is a Phase 52 D-04
+	// re-plan attempt (Role=="planner", Level=="plan"). Nil/empty on every
+	// other dispatch — which today is every dispatch, since the plan-check
+	// loop that populates this field lands in a later plan; plan_planner.tmpl
+	// renders its {{if .RepairFindings}} block as nothing until then,
+	// byte-identical to its pre-D-04 output. Omitted from JSON when empty,
+	// mirroring SharedContext/Dispatch/Dev.
+	RepairFindings []RepairFinding `json:"repairFindings,omitempty"`
+}
+
+// RepairFinding is a single finding rendered into a re-plan planner prompt's
+// D-04 findings block (plan_planner.tmpl). Its shape is the compact,
+// human-readable one-liner condensed FOR the fresh planner attempt —
+// deliberately NOT [Finding] itself, whose Dimension/Evidence/SuggestedFix
+// fields are the verifier's own wire format, not a planner-prompt summary.
+type RepairFinding struct {
+	// Severity is the originating finding's severity (e.g. "blocker",
+	// "advisory"). Free string, mirroring [Finding.Severity].
+	Severity string `json:"severity,omitempty"`
+
+	// Confidence is the originating finding's confidence (e.g. "high",
+	// "medium", "low"). Free string, mirroring [Finding.Confidence].
+	Confidence string `json:"confidence,omitempty"`
+
+	// Summary is a one-line, human-readable statement of the finding — the
+	// compact evidence a fresh planner attempt reads instead of the prior
+	// attempt's full context (D-04's plan-level analog of the Task loop's
+	// evidence packet).
+	Summary string `json:"summary,omitempty"`
 }
 
 // EnvelopeOut is the result document written by the in-pod harness to
