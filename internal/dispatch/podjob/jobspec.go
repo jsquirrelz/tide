@@ -213,6 +213,23 @@ type BuildOptions struct {
 	// PricingOverridesJSON/TraceParent conditional-append shape). Empty →
 	// env var absent (non-verifier dispatches never carry it).
 	GateCommand string
+
+	// WorktreeCheckoutImage is the tide-push image ref used for a SECOND init
+	// container on a JobKindVerifier Job, provisioning a read-only, detached
+	// worktree checkout for a level that never runs an executor Job
+	// (Phase/Milestone/Project — Phase 52 D-07, RESEARCH.md §"The missing
+	// worktree"). Empty → no checkout init container: Task-level verifiers
+	// inherit the SAME-Task-UID executor's worktree (harness.EnsureWorktree)
+	// and never set this. Set together with WorktreeBranch by non-task
+	// verifier dispatch sites (52-07 plan-check / 52-08 level-verify); Task
+	// dispatch never sets either field.
+	WorktreeCheckoutImage string
+
+	// WorktreeBranch is the run branch (project.Status.Git.BranchName) the
+	// level-verify worktree-checkout container checks out at its current
+	// tip. Empty → no checkout init container (see WorktreeCheckoutImage doc
+	// — the two fields are set together or not at all).
+	WorktreeBranch string
 }
 
 // BuildJobSpec returns a complete *batchv1.Job for executor or planner dispatch
@@ -566,7 +583,17 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 	// cascade-13: credproxy (native sidecar) and the cert-shared emptyDir it produces are
 	// included together or skipped together. credproxy is the sole producer of the cert
 	// volume; gating both keeps the PodSpec valid (no mount references a removed volume).
+	//
+	// Phase 52 D-07: the level-verify worktree-checkout init container is
+	// composed ONLY for JobKindVerifier dispatches whose caller has set BOTH
+	// WorktreeCheckoutImage and WorktreeBranch — see
+	// buildWorktreeCheckoutContainer's doc comment for the full rationale
+	// (extracted to its own function to keep BuildJobSpec's own cyclomatic
+	// complexity down; gocyclo).
 	initContainers := []corev1.Container{envelopeWriter}
+	if wc, ok := buildWorktreeCheckoutContainer(opts, kind, parentUID, subPath); ok {
+		initContainers = append(initContainers, wc)
+	}
 	volumes := []corev1.Volume{
 		{
 			Name: VolumeProjectWorkspace,
@@ -646,6 +673,64 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 			},
 		},
 	}
+}
+
+// buildWorktreeCheckoutContainer builds the level-verify worktree-checkout
+// init container (Phase 52 D-07, RESEARCH.md §"The missing worktree") and
+// reports whether it applies. It is composed ONLY for JobKindVerifier
+// dispatches whose caller has set BOTH opts.WorktreeCheckoutImage and
+// opts.WorktreeBranch (52-07 plan-check / 52-08 level-verify; Task dispatch
+// never sets these — a Task verifier inherits the SAME-Task-UID executor's
+// worktree instead, harness.EnsureWorktree). ok is false (zero Container) for
+// every other case — the caller must check ok before using the container.
+//
+// Runs the tide-push image's `--mode=worktree-checkout` — a SEPARATE process
+// entirely outside the read-only Python LangGraph verifier image (EVAL-01
+// import firewall) and outside the manager — to provision a read-only,
+// DETACHED checkout at /workspace/worktrees/<parentUID>/ before the
+// verifier's main container starts. Deliberately carries NO credential
+// surface: no ANTHROPIC_API_KEY, no credproxy coupling, no GIT_PAT /
+// push-credential env or volumes — this container only ever reads the
+// already-cloned LOCAL bare repo already staged on the shared PVC by an
+// earlier clone-mode Job (T-52-12).
+func buildWorktreeCheckoutContainer(opts BuildOptions, kind JobKind, parentUID, subPath string) (corev1.Container, bool) {
+	if kind != JobKindVerifier || opts.WorktreeCheckoutImage == "" || opts.WorktreeBranch == "" {
+		return corev1.Container{}, false
+	}
+	return corev1.Container{
+		Name:  "worktree-checkout",
+		Image: opts.WorktreeCheckoutImage,
+		Args: []string{
+			"--mode=worktree-checkout",
+			// Mirrors internal/harness/worktree.go's workspaceRoot+"repo.git"
+			// bare-repo path convention — the SAME "/workspace" mount path
+			// every container in this PodSpec already targets.
+			"--repo=/workspace/repo.git",
+			"--uid=" + parentUID,
+			"--branch=" + opts.WorktreeBranch,
+		},
+		VolumeMounts: []corev1.VolumeMount{
+			{
+				Name:      VolumeProjectWorkspace,
+				MountPath: "/workspace",
+				SubPath:   subPath,
+				// Read-write (no ReadOnly here): `git worktree add` must
+				// create worktrees/<parentUID>/ under /workspace. The
+				// verifier's own MAIN container mount stays ReadOnly
+				// (opts.ReadOnly, composed in BuildJobSpec above) — this
+				// init container's broader access is scoped to one-time
+				// setup, not the verifier's own read surface.
+			},
+		},
+		SecurityContext: &corev1.SecurityContext{
+			RunAsUser:                new(int64(1000)),
+			RunAsGroup:               new(int64(1000)),
+			RunAsNonRoot:             new(true),
+			AllowPrivilegeEscalation: new(false),
+			ReadOnlyRootFilesystem:   new(true),
+			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+		},
+	}, true
 }
 
 // routeJSON is the wire format for a single allowlist entry serialized into

@@ -24,6 +24,21 @@ limitations under the License.
 //	                 buildCloneJob). Reads GIT_PAT for private repos;
 //	                 public repos work without one.
 //
+//	--mode=worktree-checkout — Phase 52 D-07: provisions a read-only,
+//	                 DETACHED worktree checkout (no branch minted) for a
+//	                 level-verify dispatch at a level that never ran an
+//	                 executor (Phase/Milestone/Project have no per-Task
+//	                 worktree to inherit — RESEARCH.md §"The missing
+//	                 worktree"). Runs as a SECOND init container on a
+//	                 JobKindVerifier Job (internal/dispatch/podjob/jobspec.go,
+//	                 gated on BuildOptions.WorktreeCheckoutImage/WorktreeBranch),
+//	                 OUTSIDE the read-only Python LangGraph verifier image
+//	                 (EVAL-01 import firewall) and outside the manager
+//	                 process. Calls pkggit.AddReadOnlyWorktree(--repo, --uid,
+//	                 --branch) — a plain local read of the already-cloned
+//	                 bare repo on the shared PVC. No push, no GIT_PAT, no
+//	                 network access.
+//
 //	--mode=push    — level-boundary push (Phase 3 D-B2). Stages
 //	                 --artifact-paths into the per-run worktree at
 //	                 <workspace>/worktrees/run-<branch>, creates a single
@@ -132,6 +147,14 @@ type pushConfig struct {
 	// typed envelope reason "artifact-stage-failed" before any git operation —
 	// the same testable-through-run() convention the other push invariants use.
 	StageEnvelopes string
+	// Repo is the worktree-checkout mode's absolute path to the bare repo
+	// (e.g. /workspace/repo.git — the same convention internal/harness's
+	// EnsureWorktree derives from workspaceRoot). Phase 52 D-07.
+	Repo string
+	// UID is the worktree-checkout mode's level UID (mirrors envelopeUID:
+	// the checked Phase/Milestone/Project/Plan's own UID, not a task UID).
+	// Phase 52 D-07.
+	UID string
 }
 
 // EnvelopeStage maps one on-PVC envelope directory (UID-keyed, the same key the
@@ -311,6 +334,10 @@ func main() {
 			"workspace root) into .tide/planning/<destPrefix>/ on the run branch "+
 			"(DASH-02, human-readable paths per D-02). out.json/in.json are never "+
 			"staged (D-04); failures are loud (D-03).")
+	repo := fs.String("repo", "",
+		"worktree-checkout mode: absolute path to the bare repo (e.g. /workspace/repo.git)")
+	uid := fs.String("uid", "",
+		"worktree-checkout mode: the checked level's own UID (mirrors envelopeUID; Phase 52 D-07)")
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "tide-push: flag parse: %v\n", err)
@@ -332,6 +359,8 @@ func main() {
 		IntegrateTaskBranches: splitCSV(*integrateTaskBranches),
 		IntegrationOnly:       *integrationOnly,
 		StageEnvelopes:        *stageEnvelopes,
+		Repo:                  *repo,
+		UID:                   *uid,
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
@@ -369,10 +398,42 @@ func run(ctx context.Context, cfg pushConfig, _ io.Writer, stderr io.Writer) int
 		return runClone(ctx, cfg, stderr)
 	case "push":
 		return runPush(ctx, cfg, stderr)
+	case "worktree-checkout":
+		return runWorktreeCheckout(cfg, stderr)
 	default:
-		fmt.Fprintf(stderr, "tide-push: unknown mode %q (want clone|push)\n", cfg.Mode)
+		fmt.Fprintf(stderr, "tide-push: unknown mode %q (want clone|push|worktree-checkout)\n", cfg.Mode)
 		return exitInvariant
 	}
+}
+
+// runWorktreeCheckout provisions a read-only, detached worktree checkout for
+// a level-verify dispatch (Phase 52 D-07). It is the init-container-reachable
+// entry point for pkggit.AddReadOnlyWorktree — a pure local read of the
+// already-cloned bare repo already staged on the shared PVC by an earlier
+// clone-mode Job. No push, no GIT_PAT read, no network access: this mode
+// never constructs a remote URL or touches an auth credential of any kind.
+func runWorktreeCheckout(cfg pushConfig, stderr io.Writer) int {
+	if cfg.Repo == "" {
+		fmt.Fprintf(stderr, "tide-push: worktree-checkout mode requires --repo\n")
+		return exitInvariant
+	}
+	if cfg.UID == "" {
+		fmt.Fprintf(stderr, "tide-push: worktree-checkout mode requires --uid\n")
+		return exitInvariant
+	}
+	if cfg.Branch == "" {
+		fmt.Fprintf(stderr, "tide-push: worktree-checkout mode requires --branch\n")
+		return exitInvariant
+	}
+
+	dir, err := pkggit.AddReadOnlyWorktree(cfg.Repo, cfg.UID, cfg.Branch)
+	if err != nil {
+		fmt.Fprintf(stderr, "tide-push: worktree-checkout: %v\n", err)
+		return exitGenericFail
+	}
+
+	fmt.Fprintf(stderr, "tide-push: worktree-checkout: provisioned %s @ %s -> %s\n", cfg.UID, cfg.Branch, dir)
+	return exitSuccess
 }
 
 // sharedFSGroup is the gid every TIDE dispatch/push pod shares via the pod

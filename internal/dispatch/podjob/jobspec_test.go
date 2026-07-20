@@ -1287,3 +1287,146 @@ func TestBuildJobSpec_TraceparentEnvAbsentWhenEmpty(t *testing.T) {
 		})
 	}
 }
+
+// ---- Phase 52 D-07: level-verify worktree-checkout init container ----
+
+// TestBuildJobSpec_Verifier_WorktreeCheckout covers the three statics named
+// in 52-05-PLAN.md Task 2 acceptance criteria: (a) present — fields set on a
+// JobKindVerifier dispatch composes a second init container after
+// envelope-writer, workspace mounted RW in it, main container workspace
+// still ReadOnly; (b) credential-absence — no ANTHROPIC_API_KEY / secret
+// refs on the checkout container; (c) absent — a task-shaped dispatch
+// (fields empty) has no worktree-checkout container.
+//
+// buildVerifierTestOptions/buildTestOptions carry a ProviderSecretRef, so
+// credproxy is ALSO present in these fixtures (pre-existing
+// TestBuildJobSpec_HasTwoInitContainers_EnvelopeWriterAndCredproxy
+// precedent) — assertions below check container identity/position, not a
+// raw total count that would conflate the two orthogonal gates.
+func TestBuildJobSpec_Verifier_WorktreeCheckout(t *testing.T) {
+	t.Run("present: second init container after envelope-writer, RW workspace, main stays RO", func(t *testing.T) {
+		opts := buildVerifierTestOptions()
+		opts.WorktreeCheckoutImage = "ghcr.io/jsquirrelz/tide-push:test"
+		opts.WorktreeBranch = "tide/run-alpha-1"
+		job := BuildJobSpec(opts)
+
+		initContainers := job.Spec.Template.Spec.InitContainers
+		if len(initContainers) != 3 {
+			t.Fatalf("initContainers count = %d; want 3 (envelope-writer, worktree-checkout, credproxy)", len(initContainers))
+		}
+		if initContainers[0].Name != ContainerNameEnvelopeWriter {
+			t.Errorf("initContainers[0].Name = %q; want %q", initContainers[0].Name, ContainerNameEnvelopeWriter)
+		}
+		checkout := initContainers[1]
+		if checkout.Name != "worktree-checkout" {
+			t.Errorf("initContainers[1].Name = %q; want \"worktree-checkout\"", checkout.Name)
+		}
+		if checkout.Image != opts.WorktreeCheckoutImage {
+			t.Errorf("checkout.Image = %q; want %q", checkout.Image, opts.WorktreeCheckoutImage)
+		}
+
+		argsJoined := strings.Join(checkout.Args, " ")
+		wantParentUID := string(opts.Task.UID)
+		for _, want := range []string{
+			"--mode=worktree-checkout",
+			"--uid=" + wantParentUID,
+			"--branch=" + opts.WorktreeBranch,
+		} {
+			if !strings.Contains(argsJoined, want) {
+				t.Errorf("checkout.Args = %q; missing %q", argsJoined, want)
+			}
+		}
+
+		var wsMount *corev1.VolumeMount
+		for i := range checkout.VolumeMounts {
+			if checkout.VolumeMounts[i].Name == VolumeProjectWorkspace {
+				wsMount = &checkout.VolumeMounts[i]
+			}
+		}
+		if wsMount == nil {
+			t.Fatal("worktree-checkout container missing project-workspace VolumeMount")
+		}
+		if wsMount.MountPath != "/workspace" {
+			t.Errorf("checkout workspace MountPath = %q; want \"/workspace\"", wsMount.MountPath)
+		}
+		if wsMount.ReadOnly {
+			t.Error("checkout workspace VolumeMount ReadOnly = true; want false (RW — git worktree add must write)")
+		}
+
+		// The verifier's own MAIN container /workspace mount stays ReadOnly —
+		// unaffected by the new init container's RW mount of the same volume.
+		subagent := job.Spec.Template.Spec.Containers[0]
+		var mainWSMount *corev1.VolumeMount
+		for i := range subagent.VolumeMounts {
+			if subagent.VolumeMounts[i].Name == VolumeProjectWorkspace && subagent.VolumeMounts[i].MountPath == "/workspace" {
+				mainWSMount = &subagent.VolumeMounts[i]
+			}
+		}
+		if mainWSMount == nil {
+			t.Fatal("subagent missing primary /workspace mount")
+		}
+		if !mainWSMount.ReadOnly {
+			t.Error("subagent primary /workspace mount ReadOnly = false; want true (RO worktree preserved)")
+		}
+
+		validatePodSpecVolumeMountRefs(t, job.Spec.Template.Spec)
+	})
+
+	t.Run("credential-absence: no ANTHROPIC_API_KEY or secret refs on the checkout container", func(t *testing.T) {
+		opts := buildVerifierTestOptions()
+		opts.WorktreeCheckoutImage = "ghcr.io/jsquirrelz/tide-push:test"
+		opts.WorktreeBranch = "tide/run-alpha-1"
+		job := BuildJobSpec(opts)
+
+		checkout := job.Spec.Template.Spec.InitContainers[1]
+		for _, e := range checkout.Env {
+			if e.Name == "ANTHROPIC_API_KEY" || e.Name == "ANTHROPIC_AUTH_TOKEN" {
+				t.Errorf("worktree-checkout container carries credential env %q", e.Name)
+			}
+		}
+		if len(checkout.EnvFrom) != 0 {
+			t.Errorf("worktree-checkout container has %d EnvFrom source(s); want 0 (no secret refs)", len(checkout.EnvFrom))
+		}
+	})
+
+	t.Run("absent: task-shaped dispatch (fields empty, no provider secret) has exactly one init container", func(t *testing.T) {
+		opts := buildNoSecretTestOptions() // WorktreeCheckoutImage/WorktreeBranch zero value = ""; no credproxy either
+		if opts.WorktreeCheckoutImage != "" || opts.WorktreeBranch != "" {
+			t.Fatal("test fixture invariant broken: expected empty WorktreeCheckoutImage/WorktreeBranch")
+		}
+		job := BuildJobSpec(opts)
+		initContainers := job.Spec.Template.Spec.InitContainers
+		if len(initContainers) != 1 {
+			t.Fatalf("initContainers count = %d; want 1 (envelope-writer only)", len(initContainers))
+		}
+		if initContainers[0].Name != ContainerNameEnvelopeWriter {
+			t.Errorf("initContainers[0].Name = %q; want %q", initContainers[0].Name, ContainerNameEnvelopeWriter)
+		}
+	})
+
+	t.Run("absent: JobKindVerifier with fields empty never composes a worktree-checkout container", func(t *testing.T) {
+		opts := buildVerifierTestOptions() // WorktreeCheckoutImage/WorktreeBranch zero value = ""
+		job := BuildJobSpec(opts)
+		for _, c := range job.Spec.Template.Spec.InitContainers {
+			if c.Name == "worktree-checkout" {
+				t.Fatal("worktree-checkout container present despite empty WorktreeCheckoutImage/WorktreeBranch")
+			}
+		}
+	})
+}
+
+// TestBuildJobSpec_WorktreeCheckoutAbsentOnPlannerEvenIfFieldsSet proves the
+// gate is Kind==JobKindVerifier, not merely "fields set" — a planner
+// dispatch never gets a worktree-checkout container even if a caller
+// mistakenly populated the fields.
+func TestBuildJobSpec_WorktreeCheckoutAbsentOnPlannerEvenIfFieldsSet(t *testing.T) {
+	opts := buildPlannerTestOptions()
+	opts.WorktreeCheckoutImage = "ghcr.io/jsquirrelz/tide-push:test"
+	opts.WorktreeBranch = "tide/run-alpha-1"
+	job := BuildJobSpec(opts)
+	for _, c := range job.Spec.Template.Spec.InitContainers {
+		if c.Name == "worktree-checkout" {
+			t.Fatal("planner dispatch composed a worktree-checkout init container; want none (Kind must be JobKindVerifier)")
+		}
+	}
+}

@@ -167,6 +167,169 @@ func TestAddWorktreeValidatesArgs(t *testing.T) {
 	}
 }
 
+// TestAddReadOnlyWorktreeValidatesArgs covers the input-validation surface:
+// empty repoPath / uid / runBranch each surface a clear error — mirrors
+// TestAddWorktreeValidatesArgs's three-guard shape.
+func TestAddReadOnlyWorktreeValidatesArgs(t *testing.T) {
+	for _, tc := range []struct {
+		name                      string
+		repoPath, uid, branchName string
+	}{
+		{"empty repoPath", "", "uid", "main"},
+		{"empty uid", "/tmp/repo.git", "", "main"},
+		{"empty branch", "/tmp/repo.git", "uid", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := AddReadOnlyWorktree(tc.repoPath, tc.uid, tc.branchName); err == nil {
+				t.Errorf("AddReadOnlyWorktree(%q, %q, %q) returned nil error", tc.repoPath, tc.uid, tc.branchName)
+			}
+		})
+	}
+}
+
+// TestAddReadOnlyWorktreeBasic clones a seeded bare repo and takes a
+// read-only worktree checkout via AddReadOnlyWorktree; verifies the
+// returned dir, that HEAD resolves to the runBranch tip commit, and that
+// the checkout is DETACHED (no branch — distinct from AddWorktree's
+// write-oriented per-task branch).
+func TestAddReadOnlyWorktreeBasic(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, srcHead := seedBareRepo(t, base)
+
+	pvc := t.TempDir()
+	bareDest := filepath.Join(pvc, "repo.git")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	repo, err := Clone(ctx, "file://"+bareSrc, bareDest, "")
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	branch := defaultBranchOf(t, repo)
+
+	wtDir, err := AddReadOnlyWorktree(bareDest, "phase-uid-abc", branch)
+	if err != nil {
+		t.Fatalf("AddReadOnlyWorktree: %v", err)
+	}
+
+	wantPrefix := filepath.Join(pvc, "worktrees", "phase-uid-abc")
+	if wtDir != wantPrefix {
+		t.Errorf("AddReadOnlyWorktree dir = %q; want %q", wtDir, wantPrefix)
+	}
+
+	if _, err := os.Stat(filepath.Join(wtDir, ".git")); err != nil {
+		t.Errorf("expected .git in worktree %q: err=%v", wtDir, err)
+	}
+
+	got := gitOut(t, wtDir, "rev-parse", "HEAD")
+	if got != srcHead.String() {
+		t.Errorf("worktree HEAD = %q; want runBranch tip %q", got, srcHead.String())
+	}
+
+	// git branch --show-current is empty for a detached checkout.
+	if current := gitOut(t, wtDir, "branch", "--show-current"); current != "" {
+		t.Errorf("worktree branch --show-current = %q; want empty (detached)", current)
+	}
+}
+
+// TestAddReadOnlyWorktreeIdempotent proves the retried-init-container
+// property: a second call with the same args returns the same dir and nil
+// error without a git failure.
+func TestAddReadOnlyWorktreeIdempotent(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+
+	pvc := t.TempDir()
+	bareDest := filepath.Join(pvc, "repo.git")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	repo, err := Clone(ctx, "file://"+bareSrc, bareDest, "")
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	branch := defaultBranchOf(t, repo)
+
+	first, err := AddReadOnlyWorktree(bareDest, "phase-uid-idem", branch)
+	if err != nil {
+		t.Fatalf("AddReadOnlyWorktree first call: %v", err)
+	}
+
+	second, err := AddReadOnlyWorktree(bareDest, "phase-uid-idem", branch)
+	if err != nil {
+		t.Fatalf("AddReadOnlyWorktree second call: %v", err)
+	}
+	if second != first {
+		t.Errorf("AddReadOnlyWorktree second call dir = %q; want same dir %q", second, first)
+	}
+}
+
+// TestAddReadOnlyWorktreeDistinctUIDsSameBranch exercises the --detach
+// no-branch-claim property: two different uids checking out the SAME
+// runBranch both succeed — a `-b`-style or plain-branch checkout would
+// fail the second with "already checked out".
+func TestAddReadOnlyWorktreeDistinctUIDsSameBranch(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+
+	pvc := t.TempDir()
+	bareDest := filepath.Join(pvc, "repo.git")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	repo, err := Clone(ctx, "file://"+bareSrc, bareDest, "")
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	branch := defaultBranchOf(t, repo)
+
+	wtA, err := AddReadOnlyWorktree(bareDest, "phase-uid-a", branch)
+	if err != nil {
+		t.Fatalf("AddReadOnlyWorktree A: %v", err)
+	}
+	wtB, err := AddReadOnlyWorktree(bareDest, "phase-uid-b", branch)
+	if err != nil {
+		t.Fatalf("AddReadOnlyWorktree B: %v", err)
+	}
+	if wtA == wtB {
+		t.Fatalf("worktrees collided: %q == %q", wtA, wtB)
+	}
+}
+
+// TestAddReadOnlyWorktreeNoNewBranchCreated proves AddReadOnlyWorktree
+// never mints a branch — distinct from AddWorktree's tide/wt-<uid> branch,
+// which would otherwise dangle on every verify run (RESEARCH anti-pattern).
+func TestAddReadOnlyWorktreeNoNewBranchCreated(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+
+	pvc := t.TempDir()
+	bareDest := filepath.Join(pvc, "repo.git")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	repo, err := Clone(ctx, "file://"+bareSrc, bareDest, "")
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	branch := defaultBranchOf(t, repo)
+
+	before := gitOut(t, bareDest, "branch", "--list", "tide/wt-*")
+
+	if _, err := AddReadOnlyWorktree(bareDest, "phase-uid-nobranch", branch); err != nil {
+		t.Fatalf("AddReadOnlyWorktree: %v", err)
+	}
+
+	after := gitOut(t, bareDest, "branch", "--list", "tide/wt-*")
+	if before != after {
+		t.Errorf("git branch --list 'tide/wt-*' changed: before=%q after=%q", before, after)
+	}
+}
+
 // Sanity check: ensure the second seed commit creates files independently
 // from the first. Guards against fixture-helper regressions that would
 // silently make other tests vacuous.
