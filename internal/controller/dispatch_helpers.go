@@ -751,7 +751,13 @@ func checkParentApproval(ctx context.Context, c client.Client, ns, parentName, p
 		if err := c.Get(ctx, client.ObjectKey{Namespace: ns, Name: parentName}, &plan); err != nil {
 			return false, client.IgnoreNotFound(err)
 		}
-		return plan.Status.Phase == tideprojectv1alpha3.LevelPhaseAwaitingApproval, nil
+		// Phase 52 D-03: a Plan mid-plan-check (Verifying) holds child Task
+		// dispatch the SAME way an AwaitingApproval park does — no child Task
+		// dispatches until the plan-check verdict is APPROVED. This is the
+		// sole hold mechanism; no new call site is needed since gateChecks
+		// already calls checkParentApproval at Task dispatch time.
+		return plan.Status.Phase == tideprojectv1alpha3.LevelPhaseAwaitingApproval ||
+			plan.Status.Phase == tideprojectv1alpha3.LevelPhaseVerifying, nil
 	}
 	return false, nil
 }

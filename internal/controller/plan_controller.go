@@ -17,7 +17,9 @@ limitations under the License.
 package controller
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -51,6 +53,7 @@ import (
 	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/internal/pool"
+	"github.com/jsquirrelz/tide/internal/subagent/common"
 	webhookv1alpha3 "github.com/jsquirrelz/tide/internal/webhook/v1alpha3"
 	"github.com/jsquirrelz/tide/pkg/dag"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
@@ -191,6 +194,14 @@ func (r *PlanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	// 5b. Wave materialization — Phase 2 logic; runs once Tasks exist and
 	//     admission webhook stamps Validated.
 	if r.Deps.Dispatcher != nil {
+		// Phase 52 D-03: a Plan parked in Verifying is mid-plan-check — route
+		// straight to the verify state machine before any planner-dispatch or
+		// wave-materialization processing runs this reconcile (mirrors Task's
+		// gateChecks Step 2b delegation to checkVerifyingState).
+		if plan.Status.Phase == tideprojectv1alpha3.LevelPhaseVerifying {
+			project := r.resolveProjectForPlan(ctx, &plan)
+			return r.checkPlanVerifyingState(ctx, &plan, project)
+		}
 		res, dispatched, err := r.reconcilePlannerDispatch(ctx, &plan)
 		if err != nil {
 			return res, err
@@ -260,6 +271,20 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 			}
 		}
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, true, nil
+	}
+
+	// Phase 52 D-03: defensive guard mirroring the AwaitingApproval
+	// early-return's placement discipline above. Reconcile() itself already
+	// routes a Verifying Plan straight to checkPlanVerifyingState BEFORE this
+	// function is ever called — this is a no-op safety net, not a second
+	// entry point into the verify state machine. It guards the crash window
+	// a future re-plan (52-09's dispatchPlanRepair) opens between deleting
+	// the rejected attempt's child Tasks and patching Phase back off
+	// Verifying: without this guard, a mid-transition reconcile that reached
+	// this function directly (Tasks momentarily absent) could fall through
+	// to the dispatch tail below and double-dispatch a planner Job.
+	if plan.Status.Phase == tideprojectv1alpha3.LevelPhaseVerifying {
+		return ctrl.Result{}, true, nil
 	}
 
 	// If Tasks already exist for this Plan, skip planner dispatch — the
@@ -904,20 +929,570 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 		return ctrl.Result{}, err
 	}
 
-	// Clear Running phase so the Phase 2 Wave path takes over on next reconcile.
+	// Phase 52 D-03: a Plan whose plan-check verification contract is
+	// resolved (Task > Plan > Project precedence via ResolveVerificationSpec)
+	// AND Locked enters Verifying instead of clearing to "" — the
+	// checkParentApproval OR-clause (dispatch_helpers.go) structurally holds
+	// child Task dispatch until the plan-check verdict is APPROVED. This is
+	// the cheapest pre-spend rejection point: child CRDs already exist for
+	// free (the reporter finished materializing them above), dispatch is
+	// what spends. Absence of a resolved contract (empty GateCommand, or a
+	// still-Draft spec — the same OQ2 activation key hasVerificationContract
+	// uses at the Task level) preserves today's clear-to-"" behavior
+	// byte-for-byte (D-01's off-switch).
+	verification := ResolveVerificationSpec(project, plan, nil, "plan")
+	patch := client.MergeFrom(plan.DeepCopy())
+	if verification.GateCommand != "" && verification.Phase == verificationPhaseLocked {
+		plan.Status.Phase = tideprojectv1alpha3.LevelPhaseVerifying
+		meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+			Type:               tideprojectv1alpha3.ConditionReconciling,
+			Status:             metav1.ConditionTrue,
+			Reason:             "PlanCheckDispatched",
+			Message:            "Planner materialized child Tasks; dispatching an independent plan-check verifier before any Task dispatches",
+			LastTransitionTime: metav1.Now(),
+		})
+	} else {
+		// Clear Running phase so the Phase 2 Wave path takes over on next reconcile.
+		plan.Status.Phase = ""
+		meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+			Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
+			Status:             metav1.ConditionFalse,
+			Reason:             tideprojectv1alpha3.ReasonResumedByUser,
+			Message:            "Plan resumed from gate boundary",
+			LastTransitionTime: metav1.Now(),
+		})
+	}
+	if err := r.Status().Patch(ctx, plan, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Phase 52 D-03/D-10: plan-check loop (Plan-level verifier dispatch/consume).
+// Mirrors the Task loop's checkVerifyingState/dispatchVerifier/
+// handleVerifierCompletion state machine (task_controller.go) one level up.
+// Every D-10 safety rail (ESC-04 concurrency cap, the shared ReservationStore,
+// fail-closed ClassifyVerdict, the EVALUATOR sibling span) rides the SAME
+// functions Task's verifier dispatch already uses — nothing here
+// re-implements a rail, only adds the Plan-scoped call site.
+// ---------------------------------------------------------------------------
+
+// checkPlanVerifyingState handles a Plan in Phase=Verifying (Phase 52 D-03):
+// looks up the deterministic plan-check verifier Job for the current attempt
+// and either retries a deferred dispatch, waits for it to complete, or
+// consumes its verdict via handlePlanVerifierCompletion. Mirrors Task's
+// checkVerifyingState (task_controller.go) exactly, one level up.
+//
+// attempt = int(plan.Status.LoopStatus.Iteration) + 1 — the D-06 quality
+// counter doubles as the verifier Job's attempt number. Unlike Task (whose
+// executor Attempt already carries an infra-retry identity Phase 51 had to
+// preserve), a Plan's planner dispatch has no pre-existing per-attempt
+// counter of its own (RESEARCH Open Question 3's resolved answer), so
+// LoopStatus.Iteration — which never repairs in this plan (52-09 owns the
+// increment) — is safe to reuse directly as the sole source.
+func (r *PlanReconciler) checkPlanVerifyingState(ctx context.Context, plan *tideprojectv1alpha3.Plan, project *tideprojectv1alpha3.Project) (ctrl.Result, error) {
+	if project == nil {
+		// Transient: informer-cache lag on the label fast-path or the
+		// Phase→Milestone→Project chain — requeue and retry, mirroring Task's
+		// ErrParentUnresolved handling in its own checkVerifyingState.
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	attempt := int(plan.Status.LoopStatus.Iteration) + 1
+	jobName := podjob.VerifierJobName("plan", string(plan.UID), attempt)
+	var job batchv1.Job
+	if err := r.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: jobName}, &job); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, err
+		}
+		// NotFound is a legitimate "cap-hit deferred the dispatch" state
+		// (ESC-04) — retry dispatchPlanVerifier (idempotent via the
+		// deterministic Job name).
+		result, _, dErr := r.dispatchPlanVerifier(ctx, plan, project)
+		return result, dErr
+	}
+	if isJobTerminal(&job) {
+		return r.handlePlanVerifierCompletion(ctx, plan, project, &job)
+	}
+	// Still running: nothing to do this reconcile — the Job watch fires
+	// again on the verifier Job's terminal transition (Owns(&batchv1.Job{})).
+	return ctrl.Result{}, nil
+}
+
+// planVerifierChildrenCap bounds the {{.Children}} render-data summary
+// (52-03 D-09's pinned contract) — a plan authoring hundreds of child Tasks
+// must not blow up the rendered prompt size.
+const planVerifierChildrenCap = 50
+
+// planVerifierChildSummary mirrors internal/subagent/common's test-only
+// childFixture (52-03's pinned render-data contract for plan_verifier.tmpl's
+// {{range .Children}}) — this is the production equivalent dispatch sites
+// populate.
+type planVerifierChildSummary struct {
+	Name        string
+	DependsOn   []string
+	Files       []string
+	GateCommand string
+}
+
+// planVerifierRenderData mirrors internal/subagent/common's test-only
+// planVerifierFixture — the production render-data contract for
+// plan_verifier.tmpl (D-09): embeds EnvelopeIn (.Verify/.TaskUID/...) plus
+// PlanGoal/Children.
+type planVerifierRenderData struct {
+	pkgdispatch.EnvelopeIn
+	PlanGoal string
+	Children []planVerifierChildSummary
+}
+
+// dispatchPlanVerifier creates the independent, read-only plan-check
+// verifier Job for a Plan whose planner attempt has materialized its child
+// Task CRDs (D-03). Mirrors Task's dispatchVerifier (task_controller.go)
+// exactly, one level up: cap-before-reserve ordering (ESC-04/D-10, Pitfall
+// 6 — no reservation leak on cap-hit), and the deterministic
+// VerifierJobName makes a retry (e.g. after a prior cap-hit deferred
+// dispatch) idempotent via AlreadyExists-as-success (SUB-03).
+func (r *PlanReconciler) dispatchPlanVerifier(ctx context.Context, plan *tideprojectv1alpha3.Plan, project *tideprojectv1alpha3.Project) (result ctrl.Result, reserved bool, err error) {
+	logger := logf.FromContext(ctx)
+	attempt := int(plan.Status.LoopStatus.Iteration) + 1
+	verifierJobName := podjob.VerifierJobName("plan", string(plan.UID), attempt)
+
+	// LO-01 parity: no verifier image configured (TIDE_VERIFIER_IMAGE unset)
+	// — leave the Plan benignly parked in Verifying rather than build an
+	// unschedulable Job.
+	if r.Deps.VerifierImage == "" {
+		logger.Info("verifier image not configured (TIDE_VERIFIER_IMAGE empty); leaving Plan parked in Verifying without dispatching a plan-check verifier Job",
+			"plan", plan.Name)
+		return ctrl.Result{}, false, nil
+	}
+
+	// ESC-04/D-10: cap-before-acquire (Pitfall 6). Self-excludes
+	// verifierJobName so a re-reconcile of an already-dispatched verifier
+	// never counts itself.
+	inFlight, cErr := verifierInFlightCount(ctx, r.Client, plan.Namespace, project.Name, verifierJobName)
+	if cErr != nil {
+		return ctrl.Result{}, false, fmt.Errorf("plan verifier in-flight count: %w", cErr)
+	}
+	if inFlight >= defaultVerifierConcurrencyCap {
+		logger.V(1).Info("plan-check verifier dispatch deferred: concurrency cap reached",
+			"inFlight", inFlight, "cap", defaultVerifierConcurrencyCap, "plan", plan.Name)
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, false, nil
+	}
+
+	if r.Deps.ReserveEstimateCents > 0 {
+		r.Deps.Reservations.Reserve(string(plan.UID), r.Deps.ReserveEstimateCents)
+		reserved = true
+	}
+	releaseOnError := func() {
+		if reserved {
+			r.Deps.Reservations.Release(string(plan.UID))
+			reserved = false
+		}
+	}
+
+	verifierCaps := podjob.DefaultCaps(nil, podjob.JobKindVerifier)
+	wallClock := verifierCaps.WallClockSeconds
+	token, sErr := credproxy.Sign(r.Deps.SigningKey, string(plan.UID),
+		time.Duration(wallClock+podjob.DefaultWallClockGraceSeconds)*time.Second)
+	if sErr != nil {
+		releaseOnError()
+		return ctrl.Result{}, false, fmt.Errorf("mint plan verifier signed token: %w", sErr)
+	}
+
+	verification := ResolveVerificationSpec(project, plan, nil, "plan")
+	_, envInJSON, bErr := r.buildPlanVerifierEnvelopeIn(ctx, plan, project, verification, attempt, token)
+	if bErr != nil {
+		releaseOnError()
+		return ctrl.Result{}, false, bErr
+	}
+
+	var secretUID string
+	if project.Spec.ProviderSecretRef != "" {
+		var secret corev1.Secret
+		if gErr := r.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: project.Spec.ProviderSecretRef}, &secret); gErr == nil {
+			secretUID = string(secret.UID)
+		}
+	}
+	agentName, agentEmail := resolveAgentIdentity(project, r.Deps.HelmProviderDefaults)
+	job := podjob.BuildJobSpec(podjob.BuildOptions{
+		Kind:                  podjob.JobKindVerifier,
+		ParentObj:             plan,
+		Level:                 "plan",
+		Project:               project,
+		Attempt:               attempt,
+		SignedToken:           token,
+		EnvelopeInJSON:        envInJSON,
+		SubagentImage:         r.Deps.VerifierImage,
+		AgentName:             agentName,
+		AgentEmail:            agentEmail,
+		CredproxyImage:        r.Deps.CredproxyImage,
+		SecretUID:             secretUID,
+		PVCName:               r.sharedPVCName(),
+		ProjectUID:            string(project.UID),
+		ReadOnly:              true,
+		GateCommand:           verification.GateCommand,
+		EstimatedCostCents:    r.Deps.ReserveEstimateCents,
+		WorktreeCheckoutImage: r.Deps.TidePushImage,
+		WorktreeBranch:        project.Status.Git.BranchName,
+	})
+	// BuildJobSpec's JobKindVerifier case stamps role=verifier + level +
+	// <level>-uid but not the project label — mirrors dispatchVerifier's own
+	// post-BuildJobSpec label-stamping idiom (verifierInFlightCount's
+	// project-scoped List needs it).
+	if job.Labels == nil {
+		job.Labels = map[string]string{}
+	}
+	job.Labels[owner.LabelProject] = project.Name
+	if job.Spec.Template.Labels == nil {
+		job.Spec.Template.Labels = map[string]string{}
+	}
+	job.Spec.Template.Labels[owner.LabelProject] = project.Name
+
+	if oErr := owner.EnsureOwnerRef(job, plan, r.Scheme); oErr != nil {
+		releaseOnError()
+		return ctrl.Result{}, false, fmt.Errorf("ensure owner ref on plan verifier job: %w", oErr)
+	}
+	if createErr := r.Create(ctx, job); createErr != nil {
+		if !apierrors.IsAlreadyExists(createErr) {
+			releaseOnError()
+			return ctrl.Result{}, false, fmt.Errorf("create plan verifier job: %w", createErr)
+		}
+		// AlreadyExists: idempotent success — watch-lag race, or a
+		// checkPlanVerifyingState retry after a prior cap-hit deferred
+		// dispatch that raced a concurrent Create (Pitfall F / SUB-03).
+		logger.Info("plan verifier job already exists; treating as successful dispatch", "job", job.Name)
+	}
+
+	logger.Info("dispatched plan-check verifier", "plan", plan.Name, "job", job.Name, "gateCommand", verification.GateCommand)
+	return ctrl.Result{}, reserved, nil
+}
+
+// buildPlanVerifierEnvelopeIn constructs and marshals the EnvelopeIn for a
+// plan-check verifier dispatch (Phase 52 D-01/D-03/D-09). Mirrors Task's
+// buildVerifierEnvelopeIn (task_controller.go): Role="verifier",
+// Provider.Vendor="langgraph" (the verifier is logically independent from
+// the planner that authored the plan). VerifyContext.GateCommand carries the
+// canonical single primary command from the resolved contract; Commands
+// carries the resolved ordered union [GateCommand] ++ commands — the full
+// pass-criteria list the verifier executes out-of-band (D-01). Branch is
+// populated from project.Status.Git.BranchName (the plan-check verifier
+// needs the run-branch tip for its worktree checkout — see
+// WorktreeCheckoutImage/WorktreeBranch on dispatchPlanVerifier's
+// BuildOptions; the Task verifier does not set Branch, since it inherits the
+// executor's worktree by shared UID instead).
+//
+// The prompt is rendered HERE, controller-side (Go), via
+// common.LoadPromptTemplate("verifier", "plan") — same EVAL-04/D-09 import
+// firewall Task's verifier prompt honors. The render-data struct
+// (planVerifierRenderData) is the 52-03-pinned contract: PlanGoal sources
+// from the SAME Project.Spec.OutcomePrompt value reconcilePlannerDispatch
+// already renders into the planner's own prompt (outcomePromptOf) — Plan has
+// no authored goal/prompt text field of its own in the schema (Claude's
+// Discretion; no locked alternative exists). Children is a bounded summary
+// of this Plan's own child Tasks (capped at planVerifierChildrenCap).
+func (r *PlanReconciler) buildPlanVerifierEnvelopeIn(ctx context.Context, plan *tideprojectv1alpha3.Plan, project *tideprojectv1alpha3.Project, verification tideprojectv1alpha3.VerificationSpec, attempt int, token string) (pkgdispatch.EnvelopeIn, []byte, error) {
+	// D-01: the resolved ordered union — GateCommand first (guaranteed
+	// executed) then every additional authored pass-criterion, mirroring
+	// Task's buildVerifierEnvelopeIn exactly.
+	var commands []string
+	if verification.GateCommand != "" {
+		commands = append(commands, verification.GateCommand)
+	}
+	commands = append(commands, verification.Commands...)
+
+	envIn := pkgdispatch.EnvelopeIn{
+		APIVersion: pkgdispatch.APIVersionV1Alpha1,
+		Kind:       pkgdispatch.KindTaskEnvelopeIn,
+		TaskUID:    string(plan.UID),
+		Role:       "verifier",
+		Level:      "plan",
+		Branch:     project.Status.Git.BranchName,
+		LoopRunID:  string(plan.UID),
+		AttemptID:  fmt.Sprintf("%s-%d", plan.UID, attempt),
+		Provider: pkgdispatch.ProviderSpec{
+			Vendor: "langgraph",
+			Model:  ResolveProvider(project, "plan", r.Deps.HelmProviderDefaults).Model,
+		},
+		ProxyEndpoint: credproxyEndpoint,
+		SignedToken:   token,
+		Verify: &pkgdispatch.VerifyContext{
+			GateCommand:       verification.GateCommand,
+			Commands:          commands,
+			RequiredArtifacts: verification.RequiredArtifacts,
+			EvaluatorRef:      verification.Evaluator,
+		},
+	}
+
+	tmpl, tErr := common.LoadPromptTemplate("verifier", "plan")
+	if tErr != nil {
+		return pkgdispatch.EnvelopeIn{}, nil, fmt.Errorf("load plan verifier prompt template: %w", tErr)
+	}
+
+	var taskList tideprojectv1alpha3.TaskList
+	if lErr := r.List(ctx, &taskList, client.InNamespace(plan.Namespace), client.MatchingFields{taskPlanRefIndexKey: plan.Name}); lErr != nil {
+		logf.FromContext(ctx).Error(lErr, "list child tasks for plan-check prompt render failed (non-fatal); rendering with an empty Children summary", "plan", plan.Name)
+	}
+	children := make([]planVerifierChildSummary, 0, planVerifierChildrenCap)
+	for i, t := range taskList.Items {
+		if i >= planVerifierChildrenCap {
+			break
+		}
+		children = append(children, planVerifierChildSummary{
+			Name:        t.Name,
+			DependsOn:   t.Spec.DependsOn,
+			Files:       t.Spec.FilesTouched,
+			GateCommand: t.Spec.Verification.GateCommand,
+		})
+	}
+
+	renderData := planVerifierRenderData{
+		EnvelopeIn: envIn,
+		PlanGoal:   outcomePromptOf(project),
+		Children:   children,
+	}
+	var promptBuf bytes.Buffer
+	if xErr := tmpl.Execute(&promptBuf, renderData); xErr != nil {
+		return pkgdispatch.EnvelopeIn{}, nil, fmt.Errorf("render plan verifier prompt template: %w", xErr)
+	}
+	envIn.Prompt = promptBuf.String()
+
+	data, mErr := json.Marshal(envIn)
+	if mErr != nil {
+		return pkgdispatch.EnvelopeIn{}, nil, fmt.Errorf("marshal plan verifier envelope: %w", mErr)
+	}
+	return envIn, data, nil
+}
+
+// synthesizeNoPlanEnvelopeOut mirrors Task's synthesizeNoEnvelopeOut
+// (task_controller.go) for the plan-check level: a degraded envelope
+// (unreadable/missing out.json) still needs a well-formed EnvelopeOut to
+// carry through the fail-closed exhaust path, preserving LoopRunID/AttemptID
+// identity through the degraded envelope.
+func synthesizeNoPlanEnvelopeOut(plan *tideprojectv1alpha3.Plan, completedJob *batchv1.Job) pkgdispatch.EnvelopeOut {
+	out := pkgdispatch.EnvelopeOut{
+		APIVersion:  pkgdispatch.APIVersionV1Alpha1,
+		Kind:        pkgdispatch.KindTaskEnvelopeOut,
+		TaskUID:     string(plan.UID),
+		LoopRunID:   string(plan.UID),
+		AttemptID:   fmt.Sprintf("%s-%d", plan.UID, int(plan.Status.LoopStatus.Iteration)+1),
+		CompletedAt: time.Now().UTC(),
+	}
+	if completedJob == nil {
+		return out
+	}
+	for _, c := range completedJob.Status.Conditions {
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
+			if c.Reason == "DeadlineExceeded" {
+				out.TerminalReason = pkgdispatch.TerminalReasonCapExceeded
+				out.Reason = "wall-clock cap exceeded (ActiveDeadlineSeconds): pod was SIGKILLed before it could write out.json"
+			}
+			break
+		}
+	}
+	return out
+}
+
+// emitPlanEvaluatorSpan resolves the SAME parentSpanID the Plan's own AGENT
+// span was given (Plan.Spec.PhaseRef's persisted PhaseTraceSpanID, mirroring
+// handlePlannerJobCompletion's own TRACE-02 fetch) and emits the OBS-03/D-10
+// EVALUATOR sibling span for a terminal plan-check verifier Job. Best-effort
+// observability — never gates verdict consumption (mirrors
+// emitEvaluatorSpanForVerifier's identical non-fatal posture one level down).
+func (r *PlanReconciler) emitPlanEvaluatorSpan(ctx context.Context, plan *tideprojectv1alpha3.Plan, project *tideprojectv1alpha3.Project, verifierJob *batchv1.Job, out pkgdispatch.EnvelopeOut, envReadOK bool) {
+	var parentSpanID trace.SpanID
+	if plan.Spec.PhaseRef != "" {
+		var parentPh tideprojectv1alpha3.Phase
+		if err := r.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: plan.Spec.PhaseRef}, &parentPh); err == nil {
+			parentSpanID = spanIDFromHexOrZero(parentPh.Status.PhaseTraceSpanID)
+		}
+	}
+	evaluatorVersion := ""
+	if out.RunEvidence != nil && len(out.RunEvidence.EvaluatorVersions) > 0 {
+		evaluatorVersion = out.RunEvidence.EvaluatorVersions[0]
+	}
+	synthesizeEvaluatorSpan(ctx, "plan", plan.Name, project, r.Deps.HelmProviderDefaults, verifierJob, out, envReadOK, evaluatorVersion, parentSpanID)
+}
+
+// settlePlanVerifierSpend rolls the plan-check verifier's real token spend
+// into Project.Status.budget and settles the BudgetCents reservation
+// dispatchPlanVerifier made at dispatch time. Mirrors Task's
+// settleVerifierSpend (task_controller.go) one level up. Called exactly once
+// per plan-check verifier completion regardless of verdict outcome.
+func (r *PlanReconciler) settlePlanVerifierSpend(ctx context.Context, plan *tideprojectv1alpha3.Plan, project *tideprojectv1alpha3.Project, out pkgdispatch.EnvelopeOut) {
+	logger := logf.FromContext(ctx)
+	if err := budget.RollUpUsage(ctx, r.Client, project, out.Usage); err != nil {
+		logger.Error(err, "failed to roll up plan-check verifier budget usage", "plan", plan.Name)
+	}
+	if fbErr := setPricingFallbackIfNeeded(ctx, r.Client, project, out.Usage.PricingFallbackModel); fbErr != nil {
+		logger.Error(fbErr, "setPricingFallbackIfNeeded failed (non-fatal)", "plan", plan.Name)
+	}
+	r.Deps.Reservations.Settle(string(plan.UID))
+}
+
+// applyPlanLoopStatus updates plan.Status.LoopStatus with the current
+// plan-check evaluation summary only (LOOP-03 — no accumulating history):
+// LastEvaluation is the bounded verdict summary from THIS terminal verifier
+// envelope (nil-safe — a degraded/unreadable envelope leaves it nil), and
+// ExitReason is set once the loop has taken a terminal or park decision.
+// Deliberately does NOT touch LoopStatus.Iteration — 52-09 owns the re-plan
+// counter increment (dispatchPlanRepair); this plan never repairs, so
+// Iteration stays at its current value across every call here.
+func applyPlanLoopStatus(plan *tideprojectv1alpha3.Plan, out pkgdispatch.EnvelopeOut, exitReason tideprojectv1alpha3.ExitReason) {
+	if out.LoopRunID != "" {
+		plan.Status.LoopStatus.ParentRunID = out.LoopRunID
+	}
+	plan.Status.LoopStatus.ExitReason = exitReason
+	if out.Verdict == nil {
+		return
+	}
+	var highSeverity int32
+	for _, f := range out.Verdict.Findings {
+		if f.Severity == gateCommandFindingSeverity {
+			highSeverity++
+		}
+	}
+	summary := tideprojectv1alpha3.EvaluationSummary{
+		Decision:          string(out.Verdict.Verdict),
+		FindingsCount:     int32(len(out.Verdict.Findings)),
+		HighSeverityCount: highSeverity,
+	}
+	if !out.CompletedAt.IsZero() {
+		ct := metav1.NewTime(out.CompletedAt)
+		summary.CompletedAt = &ct
+	}
+	plan.Status.LoopStatus.LastEvaluation = &summary
+}
+
+// markPlanVerifiedApproved is the sole path that clears a contract-bearing
+// Plan's Verifying hold on an APPROVED plan-check verdict (D-03/D-10): Phase
+// clears to "" — the SAME value the no-contract path already uses in
+// handlePlannerJobCompletion — so the existing wave-materialization path
+// takes over and child Task dispatch unblocks via checkParentApproval's
+// now-satisfied OR-clause.
+func (r *PlanReconciler) markPlanVerifiedApproved(ctx context.Context, plan *tideprojectv1alpha3.Plan, project *tideprojectv1alpha3.Project, out pkgdispatch.EnvelopeOut) (ctrl.Result, error) {
 	patch := client.MergeFrom(plan.DeepCopy())
 	plan.Status.Phase = ""
 	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
 		Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
 		Status:             metav1.ConditionFalse,
-		Reason:             tideprojectv1alpha3.ReasonResumedByUser,
-		Message:            "Plan resumed from gate boundary",
+		Reason:             "PlanCheckApproved",
+		Message:            "Independent plan-check verifier approved the authored plan; Task dispatch unblocked",
 		LastTransitionTime: metav1.Now(),
 	})
+	applyPlanLoopStatus(plan, out, tideprojectv1alpha3.ExitApproved)
 	if err := r.Status().Patch(ctx, plan, patch); err != nil {
 		return ctrl.Result{}, err
 	}
+	r.settlePlanVerifierSpend(ctx, plan, project, out)
 	return ctrl.Result{}, nil
+}
+
+// exhaustPlanVerifyLoop is the shared fail-closed exit for every
+// non-APPROVED plan-check outcome this plan handles: an unreadable envelope,
+// a nil verdict, a classified BLOCKED verdict, and — conservatively, until a
+// later plan lands repairOrHaltPlan's findings-seeded re-plan — a REPAIRABLE
+// verdict or an APPROVED verdict a deterministic gate-command failure
+// dominates. Delegates to the shared D-08 branch point exhaustVerifyLoop
+// (level_status.go) exactly as Task's haltVerify does, one level up:
+// onExhaustion differentiates requireApproval (park at AwaitingApproval —
+// the EXISTING top-of-reconcilePlannerDispatch AwaitingApproval branch
+// already consumes the SAME "approve-plan" annotation via
+// consumeApproveAndResume) from escalate (VerifyHalted + project-wide
+// ConditionVerifyHalt).
+func (r *PlanReconciler) exhaustPlanVerifyLoop(ctx context.Context, plan *tideprojectv1alpha3.Plan, project *tideprojectv1alpha3.Project, out pkgdispatch.EnvelopeOut, message string) (ctrl.Result, error) {
+	var completedAt time.Time
+	if !out.CompletedAt.IsZero() {
+		completedAt = out.CompletedAt
+	}
+
+	// exhaustVerifyLoop performs its own mutate-then-patch cycle and MUST run
+	// before this function's own Status mutations below — an earlier
+	// in-memory mutation would be silently dropped by its DeepCopy-based
+	// patch base (see its doc comment).
+	policy := ResolveLoopPolicy(project, plan, nil, "plan")
+	result, err := exhaustVerifyLoop(ctx, r.Client, project, plan, &plan.Status.Conditions, &plan.Status.Phase, "plan", policy, completedAt, message)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// The caller-agnostic ConditionFailed reason + LoopStatus/ExitReason — a
+	// second, focused patch (mirrors haltVerify's own two-step shape).
+	// Skipped on the requireApproval leg: exhaustVerifyLoop already parked
+	// the Plan with its own WaveOrLevelPaused/ReasonVerifyExhausted
+	// condition, and stamping ConditionFailed=True on a merely-parked (not
+	// failed) Plan would contradict that state.
+	patch := client.MergeFrom(plan.DeepCopy())
+	if policy.EscalationPolicy != tideprojectv1alpha3.EscalationRequireApproval {
+		meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+			Type:               tideprojectv1alpha3.ConditionFailed,
+			Status:             metav1.ConditionTrue,
+			Reason:             "PlanCheckExhausted",
+			Message:            message,
+			LastTransitionTime: metav1.Now(),
+		})
+	}
+	applyPlanLoopStatus(plan, out, tideprojectv1alpha3.ExitEscalated)
+	if pErr := r.Status().Patch(ctx, plan, patch); pErr != nil {
+		return ctrl.Result{}, pErr
+	}
+
+	r.settlePlanVerifierSpend(ctx, plan, project, out)
+	return result, nil
+}
+
+// handlePlanVerifierCompletion consumes a terminal plan-check verifier Job's
+// EnvelopeOut.Verdict (Phase 52 D-03/D-10) — mirrors Task's
+// handleVerifierCompletion (task_controller.go) one level up. Fail-closed by
+// construction: an unreadable envelope or a nil Verdict exhausts via
+// exhaustPlanVerifyLoop, never markPlanVerifiedApproved. ClassifyVerdict
+// drives the decision: APPROVED (and no deterministic gate-command
+// dominance) -> markPlanVerifiedApproved; REPAIRABLE, or an APPROVED verdict
+// a red gate-command Finding dominates, -> the conservative exhaustion path
+// (a later plan replaces the REPAIRABLE leg with repairOrHaltPlan's
+// findings-seeded re-plan); BLOCKED (and ClassifyVerdict's own fail-closed
+// default) -> the exhaustion path.
+func (r *PlanReconciler) handlePlanVerifierCompletion(ctx context.Context, plan *tideprojectv1alpha3.Plan, project *tideprojectv1alpha3.Project, verifierJob *batchv1.Job) (ctrl.Result, error) {
+	out, err := readVerifierEnvelope(ctx, r.Deps.EnvReader, string(project.UID), string(plan.UID))
+	if err != nil {
+		// Fail-closed (mirrors handleVerifierCompletion's identical guard): a
+		// Plan whose plan-check envelope cannot be read is never approved.
+		synthOut := synthesizeNoPlanEnvelopeOut(plan, verifierJob)
+		r.emitPlanEvaluatorSpan(ctx, plan, project, verifierJob, synthOut, false)
+		return r.exhaustPlanVerifyLoop(ctx, plan, project, synthOut, err.Error())
+	}
+	if out.Verdict == nil {
+		r.emitPlanEvaluatorSpan(ctx, plan, project, verifierJob, out, true)
+		return r.exhaustPlanVerifyLoop(ctx, plan, project, out, "plan-check verifier envelope carried no verdict (fail-closed BLOCKED)")
+	}
+
+	// OBS-03/D-10: the EVALUATOR sibling span, emitted before the terminal
+	// status patches below (span-loss-averse ordering, mirrors
+	// emitEvaluatorSpanForVerifier's own call-site ordering).
+	r.emitPlanEvaluatorSpan(ctx, plan, project, verifierJob, out, true)
+
+	// D-04/D-10 parity: re-derive the classification through the canonical
+	// fail-closed ClassifyVerdict function rather than trusting
+	// out.Verdict.Verdict's raw decoded string directly.
+	raw, mErr := json.Marshal(out.Verdict)
+	if mErr != nil {
+		return r.exhaustPlanVerifyLoop(ctx, plan, project, out, mErr.Error())
+	}
+
+	switch pkgdispatch.ClassifyVerdict(raw) {
+	case pkgdispatch.VerdictApproved:
+		if hasDeterministicFailure(out.Verdict) {
+			// Same conservative exhaustion path as the REPAIRABLE leg below
+			// — 52-09 replaces this with repairOrHaltPlan's findings-seeded
+			// re-plan.
+			return r.exhaustPlanVerifyLoop(ctx, plan, project, out, "plan-check gate command failed despite an APPROVED verdict")
+		}
+		return r.markPlanVerifiedApproved(ctx, plan, project, out)
+	case pkgdispatch.VerdictRepairable:
+		return r.exhaustPlanVerifyLoop(ctx, plan, project, out, out.Verdict.Summary)
+	default: // pkgdispatch.VerdictBlocked, and ClassifyVerdict's own fail-closed default.
+		return r.exhaustPlanVerifyLoop(ctx, plan, project, out, out.Verdict.Summary)
+	}
 }
 
 // patchPlanSucceeded sets Plan.Status.Phase=Succeeded and stamps the
