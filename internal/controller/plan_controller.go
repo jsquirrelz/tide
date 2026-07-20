@@ -1177,10 +1177,10 @@ func (r *PlanReconciler) dispatchPlanVerifier(ctx context.Context, plan *tidepro
 // carries the resolved ordered union [GateCommand] ++ commands — the full
 // pass-criteria list the verifier executes out-of-band (D-01). Branch is
 // populated from project.Status.Git.BranchName (the plan-check verifier
-// needs the run-branch tip for its worktree checkout — see
-// WorktreeCheckoutImage/WorktreeBranch on dispatchPlanVerifier's
-// BuildOptions; the Task verifier does not set Branch, since it inherits the
-// executor's worktree by shared UID instead).
+// needs the run-branch tip for its worktree checkout — see the checkout
+// init-container fields on dispatchPlanVerifier's BuildOptions; the Task
+// verifier does not set Branch, since it inherits the executor's worktree by
+// shared UID instead).
 //
 // The prompt is rendered HERE, controller-side (Go), via
 // common.LoadPromptTemplate("verifier", "plan") — same EVAL-04/D-09 import
@@ -1887,6 +1887,39 @@ func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan 
 		client.MatchingFields{taskPlanRefIndexKey: plan.Name},
 	); err != nil {
 		return ctrl.Result{}, fmt.Errorf("list tasks for plan %s: %w", plan.Name, err)
+	}
+
+	// Phase 52 D-03 (Rule 2 gap-closure): handlePlannerJobCompletion's own
+	// ChildCount-gated Verifying transition only fires for a genuine leaf
+	// Plan (ChildCount==0) — reconcilePlannerDispatch's top-of-function
+	// tasks-exist early-return (":290" above) means ANY reconcile after the
+	// reporter has created even ONE child Task is structurally routed
+	// straight here (dispatched=false), never back through
+	// handlePlannerJobCompletion, so its own "observed >= expected" check can
+	// never observe a satisfied count for a Plan that actually has children
+	// (materialization is asynchronous — it cannot complete within the SAME
+	// reconcile that first found zero Tasks). This IS the reachable
+	// "materialization has happened" seam for that common case: a
+	// Running-phase Plan whose child Tasks have started appearing. Checked
+	// BEFORE wave derivation so no Task dispatches this reconcile.
+	if plan.Status.Phase == tideprojectv1alpha3.LevelPhaseRunning && len(taskList.Items) > 0 {
+		project := r.resolveProjectForPlan(ctx, plan)
+		verification := ResolveVerificationSpec(project, plan, nil, "plan")
+		if verification.GateCommand != "" && verification.Phase == verificationPhaseLocked {
+			patch := client.MergeFrom(plan.DeepCopy())
+			plan.Status.Phase = tideprojectv1alpha3.LevelPhaseVerifying
+			meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+				Type:               tideprojectv1alpha3.ConditionReconciling,
+				Status:             metav1.ConditionTrue,
+				Reason:             "PlanCheckDispatched",
+				Message:            "Child Tasks materialized; dispatching an independent plan-check verifier before any Task dispatches",
+				LastTransitionTime: metav1.Now(),
+			})
+			if err := r.Status().Patch(ctx, plan, patch); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, nil
+		}
 	}
 
 	// Step 2b: D-05 / D-06 file-touch dispatch gate.
