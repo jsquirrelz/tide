@@ -131,12 +131,21 @@ func dispatchPlanPlanner(ctx context.Context, r *PlanReconciler, name types.Name
 // terminal-status shape one level up (completeJobStatus is shared, defined
 // in task_verify_dispatch_test.go).
 func completePlanPlannerJob(ctx context.Context, plan *tideprojectv1alpha3.Plan) {
-	jobName := fmt.Sprintf("tide-plan-%s-1", plan.UID)
+	completePlanPlannerJobAttempt(ctx, plan, 1)
+}
+
+// completePlanPlannerJobAttempt mirrors completePlanPlannerJob, generalized
+// to an arbitrary attempt number (Phase 52 D-04/D-06: a re-plan mints
+// planner attempt 2, 3, ... via the SAME Iteration-derived Job-name formula
+// reconcilePlannerDispatch itself uses).
+func completePlanPlannerJobAttempt(ctx context.Context, plan *tideprojectv1alpha3.Plan, attempt int) {
+	jobName := fmt.Sprintf("tide-plan-%s-%d", plan.UID, attempt)
 	var job batchv1.Job
 	ExpectWithOffset(1, k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: "default"}, &job)).To(Succeed())
 	jobPatch := client.MergeFrom(job.DeepCopy())
 	completeJobStatus(&job)
 	ExpectWithOffset(1, k8sClient.Status().Patch(ctx, &job, jobPatch)).To(Succeed())
+	waitForJobTerminalCacheSync(ctx, jobName, "default")
 }
 
 // completePlanVerifierJob marks the deterministic plan-check verifier Job
@@ -148,6 +157,28 @@ func completePlanVerifierJob(ctx context.Context, plan *tideprojectv1alpha3.Plan
 	jobPatch := client.MergeFrom(job.DeepCopy())
 	completeJobStatus(&job)
 	ExpectWithOffset(1, k8sClient.Status().Patch(ctx, &job, jobPatch)).To(Succeed())
+	waitForJobTerminalCacheSync(ctx, jobName, "default")
+}
+
+// waitForJobTerminalCacheSync waits for the mgrClient cache to observe a
+// terminal Job status (isJobTerminal). Required whenever a test patches a
+// Job's status via the direct k8sClient immediately before a reconcile that
+// reads the SAME Job via the reconciler's cached client (Client: mgrClient
+// in newVerifyDispatchPlanReconciler/newVerifyDispatchTaskReconciler) —
+// waitForCacheSync's plain existence check is not enough for a status-only
+// mutation on an object that was already cached before the patch (Rule 1:
+// this cache-sync race reproduced live under load, exhausting a re-planned
+// attempt's verdict one reconcile early — see 52-09-SUMMARY.md deviations).
+func waitForJobTerminalCacheSync(ctx context.Context, name, namespace string) {
+	key := types.NamespacedName{Name: name, Namespace: namespace}
+	EventuallyWithOffset(1, func() bool {
+		var job batchv1.Job
+		if err := mgrClient.Get(ctx, key, &job); err != nil {
+			return false
+		}
+		return isJobTerminal(&job)
+	}, 5*time.Second, 50*time.Millisecond).Should(BeTrue(),
+		"timed out waiting for cache to observe terminal status on Job %s/%s", namespace, name)
 }
 
 // driveToPlanVerifying drives plan all the way to Phase=Verifying with a
@@ -218,6 +249,104 @@ func driveToPlanVerifying(ctx context.Context, r *PlanReconciler, envReader *map
 	// plan-check verifier Job via checkPlanVerifyingState.
 	_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
 	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+
+	return childNames
+}
+
+// driveThroughPlanRepairCycle completes the plan-check verifier Job at
+// attempt with verdict (expected REPAIRABLE and non-exhausting — the caller
+// picks findings that keep the loop alive), and drives the Plan all the way
+// through dispatchPlanRepair's delete-then-recreate reconciliation to
+// attempt+1's own Verifying state with its plan-check verifier Job
+// dispatched. Mirrors driveToPlanVerifying's own multi-reconcile shape
+// (Phase 52 Plan 07), generalized to a re-plan cycle (Phase 52 Plan 09,
+// D-04). Returns the fresh attempt's child Task names.
+func driveThroughPlanRepairCycle(ctx context.Context, r *PlanReconciler, envReader *mapEnvReader, plan *tideprojectv1alpha3.Plan, name types.NamespacedName, projName string, attempt int, verdict *pkgdispatch.GateDecision, childCount int) []string {
+	envReader.SetOut(string(plan.UID), pkgdispatch.EnvelopeOut{CompletedAt: time.Now(), Verdict: verdict})
+	completePlanVerifierJob(ctx, plan, attempt)
+
+	// This reconcile runs handlePlanVerifierCompletion -> repairOrHaltPlan ->
+	// dispatchPlanRepair: stamps the D-04 findings annotation, deletes the
+	// rejected attempt's child Tasks, bumps LoopStatus.Iteration, and clears
+	// Phase off Verifying.
+	_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+
+	nextAttempt := attempt + 1
+
+	// dispatchPlanRepair's Delete calls land synchronously within the
+	// reconcile above, but the .spec.planRef field indexer backing this List
+	// can lag the primary object-store sync by a beat (52-07's identical
+	// flake-fix rationale for makeVerifyChildTask, applied to deletion).
+	EventuallyWithOffset(1, func() int {
+		var taskList tideprojectv1alpha3.TaskList
+		if lErr := mgrClient.List(context.Background(), &taskList,
+			client.InNamespace(name.Namespace),
+			client.MatchingFields{taskPlanRefIndexKey: name.Name},
+		); lErr != nil {
+			return -1
+		}
+		return len(taskList.Items)
+	}, 5*time.Second, 50*time.Millisecond).Should(Equal(0),
+		"dispatchPlanRepair must delete every rejected-attempt child Task before the fresh planner dispatch (RESEARCH Pitfall 3)")
+
+	// reconcilePlannerDispatch's dispatch tail re-engages now the list is
+	// empty (the tasks-exist early-return no longer fires) and creates the
+	// fresh, findings-seeded planner attempt.
+	_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+
+	plannerJobName := fmt.Sprintf("tide-plan-%s-%d", plan.UID, nextAttempt)
+	var plannerJob batchv1.Job
+	ExpectWithOffset(1, k8sClient.Get(ctx, types.NamespacedName{Name: plannerJobName, Namespace: "default"}, &plannerJob)).To(Succeed(),
+		"the fresh, findings-seeded planner attempt must dispatch once the rejected attempt's children are gone")
+
+	envReader.SetOut(string(plan.UID), pkgdispatch.EnvelopeOut{ExitCode: 0, ChildCount: childCount, CompletedAt: time.Now()})
+	completePlanPlannerJobAttempt(ctx, plan, nextAttempt)
+
+	// First post-completion reconcile: zero child Tasks exist yet for THIS
+	// attempt, so the ChildCount gate requeues — this is also the reconcile
+	// that clears replanFindingsAnnotation (D-04's consumption point).
+	_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+
+	childNames := make([]string, 0, childCount)
+	for i := range childCount {
+		childName := fmt.Sprintf("%s-child-a%d-%d", name.Name, nextAttempt, i)
+		makeVerifyChildTask(childName, name.Name, projName)
+		childNames = append(childNames, childName)
+	}
+
+	EventuallyWithOffset(1, func() int {
+		var taskList tideprojectv1alpha3.TaskList
+		if lErr := mgrClient.List(context.Background(), &taskList,
+			client.InNamespace(name.Namespace),
+			client.MatchingFields{taskPlanRefIndexKey: name.Name},
+		); lErr != nil {
+			return -1
+		}
+		return len(taskList.Items)
+	}, 5*time.Second, 50*time.Millisecond).Should(Equal(childCount),
+		"the .spec.planRef field indexer must observe every created child Task before the next reconcile")
+
+	// Second reconcile: the fresh attempt's children now exist and
+	// ValidationState=="Validated" — transitions Running -> Verifying (D-03
+	// applies identically to every planner attempt, not just the first).
+	_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	ExpectWithOffset(1, k8sClient.Get(ctx, name, plan)).To(Succeed())
+	ExpectWithOffset(1, plan.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseVerifying),
+		"the re-planned attempt's own children must also gate through Verifying (D-03 applies to every attempt)")
+
+	// Third reconcile: dispatches the fresh attempt's own plan-check
+	// verifier Job.
+	_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+
+	verifierJobName := podjob.VerifierJobName("plan", string(plan.UID), nextAttempt)
+	var verifierJob batchv1.Job
+	ExpectWithOffset(1, k8sClient.Get(ctx, types.NamespacedName{Name: verifierJobName, Namespace: "default"}, &verifierJob)).To(Succeed(),
+		"the re-planned attempt must dispatch its own plan-check verifier Job")
 
 	return childNames
 }
@@ -494,5 +623,223 @@ var _ = Describe("PlanCheck: plan-check loop dispatch/hold/rails/fail-closed (Ph
 		var executorJob batchv1.Job
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: executorJobName, Namespace: "default"}, &executorJob)).To(Succeed(),
 			"an executor Job must now exist for the child Task once the plan-check verdict is APPROVED")
+	})
+})
+
+// replanScoreThirteen is a REPAIRABLE verdict scoring severityScore(3,1)=13
+// (1 blocker + 2 advisory findings) — the RePlan family's shared "first
+// pass" fixture, reused across specs that need a stable non-zero score to
+// compare a later verdict against.
+func replanScoreThirteen(summary string) *pkgdispatch.GateDecision {
+	return &pkgdispatch.GateDecision{
+		Verdict: pkgdispatch.VerdictRepairable,
+		Summary: summary,
+		Findings: []pkgdispatch.Finding{
+			{Dimension: "dependency-correctness", Severity: "blocker", Evidence: "child depends on itself"},
+			{Dimension: "file-touch", Severity: "advisory", Evidence: "declared path never referenced"},
+			{Dimension: "goal-alignment", Severity: "advisory", Evidence: "scope drift from phase brief"},
+		},
+	}
+}
+
+var _ = Describe("RePlan: findings-seeded re-plan, one-shot at defaults, severity-weighted stall (Phase 52 Plan 09, D-04/D-05/D-06)", Label("envtest", "phase52", "replan"), func() {
+	ctx := context.Background()
+
+	It("(a) exactly one re-plan at default maxIterations:1: a REPAIRABLE verdict re-dispatches a findings-seeded planner attempt 2, and a second REPAIRABLE verdict exhausts — no third planner Job (D-04)", func() {
+		const projName = "rp-proj-onereplan"
+		const planName = "rp-plan-onereplan"
+
+		makeProjectForTask(projName)
+		defer cleanupProject(projName)
+
+		plan := makeVerifyPlan(planName, projName, tideprojectv1alpha3.VerificationSpec{
+			Phase: "Locked", Version: 1, GateCommand: "make plan-check", OnExhaustion: "escalate",
+		})
+		envReader := newMapEnvReader()
+		r := newVerifyDispatchPlanReconciler(envReader)
+		name := types.NamespacedName{Name: planName, Namespace: "default"}
+
+		childNames1 := driveToPlanVerifying(ctx, r, envReader, plan, name, projName, 1)
+		defer cleanupTask(childNames1[0])
+
+		verdict1 := replanScoreThirteen("dependency ordering looks wrong")
+		childNames2 := driveThroughPlanRepairCycle(ctx, r, envReader, plan, name, projName, 1, verdict1, 1)
+		defer cleanupTask(childNames2[0])
+
+		Expect(k8sClient.Get(ctx, name, plan)).To(Succeed())
+		Expect(plan.Status.LoopStatus.Iteration).To(Equal(int32(1)), "D-06: the quality-re-plan counter increments exactly once")
+		Expect(plan.Annotations["tideproject.k8s/replan-findings"]).To(BeEmpty(),
+			"the D-04 findings annotation must clear once the fresh attempt materializes (consumption point)")
+
+		plannerJob1Name := fmt.Sprintf("tide-plan-%s-1", plan.UID)
+		plannerJob2Name := fmt.Sprintf("tide-plan-%s-2", plan.UID)
+		var plannerJob2 batchv1.Job
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: plannerJob2Name, Namespace: "default"}, &plannerJob2)).To(Succeed(),
+			"a second planner Job (tide-plan-<uid>-2) must dispatch once the rejected attempt's children are gone")
+		Expect(plannerJob2.Name).NotTo(Equal(plannerJob1Name), "the re-plan attempt must NOT collide with the rejected attempt's Job name")
+
+		envIn2 := decodeEnvelopeIn(&plannerJob2)
+		Expect(envIn2.RepairFindings).To(HaveLen(3), "the fresh planner attempt must be seeded with the D-04 findings block")
+		Expect(envIn2.RepairFindings[0].Severity).To(Equal("blocker"))
+
+		// Second REPAIRABLE verdict on the re-planned attempt: default
+		// maxIterations:1 means Iteration(1) >= MaxIterations(1) —
+		// exhausted regardless of score (the MaxIterations boundary, not
+		// the stall check).
+		envReader.SetOut(string(plan.UID), pkgdispatch.EnvelopeOut{
+			CompletedAt: time.Now(),
+			Verdict: &pkgdispatch.GateDecision{
+				Verdict:  pkgdispatch.VerdictRepairable,
+				Summary:  "still not right",
+				Findings: []pkgdispatch.Finding{{Dimension: "goal-alignment", Severity: "advisory", Evidence: "still drifting"}},
+			},
+		})
+		completePlanVerifierJob(ctx, plan, 2)
+
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Get(ctx, name, plan)).To(Succeed())
+		Expect(plan.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseVerifyHalted),
+			"a second REPAIRABLE verdict must exhaust (default maxIterations:1 allows exactly one re-plan), never dispatch a third planner attempt")
+		Expect(plan.Status.LoopStatus.ExitReason).To(Equal(tideprojectv1alpha3.ExitEscalated))
+
+		plannerJob3Name := fmt.Sprintf("tide-plan-%s-3", plan.UID)
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: plannerJob3Name, Namespace: "default"}, &batchv1.Job{})
+		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "exactly ONE re-plan at default maxIterations:1 — no third planner Job may ever dispatch")
+	})
+
+	It("(b) the rejected attempt's child Task is deleted outright, never merely un-dispatched — no executor Job ever exists for it (T-52-27 stale-attempt invariant)", func() {
+		const projName = "rp-proj-staleinvariant"
+		const planName = "rp-plan-staleinvariant"
+
+		makeProjectForTask(projName)
+		defer cleanupProject(projName)
+
+		plan := makeVerifyPlan(planName, projName, tideprojectv1alpha3.VerificationSpec{
+			Phase: "Locked", Version: 1, GateCommand: "make plan-check",
+		})
+		envReader := newMapEnvReader()
+		r := newVerifyDispatchPlanReconciler(envReader)
+		name := types.NamespacedName{Name: planName, Namespace: "default"}
+
+		childNames := driveToPlanVerifying(ctx, r, envReader, plan, name, projName, 1)
+		rejectedChildKey := types.NamespacedName{Name: childNames[0], Namespace: "default"}
+
+		var rejectedChild tideprojectv1alpha3.Task
+		Expect(k8sClient.Get(ctx, rejectedChildKey, &rejectedChild)).To(Succeed())
+		rejectedUID := rejectedChild.UID
+
+		envReader.SetOut(string(plan.UID), pkgdispatch.EnvelopeOut{
+			CompletedAt: time.Now(),
+			Verdict:     replanScoreThirteen("dependency ordering looks wrong"),
+		})
+		completePlanVerifierJob(ctx, plan, 1)
+
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+		Expect(err).NotTo(HaveOccurred())
+
+		// The rejected attempt's child Task object is gone entirely —
+		// there is nothing left for a Task reconcile to ever dispatch.
+		err = k8sClient.Get(ctx, rejectedChildKey, &tideprojectv1alpha3.Task{})
+		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "the rejected attempt's child Task must be deleted, not merely left un-dispatched")
+
+		executorJobName := podjob.JobName(rejectedUID, 1)
+		var executorJob batchv1.Job
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: executorJobName, Namespace: "default"}, &executorJob)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "no executor Job may ever exist for the rejected attempt's deleted child Task (T-52-27)")
+	})
+
+	It("(c) severity-weighted stall detection halts early at maxIterations:2 without consuming the remaining iteration (D-05)", func() {
+		const projName = "rp-proj-stall"
+		const planName = "rp-plan-stall"
+
+		makeProjectForTask(projName)
+		defer cleanupProject(projName)
+
+		plan := makeVerifyPlan(planName, projName, tideprojectv1alpha3.VerificationSpec{
+			Phase: "Locked", Version: 1, GateCommand: "make plan-check", MaxIterations: 2, OnExhaustion: "escalate",
+		})
+		envReader := newMapEnvReader()
+		r := newVerifyDispatchPlanReconciler(envReader)
+		name := types.NamespacedName{Name: planName, Namespace: "default"}
+
+		childNames1 := driveToPlanVerifying(ctx, r, envReader, plan, name, projName, 1)
+		defer cleanupTask(childNames1[0])
+
+		scoreThirteen := replanScoreThirteen("first pass: dependency ordering looks wrong")
+		childNames2 := driveThroughPlanRepairCycle(ctx, r, envReader, plan, name, projName, 1, scoreThirteen, 1)
+		defer cleanupTask(childNames2[0])
+
+		Expect(k8sClient.Get(ctx, name, plan)).To(Succeed())
+		Expect(plan.Status.LoopStatus.Iteration).To(Equal(int32(1)), "one re-plan consumed so far; one remains under maxIterations:2")
+
+		// SAME score (13) on the re-planned attempt — non-improving.
+		envReader.SetOut(string(plan.UID), pkgdispatch.EnvelopeOut{CompletedAt: time.Now(), Verdict: scoreThirteen})
+		completePlanVerifierJob(ctx, plan, 2)
+
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Get(ctx, name, plan)).To(Succeed())
+		Expect(plan.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseVerifyHalted),
+			"a non-improving re-plan must halt at the stall check, even though maxIterations:2 would allow another attempt")
+		Expect(plan.Status.LoopStatus.Iteration).To(Equal(int32(1)), "the stall check must fire BEFORE consuming the remaining iteration")
+
+		// NO third planner Job — the stall check pre-empted the
+		// MaxIterations boundary, which alone would have allowed one more
+		// re-plan (Pitfall 3's warning sign inverted into a positive
+		// assertion: the second Job exists, per driveThroughPlanRepairCycle
+		// above, but the third never does).
+		plannerJob3Name := fmt.Sprintf("tide-plan-%s-3", plan.UID)
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: plannerJob3Name, Namespace: "default"}, &batchv1.Job{})
+		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "a stalled re-plan must never dispatch a further planner attempt")
+	})
+
+	It("(c-control) an improving re-plan score proceeds and consumes the remaining iteration at maxIterations:2 (D-05 control)", func() {
+		const projName = "rp-proj-improve"
+		const planName = "rp-plan-improve"
+
+		makeProjectForTask(projName)
+		defer cleanupProject(projName)
+
+		plan := makeVerifyPlan(planName, projName, tideprojectv1alpha3.VerificationSpec{
+			Phase: "Locked", Version: 1, GateCommand: "make plan-check", MaxIterations: 2, OnExhaustion: "escalate",
+		})
+		envReader := newMapEnvReader()
+		r := newVerifyDispatchPlanReconciler(envReader)
+		name := types.NamespacedName{Name: planName, Namespace: "default"}
+
+		childNames1 := driveToPlanVerifying(ctx, r, envReader, plan, name, projName, 1)
+		defer cleanupTask(childNames1[0])
+
+		scoreThirteen := replanScoreThirteen("first pass: dependency ordering looks wrong")
+		childNames2 := driveThroughPlanRepairCycle(ctx, r, envReader, plan, name, projName, 1, scoreThirteen, 1)
+		defer cleanupTask(childNames2[0])
+
+		// Improving score: 5 (zero blockers, 5 advisories) < 13.
+		scoreFive := &pkgdispatch.GateDecision{
+			Verdict: pkgdispatch.VerdictRepairable,
+			Summary: "second pass: only minor findings remain",
+			Findings: []pkgdispatch.Finding{
+				{Dimension: "file-touch", Severity: "advisory", Evidence: "a"},
+				{Dimension: "file-touch", Severity: "advisory", Evidence: "b"},
+				{Dimension: "goal-alignment", Severity: "advisory", Evidence: "c"},
+				{Dimension: "goal-alignment", Severity: "advisory", Evidence: "d"},
+				{Dimension: "goal-alignment", Severity: "advisory", Evidence: "e"},
+			},
+		}
+		childNames3 := driveThroughPlanRepairCycle(ctx, r, envReader, plan, name, projName, 2, scoreFive, 1)
+		defer cleanupTask(childNames3[0])
+
+		Expect(k8sClient.Get(ctx, name, plan)).To(Succeed())
+		Expect(plan.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseVerifying),
+			"an improving re-plan must proceed and consume the remaining iteration — a third planner attempt dispatches")
+		Expect(plan.Status.LoopStatus.Iteration).To(Equal(int32(2)), "the second (final, maxIterations:2) re-plan consumed the remaining iteration")
+
+		plannerJob3Name := fmt.Sprintf("tide-plan-%s-3", plan.UID)
+		var plannerJob3 batchv1.Job
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: plannerJob3Name, Namespace: "default"}, &plannerJob3)).To(Succeed(),
+			"an improving re-plan must consume the remaining iteration and dispatch a third planner attempt")
 	})
 })
