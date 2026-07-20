@@ -34,7 +34,15 @@ spec:
   targetRepo: https://github.com/example/tide-verify-proof.git
   providerSecretRef: tide-provider-secret
   budget: {absoluteCapCents: 100000}
-  subagent: {model: stub}
+  # Model must be REAL (not "stub"): buildVerifierEnvelopeIn inherits the
+  # task-level model (task_controller.go ResolveProvider(project,"task")), and
+  # the verifier makes a real Anthropic call with it — "stub" 404s upstream.
+  # The executor still runs the stub image (image resolution is independent of
+  # model; dev.testMode drives stub behavior), so only the verifier bills.
+  # sonnet-4-6, not haiku-4-5: haiku investigation-spirals to the LangGraph
+  # recursion limit on the verifier prompt (observed live 2026-07-19); sonnet
+  # converges to a structured verdict in a handful of tool calls.
+  subagent: {model: claude-sonnet-4-6}
   gates: {milestone: auto, phase: auto, plan: auto, task: auto, pauseBetweenWaves: false}
 ---
 apiVersion: tideproject.k8s/v1alpha3
@@ -67,4 +75,9 @@ spec:
   filesTouched: [proof.go]
   declaredOutputPaths: [proof.go]
   dev: {testMode: success}
-  verification: {phase: Locked, gateCommand: "false", maxIterations: 2, onExhaustion: requireApproval}
+  # Red gate that is SEMANTICALLY REPAIRABLE: the file is absent, so the gate
+  # fails, but a fresh executor attempt could plausibly create it — the
+  # verifier judges REPAIRABLE and drives the repair loop. (A literal "false"
+  # gate is honestly unfixable; a sharp judge correctly calls that BLOCKED,
+  # which forecloses the loop this fixture exists to prove.)
+  verification: {phase: Locked, gateCommand: "test -f VERIFIED.md", maxIterations: 2, onExhaustion: requireApproval}

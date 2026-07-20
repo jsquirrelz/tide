@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"testing"
@@ -34,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
+	"github.com/jsquirrelz/tide/internal/owner"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
@@ -186,6 +188,169 @@ func TestPodStatusEnvelopeReaderReadsSubagentTerminationMessage(t *testing.T) {
 	}
 	if got.TaskUID != want.TaskUID || got.Result != want.Result || got.ExitCode != want.ExitCode {
 		t.Fatalf("ReadOut() = %#v, want %#v", got, want)
+	}
+}
+
+// terminatedPod builds a pod with a terminated subagent container carrying
+// message, labeled with taskUID plus any extra labels — the fixture shape
+// every PodStatusEnvelopeReader test consumes.
+func terminatedPod(name, taskUID, message string, extraLabels map[string]string) *corev1.Pod {
+	labels := map[string]string{"tideproject.k8s/task-uid": taskUID}
+	maps.Copy(labels, extraLabels)
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "task-ns", Labels: labels},
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name: ContainerNameSubagent,
+					State: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{Message: message},
+					},
+				},
+			},
+		},
+	}
+}
+
+// A contract-bearing Task terminates with BOTH an executor pod and a verifier
+// pod carrying the same task-uid label. ReadOut serves executor/planner
+// completion and must never return the verifier's message — before the
+// role filter this was cache-order roulette (found live 2026-07-19).
+func TestPodStatusEnvelopeReader_ReadOut_SkipsVerifierPods(t *testing.T) {
+	taskUID := "task-uid-mixed"
+	executorOut, err := json.Marshal(pkgdispatch.EnvelopeOut{
+		APIVersion: pkgdispatch.APIVersionV1Alpha1,
+		Kind:       pkgdispatch.KindTaskEnvelopeOut,
+		TaskUID:    taskUID,
+		Result:     "executor-result",
+	})
+	if err != nil {
+		t.Fatalf("marshal executor EnvelopeOut: %v", err)
+	}
+	verifierStub, err := json.Marshal(pkgdispatch.TerminationStub{GateDecision: "REPAIRABLE"})
+	if err != nil {
+		t.Fatalf("marshal verifier TerminationStub: %v", err)
+	}
+
+	reader := &PodStatusEnvelopeReader{
+		Client: fake.NewClientBuilder().
+			WithScheme(testScheme(t)).
+			WithObjects(
+				// Verifier pod first so an unfiltered implementation that takes
+				// the first match returns the wrong message deterministically.
+				terminatedPod("a-verifier-pod", taskUID, string(verifierStub),
+					map[string]string{"tideproject.k8s/role": "verifier"}),
+				terminatedPod("b-executor-pod", taskUID, string(executorOut),
+					map[string]string{"tideproject.k8s/role": "executor"}),
+			).
+			Build(),
+	}
+
+	got, err := reader.ReadOut(context.Background(), "project-uid", taskUID)
+	if err != nil {
+		t.Fatalf("ReadOut() error = %v", err)
+	}
+	if got.Result != "executor-result" {
+		t.Fatalf("ReadOut() returned %q; must skip the verifier pod and return the executor envelope", got.Result)
+	}
+}
+
+// The verifier image writes the tiny TerminationStub (D-05a) to its
+// termination message — gateDecision enum string, never a full EnvelopeOut.
+// ReadVerifierOut must select the verifier-role pod and graft that stub
+// verdict into EnvelopeOut.Verdict; before this existed every live verify
+// fail-closed as VerifierVerdictMissing (found live 2026-07-19).
+func TestPodStatusEnvelopeReader_ReadVerifierOut_GraftsStubVerdict(t *testing.T) {
+	taskUID := "task-uid-verify"
+	executorOut, err := json.Marshal(pkgdispatch.EnvelopeOut{
+		APIVersion: pkgdispatch.APIVersionV1Alpha1,
+		Kind:       pkgdispatch.KindTaskEnvelopeOut,
+		TaskUID:    taskUID,
+		Result:     "executor-result",
+	})
+	if err != nil {
+		t.Fatalf("marshal executor EnvelopeOut: %v", err)
+	}
+	verifierStub, err := json.Marshal(pkgdispatch.TerminationStub{
+		ExitCode:          0,
+		GateDecision:      "REPAIRABLE",
+		FindingsCount:     2,
+		HighSeverityCount: 1,
+	})
+	if err != nil {
+		t.Fatalf("marshal verifier TerminationStub: %v", err)
+	}
+
+	reader := &PodStatusEnvelopeReader{
+		Client: fake.NewClientBuilder().
+			WithScheme(testScheme(t)).
+			WithObjects(
+				terminatedPod("executor-pod", taskUID, string(executorOut),
+					map[string]string{"tideproject.k8s/role": "executor"}),
+				terminatedPod("verifier-pod", taskUID, string(verifierStub),
+					map[string]string{"tideproject.k8s/role": "verifier"}),
+			).
+			Build(),
+	}
+
+	got, err := reader.ReadVerifierOut(context.Background(), "project-uid", taskUID)
+	if err != nil {
+		t.Fatalf("ReadVerifierOut() error = %v", err)
+	}
+	if got.Verdict == nil {
+		t.Fatalf("ReadVerifierOut() Verdict = nil; stub gateDecision must be grafted")
+	}
+	if got.Verdict.Verdict != pkgdispatch.VerdictRepairable {
+		t.Fatalf("ReadVerifierOut() Verdict = %q, want REPAIRABLE", got.Verdict.Verdict)
+	}
+}
+
+// Repair loops leave one terminated verifier pod per attempt sharing the
+// task-uid label; ReadVerifierOut must return the HIGHEST attempt's verdict,
+// not whichever the cache lists first.
+func TestPodStatusEnvelopeReader_ReadVerifierOut_PicksHighestAttempt(t *testing.T) {
+	taskUID := "task-uid-attempts"
+	stub1, err := json.Marshal(pkgdispatch.TerminationStub{GateDecision: "REPAIRABLE"})
+	if err != nil {
+		t.Fatalf("marshal attempt-1 stub: %v", err)
+	}
+	stub2, err := json.Marshal(pkgdispatch.TerminationStub{GateDecision: "APPROVED"})
+	if err != nil {
+		t.Fatalf("marshal attempt-2 stub: %v", err)
+	}
+
+	reader := &PodStatusEnvelopeReader{
+		Client: fake.NewClientBuilder().
+			WithScheme(testScheme(t)).
+			WithObjects(
+				terminatedPod("verifier-attempt-2", taskUID, string(stub2),
+					map[string]string{"tideproject.k8s/role": "verifier", owner.LabelAttempt: "2"}),
+				terminatedPod("verifier-attempt-1", taskUID, string(stub1),
+					map[string]string{"tideproject.k8s/role": "verifier", owner.LabelAttempt: "1"}),
+			).
+			Build(),
+	}
+
+	got, err := reader.ReadVerifierOut(context.Background(), "project-uid", taskUID)
+	if err != nil {
+		t.Fatalf("ReadVerifierOut() error = %v", err)
+	}
+	if got.Verdict == nil || got.Verdict.Verdict != pkgdispatch.VerdictApproved {
+		t.Fatalf("ReadVerifierOut() = %#v, want the attempt-2 APPROVED verdict", got.Verdict)
+	}
+}
+
+// No verifier pod at all (e.g. termination message lost to node pressure) is
+// a read error — the caller's fail-closed VerifierEnvelopeUnreadable path,
+// never a silent empty envelope.
+func TestPodStatusEnvelopeReader_ReadVerifierOut_NoVerifierPodErrors(t *testing.T) {
+	reader := &PodStatusEnvelopeReader{
+		Client: fake.NewClientBuilder().WithScheme(testScheme(t)).Build(),
+	}
+
+	_, err := reader.ReadVerifierOut(context.Background(), "project-uid", "task-uid-none")
+	if err == nil {
+		t.Fatalf("ReadVerifierOut() with no verifier pod must error (fail-closed)")
 	}
 }
 

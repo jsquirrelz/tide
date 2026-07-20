@@ -1,0 +1,57 @@
+# Seeds /workspace/worktrees/<TASK_UID> on the tide-projects PVC so the
+# verifier has a candidate worktree to judge. Needed because the live-proof
+# executor is the STUB subagent with no cloned repo: the fixture Project's
+# targetRepo is fake, so no clone Job ever lands /workspace/repo.git, the
+# stub takes its gitless fallback (ensureExecutorWorktree's 30s repo-wait),
+# and nothing materializes the worktree the verifier requires.
+#
+# Substitute before applying (both appear once each):
+#   TASK_UID_PLACEHOLDER    — .metadata.uid of the freshly-applied Task
+#   PROJECT_UID_PLACEHOLDER — .metadata.uid of the Project (subPath prefix)
+# Apply IMMEDIATELY after the Task (the stub's 30s repo-wait is the window;
+# this pod completes in ~5s). The worktree carries a README recording the
+# task intent plus a plausible proof.go implementation, so the verifier
+# judges a real candidate rather than an empty repo.
+apiVersion: v1
+kind: Pod
+metadata: {name: worktree-provisioner, namespace: tide-verify-proof}
+spec:
+  restartPolicy: Never
+  securityContext: {runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000}
+  containers:
+  - name: provision
+    # The verifier image doubles as the provisioner: it has git, and it is
+    # already kind-loaded on the node (imagePullPolicy Never).
+    image: ghcr.io/jsquirrelz/tide-langgraph-verifier:test
+    imagePullPolicy: Never
+    command: ["/bin/sh","-c"]
+    args:
+    - |
+      set -e
+      WT=/workspace/worktrees/TASK_UID_PLACEHOLDER
+      mkdir -p "$WT"
+      cd "$WT"
+      git init -b main .
+      git config user.name 'TIDE Proof'
+      git config user.email 'proof@tideproject.k8s'
+      cat > README.md <<'MD'
+      # tide-verify-proof
+
+      Fixture project for TIDE's task-loop live proof.
+
+      Task 01: implement `Proof()` in proof.go returning the fixture marker string.
+      MD
+      cat > proof.go <<'GO'
+      // Package proof hosts the tide-verify-proof fixture marker.
+      package proof
+
+      // Proof returns the fixture marker string for task 01.
+      func Proof() string {
+      	return "tide-verify-proof"
+      }
+      GO
+      git add -A
+      git commit -m 'task-01: implement Proof() marker per task instruction'
+      echo provisioned OK
+    volumeMounts: [{mountPath: /workspace, name: ws, subPath: PROJECT_UID_PLACEHOLDER/workspace}]
+  volumes: [{name: ws, persistentVolumeClaim: {claimName: tide-projects}}]

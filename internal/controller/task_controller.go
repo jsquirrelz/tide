@@ -2828,6 +2828,27 @@ func (r *TaskReconciler) dispatchRepairAttempt(ctx context.Context, task *tidepr
 	return ctrl.Result{}, nil
 }
 
+// verifierEnvelopeReader is the optional role-aware read seam a reader may
+// implement (podjob.PodStatusEnvelopeReader does). A contract-bearing Task's
+// executor and verifier pods share the task-uid label, and the verifier's
+// termination message is the tiny TerminationStub — not an EnvelopeOut — so
+// the plain ReadOut can neither select the right pod nor see the verdict
+// (found live 2026-07-19: every verify fail-closed VerifierVerdictMissing).
+// Readers without the method (envtest fakes, FilesystemEnvelopeReader) fall
+// back to ReadOut unchanged.
+type verifierEnvelopeReader interface {
+	ReadVerifierOut(ctx context.Context, projectUID, taskUID string) (pkgdispatch.EnvelopeOut, error)
+}
+
+// readVerifierEnvelope reads the verifier verdict envelope via the role-aware
+// seam when the reader provides it, else the plain ReadOut.
+func readVerifierEnvelope(ctx context.Context, reader podjob.EnvelopeReader, projectUID, taskUID string) (pkgdispatch.EnvelopeOut, error) {
+	if vr, ok := reader.(verifierEnvelopeReader); ok {
+		return vr.ReadVerifierOut(ctx, projectUID, taskUID)
+	}
+	return reader.ReadOut(ctx, projectUID, taskUID)
+}
+
 // handleVerifierCompletion consumes a terminal verifier Job's
 // EnvelopeOut.Verdict (Plan 07, the BACKWARD half of the verifier
 // sub-state-machine Plan 06 opened). Fail-closed by construction: an
@@ -2838,7 +2859,7 @@ func (r *TaskReconciler) dispatchRepairAttempt(ctx context.Context, task *tidepr
 // gate-command Finding dominates -> repairOrHalt; BLOCKED (and
 // ClassifyVerdict's own fail-closed default) -> haltVerify.
 func (r *TaskReconciler) handleVerifierCompletion(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, verifierJob *batchv1.Job) (ctrl.Result, error) {
-	out, err := r.Deps.EnvReader.ReadOut(ctx, string(project.UID), string(task.UID))
+	out, err := readVerifierEnvelope(ctx, r.Deps.EnvReader, string(project.UID), string(task.UID))
 	if err != nil {
 		// Fail-closed (mirrors handleJobCompletion's EnvelopeReadFailed path,
 		// :1251): a Task whose verifier envelope cannot be read is never

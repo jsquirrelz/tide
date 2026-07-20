@@ -1,0 +1,23 @@
+# Green-gate half of the Phase 51 live proof (billable happy path).
+# Apply AFTER the red-gate run reaches VerifyHalted and the project is
+# resumed (`tide resume` clears the project-wide VerifyHalt — new dispatch
+# is frozen while it is set). Requires the same hierarchy + secrets from
+# live-proof-fixture.yaml, and a provisioned worktree for THIS task's UID
+# (see live-proof-worktree-provisioner.yaml).
+# Expected: executor (stub) → Verifying → verifier APPROVED → Succeeded.
+apiVersion: tideproject.k8s/v1alpha3
+kind: Task
+metadata:
+  name: proof-task-green
+  namespace: tide-verify-proof
+  labels: {tideproject.k8s/project: tide-verify-proof-project, tideproject.k8s/wave-index: "0"}
+spec:
+  planRef: tide-verify-proof-plan
+  promptPath: children/task-01.json
+  filesTouched: [proof.go]
+  declaredOutputPaths: [proof.go]
+  dev: {testMode: success}
+  # Green gate that is SEMANTICALLY MEANINGFUL: proof.go exists in the
+  # provisioned worktree, so the gate passes and the verifier can judge the
+  # candidate on its merits — more honest than a literal "true".
+  verification: {phase: Locked, gateCommand: "test -f proof.go", maxIterations: 1, onExhaustion: requireApproval}

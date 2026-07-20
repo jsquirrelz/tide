@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -160,6 +161,15 @@ func (r *PodStatusEnvelopeReader) ReadOut(ctx context.Context, projectUID, taskU
 			return pkgdispatch.EnvelopeOut{}, fmt.Errorf("list pods for task %s: %w", taskUID, err)
 		}
 		for _, pod := range pods.Items {
+			// Phase 51: a contract-bearing Task's verifier pod shares the
+			// task-uid label with its executor pod. This method serves
+			// executor/planner completion — a verifier pod's message here
+			// would be the wrong role's envelope (and cache order made it a
+			// coin flip which one listed first). Verifier verdicts are read
+			// by ReadVerifierOut.
+			if pod.Labels["tideproject.k8s/role"] == string(JobKindVerifier) {
+				continue
+			}
 			for _, status := range pod.Status.ContainerStatuses {
 				if status.Name != ContainerNameSubagent || status.State.Terminated == nil {
 					continue
@@ -180,6 +190,82 @@ func (r *PodStatusEnvelopeReader) ReadOut(ctx context.Context, projectUID, taskU
 		return r.Fallback.ReadOut(ctx, projectUID, taskUID)
 	}
 	return pkgdispatch.EnvelopeOut{}, fmt.Errorf("no termination envelope found for task %s", taskUID)
+}
+
+// ReadVerifierOut reads the verifier verdict for a Task from the verifier
+// pod's termination message (Phase 51). The verifier image writes the tiny
+// TerminationStub there (D-05a size×locality rule: the full GateDecision
+// with findings stays on the namespace-local PVC out.json, which the Manager
+// cannot mount) — so the verdict enum travels as TerminationStub.GateDecision
+// (EVAL-05), and this method grafts it into EnvelopeOut.Verdict for the
+// controller's ClassifyVerdict three-tier decision. Findings stay behind on
+// the PVC: the stub's verdict is post-dominance (the in-pod harness already
+// forced a red gate command down to REPAIRABLE/BLOCKED before stamping it),
+// so the tier alone is sufficient and safe for the controller's decision.
+//
+// Selection: pods labeled with the task-uid AND role=verifier; among them the
+// HIGHEST attempt label wins (repair loops leave one terminated verifier pod
+// per attempt). No filesystem fallback — a missing verifier message is a read
+// error, which the caller fail-closes (VerifierEnvelopeUnreadable), never an
+// empty envelope.
+func (r *PodStatusEnvelopeReader) ReadVerifierOut(ctx context.Context, projectUID, taskUID string) (pkgdispatch.EnvelopeOut, error) {
+	_ = projectUID // selection is label-driven; kept for interface symmetry with ReadOut
+	if r.Client == nil {
+		return pkgdispatch.EnvelopeOut{}, fmt.Errorf("no client configured to read verifier termination envelope for task %s", taskUID)
+	}
+	var pods corev1.PodList
+	if err := r.Client.List(ctx, &pods, client.MatchingLabels{
+		"tideproject.k8s/task-uid": taskUID,
+		"tideproject.k8s/role":     string(JobKindVerifier),
+	}); err != nil {
+		return pkgdispatch.EnvelopeOut{}, fmt.Errorf("list verifier pods for task %s: %w", taskUID, err)
+	}
+
+	bestAttempt := -1
+	var bestMsg, bestPod string
+	for _, pod := range pods.Items {
+		for _, status := range pod.Status.ContainerStatuses {
+			if status.Name != ContainerNameSubagent || status.State.Terminated == nil {
+				continue
+			}
+			msg := strings.TrimSpace(status.State.Terminated.Message)
+			if msg == "" {
+				continue
+			}
+			attempt := 0
+			if a, err := strconv.Atoi(pod.Labels[owner.LabelAttempt]); err == nil {
+				attempt = a
+			}
+			if attempt > bestAttempt {
+				bestAttempt = attempt
+				bestMsg = msg
+				bestPod = pod.Namespace + "/" + pod.Name
+			}
+		}
+	}
+	if bestAttempt < 0 {
+		return pkgdispatch.EnvelopeOut{}, fmt.Errorf("no verifier termination envelope found for task %s", taskUID)
+	}
+
+	// The message may be a full EnvelopeOut (future-proof) or — the shipped
+	// verifier image's actual shape — a TerminationStub. ExitCode/Reason/Usage
+	// share JSON keys across both types, so the EnvelopeOut unmarshal captures
+	// them either way; the verdict graft below covers the stub shape.
+	var out pkgdispatch.EnvelopeOut
+	if err := json.Unmarshal([]byte(bestMsg), &out); err != nil {
+		return pkgdispatch.EnvelopeOut{}, fmt.Errorf("unmarshal verifier termination envelope for pod %s: %w", bestPod, err)
+	}
+	if out.Verdict == nil {
+		var stub pkgdispatch.TerminationStub
+		if err := json.Unmarshal([]byte(bestMsg), &stub); err == nil && stub.GateDecision != "" {
+			out.Verdict = &pkgdispatch.GateDecision{
+				Verdict: pkgdispatch.Verdict(stub.GateDecision),
+				Summary: fmt.Sprintf("verdict relayed via termination stub (%d findings, %d high-severity; full GateDecision on the namespace-local PVC)",
+					stub.FindingsCount, stub.HighSeverityCount),
+			}
+		}
+	}
+	return out, nil
 }
 
 // PodJobBackend satisfies internal/dispatch.Dispatcher. It creates one K8s Job per

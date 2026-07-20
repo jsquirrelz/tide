@@ -109,6 +109,47 @@ def test_run_agent_ignores_model_supplied_gate_command(monkeypatch, fixture_work
     assert captured["command"] == "true"
 
 
+def test_run_agent_returns_structured_gate_decision_json(monkeypatch, fixture_worktree: Path) -> None:
+    """The ToolStrategy(GateDecision) wiring: a model that emits its verdict
+    by calling the synthesized GateDecision tool yields a structured_response,
+    and run_agent returns its by_alias JSON — the exact bytes
+    verdict.classify_verdict parses (D-04). Without this wiring every verdict
+    fail-closes to BLOCKED and APPROVED/REPAIRABLE are unreachable."""
+    monkeypatch.setenv("TIDE_WORKTREE_DIR", str(fixture_worktree))
+    model = _fake_model(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "GateDecision",
+                        "args": {"verdict": "APPROVED", "summary": "gate green", "findings": []},
+                        "id": "call-1",
+                    }
+                ],
+            ),
+        ]
+    )
+
+    result_text = agent.run_agent(model, "verify the candidate")
+
+    parsed = json.loads(result_text)
+    assert parsed["verdict"] == "APPROVED"
+    assert parsed["summary"] == "gate green"
+
+
+def test_run_agent_prose_final_message_falls_back_to_text(monkeypatch, fixture_worktree: Path) -> None:
+    """A run that never calls the GateDecision tool has no structured_response
+    (verified behavior at langchain==1.3.14: no retry, no raise) — run_agent
+    returns the prose, which classify_verdict fail-closes to BLOCKED."""
+    monkeypatch.setenv("TIDE_WORKTREE_DIR", str(fixture_worktree))
+    model = _fake_model([AIMessage(content="looks fine to me")])
+
+    result_text = agent.run_agent(model, "verify the candidate")
+
+    assert result_text == "looks fine to me"
+
+
 def test_run_agent_passes_explicit_recursion_limit(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 
