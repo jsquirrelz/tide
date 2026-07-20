@@ -1,5 +1,5 @@
 ---
-status: partial
+status: passed
 phase: 51-the-task-loop
 source: [51-VERIFICATION.md, 51-08-PLAN.md]
 started: 2026-07-19
@@ -8,7 +8,7 @@ updated: 2026-07-20
 
 ## Current Test
 
-[test 1 PASSED live 2026-07-20; test 2 (kind concurrency spec) still pending]
+[both tests PASSED live 2026-07-20]
 
 ## Tests
 
@@ -90,7 +90,7 @@ why manual: requires the operator's real Anthropic key (`~/.tide/anthropic.key`)
 
 ### 2. Live kind concurrency spec (Plan 08 Task 1 — `make test-int`)
 expected: `test/integration/kind/verifier_concurrency_test.go` runs live — 3 contract-bearing Tasks dispatch concurrent `role=verifier` Jobs that never exceed the sized `verifierInFlightCount` cap (2), drain to zero, and leave no Task stranded in `Verifying`. (Spec compiles/vets/lints clean; not yet run against a live cluster.)
-result: [pending]
+result: **PASSED** (2026-07-20, kind-tide-test): `KEEP_KIND_CLUSTER=true go test ./test/integration/kind/ -run TestIntegrationKind --ginkgo.focus 'Verifier concurrent-dispatch'` → `Ran 1 of 27 Specs in 157.314 seconds — SUCCESS! 1 Passed | 0 Failed`.
 why manual: needs a running kind cluster (Layer B); deferred from Task 1 as part of the same operator session.
 
 ## Operator runbook (prerequisites now satisfied)
@@ -99,9 +99,9 @@ Both prerequisites the executor flagged are FIXED: `TaskReconcilerDeps.VerifierI
 ## Summary
 
 total: 2
-passed: 1
+passed: 2
 issues: 0
-pending: 1
+pending: 0
 skipped: 0
 blocked: 0
 
