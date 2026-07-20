@@ -47,9 +47,25 @@ COPY cmd/tide-langgraph-verifier/verifier/__init__.py \
      cmd/tide-langgraph-verifier/verifier/envelope.py \
      cmd/tide-langgraph-verifier/verifier/tools.py \
      cmd/tide-langgraph-verifier/verifier/agent.py \
+     cmd/tide-langgraph-verifier/verifier/verdict.py \
      /app/verifier/
 
+# `python -m verifier` resolves the package from sys.path, and `-m` prepends the
+# process CWD — which is /workspace in the dispatched pod (jobspec sets
+# WorkingDir on the subagent container), not /app. PYTHONPATH pins the package
+# location so the entrypoint resolves from any CWD.
+ENV PYTHONPATH=/app
+
 USER 1000
+
+# Build-time entrypoint guard: pytest imports the package off the source tree
+# and never exercises the shipped ENTRYPOINT, so a packaging break (file missing
+# from the COPY above, or a CWD-dependent import) only surfaced at live dispatch.
+# Run from / — NOT /app — as uid 1000 to prove the import chain the entrypoint
+# needs works from an arbitrary CWD. __main__ is `if __name__` guarded, so
+# importing it executes no agent code. Fails the build for every consumer of
+# this Dockerfile (make targets, test-int-kind-prep, readonly script, release).
+RUN cd / && python -c "import verifier, verifier.__main__"
 
 # Consumed by ChatAnthropic's httpx transport to trust the credproxy sidecar's
 # freshly-minted self-signed CA (D-06/D-07) — the sidecar writes ca.crt to this

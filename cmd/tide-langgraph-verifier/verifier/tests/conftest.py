@@ -20,6 +20,31 @@ API_VERSION = "dispatch.tideproject.k8s/v1alpha1"
 KIND_TASK_ENVELOPE_IN = "TaskEnvelopeIn"
 
 
+def _repo_root() -> Path:
+    """Walk up from this file until go.mod is found (repo root marker).
+
+    make test-langgraph-verifier cd's into cmd/tide-langgraph-verifier
+    before invoking pytest, so a fixed Path(__file__).parents[N] is fragile
+    against directory-depth changes — walk to the go.mod marker instead.
+
+    Lives in the test package, never the runtime modules: the shipped image
+    has no go.mod above /app/verifier/, so repo-root walking at import time
+    crashed the entrypoint (the Phase 51 live-proof blocker).
+    """
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / "go.mod").exists():
+            return parent
+    raise RuntimeError(f"could not locate repo root (no go.mod found above {here})")
+
+
+# The single source-of-truth fixtures pkg/dispatch's Go test suite also reads
+# — the cross-language round-trip proofs (D-02/D-03), never Python-local
+# copies.
+GOLDEN_FIXTURE = _repo_root() / "pkg" / "dispatch" / "testdata" / "gate_decision_golden.json"
+ENVELOPE_OUT_GOLDEN_FIXTURE = _repo_root() / "pkg" / "dispatch" / "testdata" / "envelope_out_golden.json"
+
+
 def _run_git(args: list[str], cwd: Path) -> None:
     subprocess.run(
         ["git", "-C", str(cwd)] + args,

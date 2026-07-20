@@ -11,7 +11,7 @@ Phase 50 (D-02/D-03) extends both writers with the mirrored
 TerminalReason/RunEvidence/loopRunID/attemptID fields hand-ported from
 pkg/dispatch/terminal_reason.go and pkg/dispatch/run_evidence.go — proven
 against the shared pkg/dispatch/testdata/envelope_out_golden.json fixture
-(see [ENVELOPE_OUT_GOLDEN_FIXTURE]).
+(tests/conftest.py:ENVELOPE_OUT_GOLDEN_FIXTURE).
 """
 
 from __future__ import annotations
@@ -21,8 +21,6 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-
-from verifier.verdict import _repo_root
 
 # Wire-contract discriminators (pkg/dispatch/envelope.go:21-38). Consumers
 # MUST reject any envelope whose apiVersion/kind does not match these exactly
@@ -271,11 +269,3 @@ def write_termination_stub(
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(data)
-
-
-# ENVELOPE_OUT_GOLDEN_FIXTURE is the single source-of-truth EnvelopeOut
-# fixture pkg/dispatch's Go test suite also reads
-# (pkg/dispatch/testdata/envelope_out_golden.json) — the cross-language
-# round-trip proof (D-02/D-03), never a Python-local copy. Mirrors
-# verdict.GOLDEN_FIXTURE's identical repo-root idiom.
-ENVELOPE_OUT_GOLDEN_FIXTURE = _repo_root() / "pkg" / "dispatch" / "testdata" / "envelope_out_golden.json"

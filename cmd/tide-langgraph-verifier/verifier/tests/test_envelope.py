@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from verifier import envelope
+from verifier.tests.conftest import ENVELOPE_OUT_GOLDEN_FIXTURE
 
 
 def _write_stub_with_timeout(timeout: float = 8.0, **kwargs) -> bool:
@@ -216,7 +217,7 @@ def test_envelope_out_golden_fixture_parity(tmp_path: Path) -> None:
     cross-language parity proof. The fixture deliberately pins a
     non-"completed" terminalReason so a silent-default bug in either
     language surfaces as a value mismatch here."""
-    golden = json.loads(envelope.ENVELOPE_OUT_GOLDEN_FIXTURE.read_bytes())
+    golden = json.loads(ENVELOPE_OUT_GOLDEN_FIXTURE.read_bytes())
 
     assert golden["terminalReason"] == "cap_exceeded"
     assert golden["loopRunID"]

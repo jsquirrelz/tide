@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import json
 from enum import Enum
-from pathlib import Path
 
 import pydantic
 
@@ -89,23 +88,3 @@ def classify_verdict(raw: str | bytes) -> Verdict:
         return Verdict(verdict_str)
     except ValueError:
         return Verdict.BLOCKED  # missing/unrecognized verdict field
-
-
-def _repo_root() -> Path:
-    """Walk up from this file until go.mod is found (repo root marker).
-
-    make test-langgraph-verifier cd's into cmd/tide-langgraph-verifier
-    before invoking pytest, so a fixed Path(__file__).parents[N] is fragile
-    against directory-depth changes — walk to the go.mod marker instead.
-    """
-    here = Path(__file__).resolve()
-    for parent in here.parents:
-        if (parent / "go.mod").exists():
-            return parent
-    raise RuntimeError(f"could not locate repo root (no go.mod found above {here})")
-
-
-# GOLDEN_FIXTURE is the single source-of-truth verdict fixture pkg/dispatch's
-# Go test suite also reads (pkg/dispatch/testdata/gate_decision_golden.json)
-# — the cross-language round-trip proof (D-02), never a Python-local copy.
-GOLDEN_FIXTURE = _repo_root() / "pkg" / "dispatch" / "testdata" / "gate_decision_golden.json"

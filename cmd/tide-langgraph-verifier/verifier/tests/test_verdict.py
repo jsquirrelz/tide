@@ -18,6 +18,7 @@ import pytest
 
 from verifier import __main__ as entrypoint
 from verifier import envelope, verdict
+from verifier.tests.conftest import GOLDEN_FIXTURE
 
 
 def test_golden_fixture_round_trip() -> None:
@@ -25,7 +26,7 @@ def test_golden_fixture_round_trip() -> None:
     pkg/dispatch/testdata/gate_decision_golden.json Plan 49-02 authored
     (D-02) — the cross-language parity proof. Value-equivalence, not a raw
     byte compare (key order differs across Go/Python serializers)."""
-    golden_bytes = verdict.GOLDEN_FIXTURE.read_bytes()
+    golden_bytes = GOLDEN_FIXTURE.read_bytes()
 
     decoded = verdict.GateDecision.model_validate_json(golden_bytes)
 
