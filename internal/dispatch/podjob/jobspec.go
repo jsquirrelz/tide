@@ -283,16 +283,27 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 			labels["tideproject.k8s/task-uid"] = parentUID
 		}
 	case JobKindVerifier:
-		// Phase 51 TASK-04/ESC-04: the verifier dispatches per-Task, same as
-		// the executor, but with its own deterministic name + role label so
-		// it never collides with — and is separately countable from — the
-		// executor Job for the same Task/attempt.
-		if opts.Task != nil {
-			parentUID = string(opts.Task.UID)
+		// Phase 51 TASK-04/ESC-04, generalized level-generic in Phase 52
+		// P02 (RESEARCH Pitfall 1): mirrors case JobKindPlanner's
+		// ParentObj-based parentUID resolution so BuildJobSpec builds a
+		// verifier Job for ANY level's parent object — a nil opts.Task
+		// no longer panics. Own deterministic name + role label so the
+		// verifier Job never collides with — and is separately countable
+		// from — the executor Job for the same parent/attempt.
+		if opts.ParentObj != nil {
+			parentUID = string(opts.ParentObj.GetUID())
 		}
-		jobName = VerifierJobName(opts.Task.UID, opts.Attempt)
-		labels["tideproject.k8s/task-uid"] = string(opts.Task.UID)
+		jobName = VerifierJobName(opts.Level, parentUID, opts.Attempt)
 		labels["tideproject.k8s/role"] = "verifier"
+		labels["tideproject.k8s/level"] = opts.Level
+		// T-52-05 (accept): verifierInFlightCount filters on role+project
+		// only, never the task-uid VALUE, so keeping this label key
+		// (populated with parentUID for any level) preserves compat; the
+		// level label above makes consumers level-aware.
+		labels["tideproject.k8s/task-uid"] = parentUID
+		if opts.Level != "" && parentUID != "" {
+			labels[fmt.Sprintf("tideproject.k8s/%s-uid", opts.Level)] = parentUID
+		}
 		// D-05: stamp estimated-cost label for restart rederivation via
 		// budget.RederiveReservations. The verifier shares the executor's
 		// per-task reservation key; without this label a restart while the
