@@ -136,6 +136,10 @@ None - no external service configuration required.
 - Full verification run: `go build ./...` clean; `make test` (unit tier incl. envtest, 74 packages) all green; `./bin/golangci-lint run ./...` (v2.11.4) 0 issues; `git diff --stat internal/subagent/common/templates/task_verifier.tmpl` empty across both commits (D-09 untouched, confirmed).
 - No blockers.
 
+## Self-Check: PASSED
+
+All 9 created/modified source files + SUMMARY.md verified present on disk; all 3 commits (`f806e194`, `6ffd83a1`, plus this file's own metadata commit) verified present in `git log --oneline --all`.
+
 ---
 *Phase: 52-per-level-looppolicy-parameterization*
 *Completed: 2026-07-20*
