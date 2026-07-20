@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -2508,5 +2509,104 @@ func TestRunCloneNoProjectUIDSkipsPVCEnvelope(t *testing.T) {
 	// No clone envelope dir/file should exist when ProjectUID is empty.
 	if _, err := os.Stat(filepath.Join(ws, "envelopes", "clone")); err == nil {
 		t.Error("clone envelope dir created despite empty ProjectUID")
+	}
+}
+
+// ---------- worktree-checkout mode (Phase 52 D-07) ----------
+
+// TestRunWorktreeCheckoutMode covers the happy path: a bare repo is already
+// staged at <ws>/repo.git (mirrors what a prior clone-mode Job would have
+// produced), and worktree-checkout mode provisions a read-only, detached
+// checkout at <ws>/worktrees/<uid>/ via pkggit.AddReadOnlyWorktree.
+func TestRunWorktreeCheckoutMode(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, srcHead := seedBareRepo(t, base)
+	ws := t.TempDir()
+	bareDest := filepath.Join(ws, "repo.git")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repo, err := pkggit.Clone(ctx, "file://"+bareSrc, bareDest, "")
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	branch := defaultBranchOf(t, repo)
+
+	cfg := pushConfig{
+		Mode:   "worktree-checkout",
+		Repo:   bareDest,
+		UID:    "phase-uid-checkout",
+		Branch: branch,
+	}
+
+	exit, stderr := stderrAndRun(t, ctx, cfg, "")
+	if exit != exitSuccess {
+		t.Fatalf("worktree-checkout exit=%d, stderr=%s", exit, stderr)
+	}
+
+	wtDir := filepath.Join(ws, "worktrees", "phase-uid-checkout")
+	if _, err := os.Stat(filepath.Join(wtDir, ".git")); err != nil {
+		t.Errorf("expected .git in worktree %q: %v", wtDir, err)
+	}
+	head, err := exec.Command("git", "-C", wtDir, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+	if got := strings.TrimSpace(string(head)); got != srcHead.String() {
+		t.Errorf("worktree HEAD = %q; want %q", got, srcHead.String())
+	}
+}
+
+// TestRunWorktreeCheckoutModeMissingFlags proves each of --repo/--uid/--branch
+// is required — an empty value fails closed with exitInvariant rather than
+// silently no-oping.
+func TestRunWorktreeCheckoutModeMissingFlags(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cfg  pushConfig
+	}{
+		{"missing repo", pushConfig{Mode: "worktree-checkout", UID: "uid", Branch: "main"}},
+		{"missing uid", pushConfig{Mode: "worktree-checkout", Repo: "/workspace/repo.git", Branch: "main"}},
+		{"missing branch", pushConfig{Mode: "worktree-checkout", Repo: "/workspace/repo.git", UID: "uid"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			exit, stderr := stderrAndRun(t, ctx, tc.cfg, "")
+			if exit != exitInvariant {
+				t.Errorf("exit=%d, want exitInvariant; stderr=%s", exit, stderr)
+			}
+		})
+	}
+}
+
+// TestRunWorktreeCheckoutModeIdempotent proves a retried init container
+// (same args re-invoked) succeeds without error on the second call.
+func TestRunWorktreeCheckoutModeIdempotent(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	ws := t.TempDir()
+	bareDest := filepath.Join(ws, "repo.git")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repo, err := pkggit.Clone(ctx, "file://"+bareSrc, bareDest, "")
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	branch := defaultBranchOf(t, repo)
+
+	cfg := pushConfig{
+		Mode:   "worktree-checkout",
+		Repo:   bareDest,
+		UID:    "phase-uid-idem",
+		Branch: branch,
+	}
+
+	if exit, stderr := stderrAndRun(t, ctx, cfg, ""); exit != exitSuccess {
+		t.Fatalf("first call exit=%d, stderr=%s", exit, stderr)
+	}
+	if exit, stderr := stderrAndRun(t, ctx, cfg, ""); exit != exitSuccess {
+		t.Fatalf("second (retried) call exit=%d, stderr=%s", exit, stderr)
 	}
 }
