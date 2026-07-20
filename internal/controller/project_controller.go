@@ -524,7 +524,13 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 	// re-attempt it (and a hollow Complete with nothing on the remote) — exactly
 	// the #13b defect. So a Complete project fast-paths into the push state
 	// machine instead of returning.
-	complete, err := r.checkProjectComplete(ctx, project)
+	handled, verifyRes, complete, err := r.checkProjectComplete(ctx, project)
+	if handled {
+		// Phase 52 D-07/T-52-31: the level-verify machinery is driving the
+		// Project's state this reconcile — return directly, never fall
+		// through to the Complete-arm boundary push below.
+		return verifyRes, err
+	}
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -1436,17 +1442,52 @@ func (r *ProjectReconciler) countChildMilestones(ctx context.Context, project *t
 	return countChildren(ctx, r.Client, project.Namespace, project.UID, &tidev1alpha3.MilestoneList{})
 }
 
-// checkProjectComplete returns true (and patches Status.Phase=Complete) when
-// BoundaryDetected reports all owned Milestones have reached Succeeded.
-// Returns false without patching when no Milestones exist yet (childless guard).
-func (r *ProjectReconciler) checkProjectComplete(ctx context.Context, project *tidev1alpha3.Project) (bool, error) {
-	detected, err := gates.BoundaryDetected(ctx, r.Client, project, "Milestone")
-	if err != nil {
-		return false, err
+// projectLevelVerifyTarget builds the level-verify entry point's target
+// contract for this Project (Phase 52 D-07/52-10 wiring). ParentSpanID stays
+// the zero value — Project is the trace root, so there is no parent AGENT
+// span to sibling against (mirrors levelVerifyTarget's own doc: "Zero value
+// when no parent span is available (e.g. Project, the trace root)"). Goal is
+// Project.Spec.OutcomePrompt — the one level whose Spec genuinely carries
+// authored goal/prompt text (phaseLevelVerifyTarget/milestoneLevelVerifyTarget
+// reuse the same field for exactly this reason: it is the only authored goal
+// text reachable anywhere in the object graph).
+func (r *ProjectReconciler) projectLevelVerifyTarget(project *tidev1alpha3.Project) levelVerifyTarget {
+	return levelVerifyTarget{
+		Obj:        project,
+		Conditions: &project.Status.Conditions,
+		PhasePtr:   &project.Status.Phase,
+		LoopStatus: &project.Status.LoopStatus,
+		Level:      "project",
+		Goal:       project.Spec.OutcomePrompt,
+	}
+}
+
+// checkProjectComplete returns (handled, res, complete, err). handled=true
+// means the Phase 52 D-07 level-verify machinery is driving this Project's
+// state this reconcile (dispatch/still-verifying/exhausted, T-52-31 verify-
+// before-push) — the caller must return res/err directly and must NOT treat
+// the Project as complete this pass. complete=true (handled=false) means
+// BoundaryDetected reports all owned Milestones have reached Succeeded AND
+// (when a verification contract resolved) the level-verify loop already
+// concluded APPROVED — Status.Phase=Complete was patched. Returns
+// complete=false without patching when no Milestones exist yet (childless
+// guard) or while the level-verify loop is still active.
+func (r *ProjectReconciler) checkProjectComplete(ctx context.Context, project *tidev1alpha3.Project) (handled bool, res ctrl.Result, complete bool, err error) {
+	detected, dErr := gates.BoundaryDetected(ctx, r.Client, project, "Milestone")
+	if dErr != nil {
+		return false, ctrl.Result{}, false, dErr
 	}
 	if !detected {
-		return false, nil
+		return false, ctrl.Result{}, false, nil
 	}
+
+	// Phase 52 D-07/T-52-31: verify BEFORE the level stamps Complete — an
+	// unverified outcome must not publish (the boundary push that follows
+	// Complete in reconcilePhase3Lifecycle).
+	if vHandled, vRes, vErr := maybeRunLevelVerify(ctx, r.Client, r.Scheme, r.Deps, project, r.projectLevelVerifyTarget(project)); vHandled {
+		return true, vRes, false, vErr
+	}
+
 	patch := client.MergeFrom(project.DeepCopy())
 	project.Status.Phase = tidev1alpha3.PhaseComplete
 	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
@@ -1456,10 +1497,10 @@ func (r *ProjectReconciler) checkProjectComplete(ctx context.Context, project *t
 		Message:            "All owned Milestones reached Succeeded",
 		LastTransitionTime: metav1.Now(),
 	})
-	if err := r.Status().Patch(ctx, project, patch); err != nil {
-		return true, err
+	if pErr := r.Status().Patch(ctx, project, patch); pErr != nil {
+		return false, ctrl.Result{}, true, pErr
 	}
-	return true, nil
+	return false, ctrl.Result{}, true, nil
 }
 
 // reconcileProjectPlannerDispatch is the D-A2 5th dispatch site — mirrors

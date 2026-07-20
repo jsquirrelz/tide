@@ -241,6 +241,28 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 		return ctrl.Result{}, nil
 	}
 
+	// Step 1b (Phase 52 D-07): a Milestone parked in Verifying is mid-level-
+	// verify — route straight to the verify state machine before any other
+	// state-transition logic runs this reconcile (mirrors Plan's identical
+	// Verifying routing, plan_controller.go:201-204, one level up, and
+	// Phase's own Step-1b-equivalent, phase_controller.go). Without this, the
+	// idempotency guard below (Step 2b, which sees the Milestone already owns
+	// >=1 child Phase) would silently no-op forever and the verifier Job's
+	// completion would never be consumed.
+	if ms.Status.Phase == tideprojectv1alpha3.LevelPhaseVerifying {
+		var project *tideprojectv1alpha3.Project
+		if ms.Spec.ProjectRef != "" {
+			var p tideprojectv1alpha3.Project
+			if err := r.Get(ctx, client.ObjectKey{Namespace: ms.Namespace, Name: ms.Spec.ProjectRef}, &p); err == nil {
+				project = &p
+			}
+		}
+		if handled, res, vErr := maybeRunLevelVerify(ctx, r.Client, r.Scheme, r.Deps, project, r.milestoneLevelVerifyTarget(ms, project)); handled {
+			return res, vErr
+		}
+		return r.patchMilestoneSucceeded(ctx, ms)
+	}
+
 	// Step 1a: AwaitingApproval is paused — the reconciler MUST NOT re-dispatch
 	// the planner. Two sub-cases:
 	//   (a) no approve annotation → keep paused, return early
@@ -852,6 +874,13 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 		if expected == 0 {
 			// Genuine leaf — planner authored no Phase children.
 			logger.V(1).Info("boundary push skipped: planner authored no Phase children (leaf)", "milestone", ms.Name)
+			// Phase 52 D-07/T-52-31: verify BEFORE the level stamps Succeeded —
+			// handled=true means the level-verify machinery is driving this
+			// Milestone's state this reconcile (dispatch/still-verifying/
+			// exhausted); the caller must not also patch Succeeded this pass.
+			if handled, res, vErr := maybeRunLevelVerify(ctx, r.Client, r.Scheme, r.Deps, project, r.milestoneLevelVerifyTarget(ms, project)); handled {
+				return res, vErr
+			}
 			return r.patchMilestoneSucceeded(ctx, ms)
 		}
 		observed := r.countChildPhases(ctx, ms)
@@ -866,6 +895,11 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 			return ctrl.Result{}, derr
 		}
 		if detected {
+			// Phase 52 D-07/T-52-31: verify BEFORE the boundary push — an
+			// unverified outcome must not publish.
+			if handled, res, vErr := maybeRunLevelVerify(ctx, r.Client, r.Scheme, r.Deps, project, r.milestoneLevelVerifyTarget(ms, project)); handled {
+				return res, vErr
+			}
 			if err := r.maybeTriggerBoundaryPush(ctx, ms, project); err != nil {
 				if errors.Is(err, errGitWriterBusy) {
 					// D-02: another git-writer Job is in flight — normal
@@ -893,12 +927,17 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 		return ctrl.Result{}, derr
 	}
 	if detected {
+		// Phase 52 D-07/T-52-31: verify BEFORE the boundary push (fallback path).
+		if handled, res, vErr := maybeRunLevelVerify(ctx, r.Client, r.Scheme, r.Deps, project, r.milestoneLevelVerifyTarget(ms, project)); handled {
+			return res, vErr
+		}
 		if err := r.maybeTriggerBoundaryPush(ctx, ms, project); err != nil {
 			if errors.Is(err, errGitWriterBusy) {
 				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 			}
 			return ctrl.Result{}, err
 		}
+		return r.patchMilestoneSucceeded(ctx, ms)
 	} else if r.hasChildPhases(ctx, ms) {
 		logger.V(1).Info("boundary push deferred: child Phases pending (fallback)", "milestone", ms.Name)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
@@ -907,10 +946,13 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 		// may have ChildCount>0 (children materializing). Requeue; don't auto-succeed.
 		logger.V(1).Info("boundary push deferred: env reader present but unreadable, waiting (fallback)", "milestone", ms.Name)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-	} else {
-		logger.V(1).Info("boundary push skipped: milestone has no child Phases (nil-EnvReader fallback)", "milestone", ms.Name)
 	}
 
+	logger.V(1).Info("boundary push skipped: milestone has no child Phases (nil-EnvReader fallback)", "milestone", ms.Name)
+	// Phase 52 D-07/T-52-31: verify BEFORE the level stamps Succeeded (fallback leaf).
+	if handled, res, vErr := maybeRunLevelVerify(ctx, r.Client, r.Scheme, r.Deps, project, r.milestoneLevelVerifyTarget(ms, project)); handled {
+		return res, vErr
+	}
 	return r.patchMilestoneSucceeded(ctx, ms)
 }
 
@@ -940,6 +982,32 @@ func (r *MilestoneReconciler) patchMilestoneFailed(ctx context.Context, ms *tide
 			Message: message,
 		},
 	)
+}
+
+// milestoneLevelVerifyTarget builds the level-verify entry point's target
+// contract for this Milestone (Phase 52 D-07/52-10 wiring). ParentSpanID is
+// the Project's own span (project is already the caller's own parameter —
+// no extra Get needed, unlike Phase's immediate-parent fetch) so the
+// EVALUATOR span lands as a sibling of this Milestone's own AGENT span, not
+// its child. Goal reuses Project.Spec.OutcomePrompt (Claude's Discretion —
+// see phaseLevelVerifyTarget's identical doc note: MilestoneSpec carries no
+// authored goal/prompt text field of its own).
+func (r *MilestoneReconciler) milestoneLevelVerifyTarget(ms *tideprojectv1alpha3.Milestone, project *tideprojectv1alpha3.Project) levelVerifyTarget {
+	var parentSpanID trace.SpanID
+	goal := ""
+	if project != nil {
+		parentSpanID = spanIDFromHexOrZero(project.Status.ProjectTraceSpanID)
+		goal = project.Spec.OutcomePrompt
+	}
+	return levelVerifyTarget{
+		Obj:          ms,
+		Conditions:   &ms.Status.Conditions,
+		PhasePtr:     &ms.Status.Phase,
+		LoopStatus:   &ms.Status.LoopStatus,
+		Level:        "milestone",
+		Goal:         goal,
+		ParentSpanID: parentSpanID,
+	}
 }
 
 func (r *MilestoneReconciler) patchMilestoneSucceeded(ctx context.Context, ms *tideprojectv1alpha3.Milestone) (ctrl.Result, error) {
