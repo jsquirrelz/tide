@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 
 	"go.opentelemetry.io/otel/trace"
@@ -305,7 +306,12 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 		return ctrl.Result{}, true, nil
 	}
 
-	jobName := fmt.Sprintf("tide-plan-%s-1", plan.UID)
+	// Phase 52 D-06/OQ3: LoopStatus.Iteration doubles as the planner Job's
+	// attempt identity — it only changes (in dispatchPlanRepair) at the same
+	// moment Phase clears off Running, so this formula is stable across every
+	// re-reconcile of a Running Plan (see reconcilePlannerDispatch's dispatch
+	// tail below, which computes the SAME attempt for the Job it creates).
+	jobName := fmt.Sprintf("tide-plan-%s-%d", plan.UID, int(plan.Status.LoopStatus.Iteration)+1)
 
 	// On Running: check Job terminal state.
 	if plan.Status.Phase == tideprojectv1alpha3.LevelPhaseRunning {
@@ -410,7 +416,13 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 
 	// Phase 04.1 P1.2 fix: planner Jobs now share the full Phase 2 dispatch
 	// contract via podjob.BuildJobSpec(Kind=JobKindPlanner).
-	attempt := 1 // plan planner dispatch is single-shot per ROADMAP scope
+	// Phase 52 D-04/OQ3: no longer single-shot — a REPAIRABLE plan-check
+	// verdict re-dispatches a fresh planner attempt (dispatchPlanRepair).
+	// LoopStatus.Iteration (D-06's quality-re-plan counter, distinct from
+	// WaveIntegration.Attempts) doubles as this attempt identity: Plan's
+	// planner dispatch never had a pre-existing infra-retry counter of its
+	// own to preserve (RESEARCH Open Question 3's resolved answer).
+	attempt := int(plan.Status.LoopStatus.Iteration) + 1
 
 	plannerCaps := podjob.DefaultCaps(nil, podjob.JobKindPlanner)
 	if plannerCaps.Iterations <= 0 {
@@ -423,6 +435,19 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 	}, credproxyEndpoint, r.Deps.HelmProviderDefaults, plan.Spec.SharedContext)
 	if err != nil {
 		return ctrl.Result{}, true, fmt.Errorf("build planner envelope: %w", err)
+	}
+
+	// Phase 52 D-04: a re-plan attempt's bounded findings block — staged by
+	// dispatchPlanRepair onto replanFindingsAnnotation — seeds this fresh
+	// planner's prompt via the 52-03-pinned EnvelopeIn.RepairFindings field.
+	// Re-marshal only when present: the common (non-re-plan) case leaves
+	// envInJSON byte-identical to today's output.
+	if repairFindings := decodeReplanFindings(plan); len(repairFindings) > 0 {
+		envIn.RepairFindings = repairFindings
+		envInJSON, err = json.Marshal(envIn)
+		if err != nil {
+			return ctrl.Result{}, true, fmt.Errorf("marshal planner envelope with repair findings: %w", err)
+		}
 	}
 
 	// Mint a signed token for the credproxy sidecar.
@@ -531,6 +556,16 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 //nolint:gocyclo // a flat state machine of mutually-exclusive completion arms; splitting obscures the contract
 func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *tideprojectv1alpha3.Plan, completedJob *batchv1.Job) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
+
+	// Phase 52 D-04: consume (clear) the replan-findings annotation now that
+	// the planner attempt it seeded has completed — mirrors the
+	// approve-annotation "consume once acted on" idiom. A no-op for every
+	// ordinary (non-re-plan) completion: the annotation is only ever present
+	// starting from the SECOND planner attempt onward.
+	if cErr := r.clearReplanFindingsAnnotation(ctx, plan); cErr != nil {
+		logger.Error(cErr, "clear replan-findings annotation failed (non-fatal)", "plan", plan.Name)
+	}
+
 	project := r.resolveProjectForPlan(ctx, plan)
 	projectUID := ""
 	if project != nil {
@@ -674,7 +709,13 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	// durable per-attempt guard: the completed planner Job's UID, falling back to
 	// the deterministic planJobName when completedJob is nil (already TTL-GC'd or
 	// never observed).
-	planJobName := fmt.Sprintf("tide-plan-%s-1", plan.UID)
+	// Phase 52 D-04/OQ3 (Rule 1 fix): must use the SAME Iteration-derived
+	// attempt formula as reconcilePlannerDispatch's own jobName/attempt sites
+	// — a hardcoded "-1" here silently broke PlanRolledUpUID's exactly-once
+	// budget-rollup marker comparison below for any re-planned (attempt>1)
+	// completion, since planJobName would never match the attempt-2+ Job
+	// that was actually just processed.
+	planJobName := fmt.Sprintf("tide-plan-%s-%d", plan.UID, int(plan.Status.LoopStatus.Iteration)+1)
 	spawnKey := planJobName
 	if completedJob != nil {
 		spawnKey = string(completedJob.UID)
@@ -1441,6 +1482,267 @@ func (r *PlanReconciler) exhaustPlanVerifyLoop(ctx context.Context, plan *tidepr
 	return result, nil
 }
 
+// replanFindingsAnnotation is the bounded, single-current-iteration D-04
+// findings transport: the plan-check verdict is in hand at repair time, but
+// the fresh planner re-dispatch happens on a LATER reconcile (after
+// child-Task deletion completes) — this annotation is what carries the
+// findings across that gap. Annotations, not .status, per LOOP-03's
+// no-history rule (this is current-iteration-only, cleared on consumption —
+// the gates-annotation precedent, mirroring the approve/reject annotations'
+// own one-shot shape).
+const replanFindingsAnnotation = "tideproject.k8s/replan-findings"
+
+// T-52-29 DoS mitigation: an unbounded findings block must never accumulate
+// on the Plan object. replanFindingsMaxCount caps the finding count;
+// replanFindingsMaxSummaryBytes caps each finding's rendered Summary length
+// (RunEvidence.Bounded's hard-byte-cut truncation idiom, pkg/dispatch/run_evidence.go).
+const (
+	replanFindingsMaxCount        = 10
+	replanFindingsMaxSummaryBytes = 300
+)
+
+// severityScore computes the D-05 severity-weighted stall-detection score
+// from a verdict's finding counts — high-severity findings dominate (weight
+// 10) over the raw findings count (weight 1). The scheme's only structural
+// requirement is that the score strictly decrease on genuine improvement;
+// the absolute scale is otherwise arbitrary (Claude's Discretion per D-05).
+func severityScore(findingsCount, highSeverityCount int32) int {
+	return int(highSeverityCount)*10 + int(findingsCount)
+}
+
+// replanStalled reports whether a re-plan's newScore fails to strictly
+// improve on the previous iteration's evaluation (D-05): prev is
+// plan.Status.LoopStatus.LastEvaluation, and nil (no previous evaluation —
+// the first-ever REPAIRABLE verdict, nothing to compare against yet) is
+// never stalled.
+func replanStalled(prev *tideprojectv1alpha3.EvaluationSummary, newScore int) bool {
+	if prev == nil {
+		return false
+	}
+	prevScore := severityScore(prev.FindingsCount, prev.HighSeverityCount)
+	return newScore >= prevScore
+}
+
+// truncateReplanString hard-cuts s to at most n bytes — diagnostic-only text
+// (a finding's Summary), never re-parsed, so a UTF-8-boundary-unaware cut is
+// sufficient and keeps the annotation's byte bound exact (T-52-29). Mirrors
+// pkg/dispatch's own truncateRunEvidenceString idiom (unexported there,
+// re-implemented here rather than exported across the package boundary for
+// one caller).
+func truncateReplanString(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
+}
+
+// boundedRepairFindings condenses a plan-check verdict's Findings into the
+// bounded []pkgdispatch.RepairFinding shape plan_planner.tmpl's D-04 block
+// renders (the 52-03-pinned contract) — capped at replanFindingsMaxCount
+// entries. RepairFinding.Summary sources from Finding.Evidence (falling back
+// to SuggestedFix when Evidence is empty) — the verifier's own "concrete
+// observation backing this finding" text — since RepairFinding is
+// deliberately NOT Finding itself (RepairFinding is the compact
+// planner-prompt summary; Finding is the verifier's full wire format,
+// pkg/dispatch/envelope.go's own doc comment). Returns nil for an empty
+// input (the "present iff informative" contract the annotation helpers rely
+// on).
+func boundedRepairFindings(findings []pkgdispatch.Finding) []pkgdispatch.RepairFinding {
+	if len(findings) == 0 {
+		return nil
+	}
+	n := min(len(findings), replanFindingsMaxCount)
+	out := make([]pkgdispatch.RepairFinding, 0, n)
+	for _, f := range findings[:n] {
+		summary := f.Evidence
+		if summary == "" {
+			summary = f.SuggestedFix
+		}
+		out = append(out, pkgdispatch.RepairFinding{
+			Severity:   f.Severity,
+			Confidence: f.Confidence,
+			Summary:    truncateReplanString(summary, replanFindingsMaxSummaryBytes),
+		})
+	}
+	return out
+}
+
+// setReplanFindingsAnnotation stamps the bounded D-04 findings block from a
+// just-verified REPAIRABLE (or deterministic-failure-dominated APPROVED)
+// plan-check verdict onto replanFindingsAnnotation — a plain metadata
+// MergeFrom patch (T-04-G2 idiom, mirrors consumeApproveAndResume's
+// annotation-patch shape, level_status.go): annotations are not part of the
+// .status subresource, so this cannot ride the LoopStatus patch
+// dispatchPlanRepair also performs. A verdict carrying zero findings clears
+// the annotation rather than stamping an empty array, keeping the
+// "present iff informative" contract simple for decodeReplanFindings.
+func (r *PlanReconciler) setReplanFindingsAnnotation(ctx context.Context, plan *tideprojectv1alpha3.Plan, out pkgdispatch.EnvelopeOut) error {
+	var findings []pkgdispatch.Finding
+	if out.Verdict != nil {
+		findings = out.Verdict.Findings
+	}
+	bounded := boundedRepairFindings(findings)
+
+	annoPatch := client.MergeFrom(plan.DeepCopy())
+	newAnno := make(map[string]string, len(plan.Annotations)+1)
+	maps.Copy(newAnno, plan.Annotations)
+	if len(bounded) == 0 {
+		delete(newAnno, replanFindingsAnnotation)
+	} else {
+		data, mErr := json.Marshal(bounded)
+		if mErr != nil {
+			return fmt.Errorf("marshal replan findings: %w", mErr)
+		}
+		newAnno[replanFindingsAnnotation] = string(data)
+	}
+	plan.SetAnnotations(newAnno)
+	return r.Patch(ctx, plan, annoPatch)
+}
+
+// decodeReplanFindings reads replanFindingsAnnotation (set by
+// setReplanFindingsAnnotation) back into the []pkgdispatch.RepairFinding
+// shape plan_planner.tmpl's {{range .RepairFindings}} block consumes.
+// Nil/absent/malformed all decode to nil — fail-soft: a corrupt annotation
+// must not block the fresh planner attempt from dispatching entirely, it
+// just dispatches without the D-04 evidence block rather than wedging the
+// loop.
+func decodeReplanFindings(plan *tideprojectv1alpha3.Plan) []pkgdispatch.RepairFinding {
+	raw, ok := plan.Annotations[replanFindingsAnnotation]
+	if !ok || raw == "" {
+		return nil
+	}
+	var findings []pkgdispatch.RepairFinding
+	if err := json.Unmarshal([]byte(raw), &findings); err != nil {
+		return nil
+	}
+	return findings
+}
+
+// clearReplanFindingsAnnotation removes replanFindingsAnnotation once the
+// fresh, findings-seeded planner attempt it seeded has completed (D-04's
+// consumption point — mirrors the approve-annotation "consume once acted on"
+// idiom). A no-op (zero API calls) when the annotation is already absent —
+// true for every ordinary (non-re-plan) planner completion, the common case.
+func (r *PlanReconciler) clearReplanFindingsAnnotation(ctx context.Context, plan *tideprojectv1alpha3.Plan) error {
+	if _, ok := plan.Annotations[replanFindingsAnnotation]; !ok {
+		return nil
+	}
+	annoPatch := client.MergeFrom(plan.DeepCopy())
+	newAnno := make(map[string]string, len(plan.Annotations))
+	maps.Copy(newAnno, plan.Annotations)
+	delete(newAnno, replanFindingsAnnotation)
+	plan.SetAnnotations(newAnno)
+	return r.Patch(ctx, plan, annoPatch)
+}
+
+// repairOrHaltPlan implements D-04/D-05's re-plan decision tree, replacing
+// 52-07's marked conservative seam (both the REPAIRABLE leg and the
+// APPROVED-with-deterministic-gate-failure leg now route here — see
+// handlePlanVerifierCompletion). Order (neither leg burns an iteration):
+//
+//  1. D-05 stall check — the new verdict's severity-weighted score against
+//     plan.Status.LoopStatus.LastEvaluation (the attempt just before this
+//     one). A non-improving re-plan halts immediately, before consuming a
+//     remaining iteration — proven at MaxIterations:2 (D-05's own required
+//     coverage: a maxIterations:1 default never reaches a second stall
+//     check).
+//  2. The MaxIterations boundary — plan.Status.LoopStatus.Iteration (D-06's
+//     quality-re-plan counter) >= policy.MaxIterations. ResolveLoopPolicy
+//     defaults Plan's MaxIterations to 1 when unset (dispatch_helpers.go),
+//     so Iteration starts at 0 (no re-plan yet) and the first REPAIRABLE
+//     verdict always proceeds; the SECOND REPAIRABLE verdict (Iteration
+//     now 1) exhausts — exactly one re-plan at defaults (Phase 51
+//     repairOrHalt's identical direct-comparison precedent, applied one
+//     level up).
+//  3. Otherwise dispatchPlanRepair mints the fresh, findings-seeded planner
+//     attempt (D-04).
+func (r *PlanReconciler) repairOrHaltPlan(ctx context.Context, plan *tideprojectv1alpha3.Plan, project *tideprojectv1alpha3.Project, out pkgdispatch.EnvelopeOut) (ctrl.Result, error) {
+	policy := ResolveLoopPolicy(project, plan, nil, "plan")
+
+	var findingsCount, highSeverity int32
+	if out.Verdict != nil {
+		findingsCount = int32(len(out.Verdict.Findings))
+		for _, f := range out.Verdict.Findings {
+			if f.Severity == gateCommandFindingSeverity {
+				highSeverity++
+			}
+		}
+	}
+	newScore := severityScore(findingsCount, highSeverity)
+
+	if replanStalled(plan.Status.LoopStatus.LastEvaluation, newScore) {
+		return r.exhaustPlanVerifyLoop(ctx, plan, project, out,
+			"re-plan loop stalled: the new plan-check verdict did not strictly improve on the prior iteration")
+	}
+	if int(plan.Status.LoopStatus.Iteration) >= int(policy.MaxIterations) {
+		return r.exhaustPlanVerifyLoop(ctx, plan, project, out,
+			fmt.Sprintf("plan-check iterations exhausted MaxIterations=%d without an APPROVED verdict", policy.MaxIterations))
+	}
+	return r.dispatchPlanRepair(ctx, plan, project, out)
+}
+
+// dispatchPlanRepair implements D-04's re-plan: the delete-then-recreate
+// child-Task reconciliation RESEARCH.md's Pitfall 3 requires, plus the
+// findings-seeded fresh planner attempt. Order matters:
+//
+//  1. Stamp the bounded findings block onto replanFindingsAnnotation
+//     (setReplanFindingsAnnotation) — must land before the fresh planner
+//     Job can possibly dispatch, since reconcilePlannerDispatch's dispatch
+//     tail reads it.
+//  2. DELETE every child Task owned by this Plan
+//     (client.MatchingFields{taskPlanRefIndexKey: plan.Name} — the SAME
+//     list reconcilePlannerDispatch's own tasks-exist early-return runs).
+//     This is safe: D-03's Verifying hold guarantees none of these Tasks
+//     ever dispatched an executor Job. This single delete satisfies BOTH
+//     Pitfall 3 (unblocks the tasks-exist early-return so the fresh planner
+//     Job can actually be created) and T-52-27 (there is nothing
+//     stale left to dispatch).
+//  3. A single status patch: applyPlanLoopStatus stamps LastEvaluation from
+//     the attempt JUST verified (BEFORE the Iteration bump below — mirrors
+//     dispatchRepairAttempt's applyLoopStatus-before-reassignment ordering
+//     one level down, task_controller.go), then Iteration increments
+//     (D-06's counter doubling as the next planner/verifier attempt
+//     number), then Phase clears off Verifying to "" — the SAME value the
+//     no-contract path already uses in handlePlannerJobCompletion — so
+//     reconcilePlannerDispatch's dispatch tail re-engages on a LATER
+//     reconcile once the child-Task List above observes zero items.
+func (r *PlanReconciler) dispatchPlanRepair(ctx context.Context, plan *tideprojectv1alpha3.Plan, project *tideprojectv1alpha3.Project, out pkgdispatch.EnvelopeOut) (ctrl.Result, error) {
+	logger := logf.FromContext(ctx)
+
+	if aErr := r.setReplanFindingsAnnotation(ctx, plan, out); aErr != nil {
+		return ctrl.Result{}, fmt.Errorf("stamp replan-findings annotation: %w", aErr)
+	}
+
+	var taskList tideprojectv1alpha3.TaskList
+	if lErr := r.List(ctx, &taskList, client.InNamespace(plan.Namespace), client.MatchingFields{taskPlanRefIndexKey: plan.Name}); lErr != nil {
+		return ctrl.Result{}, fmt.Errorf("list rejected-attempt child tasks: %w", lErr)
+	}
+	for i := range taskList.Items {
+		if dErr := r.Delete(ctx, &taskList.Items[i]); dErr != nil && !apierrors.IsNotFound(dErr) {
+			return ctrl.Result{}, fmt.Errorf("delete rejected-attempt child task %s: %w", taskList.Items[i].Name, dErr)
+		}
+	}
+	logger.Info("deleted rejected plan-check attempt's child tasks ahead of re-plan", "plan", plan.Name, "count", len(taskList.Items))
+
+	patch := client.MergeFrom(plan.DeepCopy())
+	applyPlanLoopStatus(plan, out, "") // loop continues: ExitReason stays empty
+	plan.Status.LoopStatus.Iteration++
+	plan.Status.Phase = ""
+	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha3.ConditionReconciling,
+		Status:             metav1.ConditionTrue,
+		Reason:             "PlanCheckRepairDispatched",
+		Message:            fmt.Sprintf("Plan-check found repairable findings; deleted %d rejected-attempt child task(s) and cleared Verifying for a findings-seeded re-plan", len(taskList.Items)),
+		LastTransitionTime: metav1.Now(),
+	})
+	if pErr := r.Status().Patch(ctx, plan, patch); pErr != nil {
+		return ctrl.Result{}, pErr
+	}
+
+	r.settlePlanVerifierSpend(ctx, plan, project, out)
+	return ctrl.Result{Requeue: true}, nil
+}
+
 // handlePlanVerifierCompletion consumes a terminal plan-check verifier Job's
 // EnvelopeOut.Verdict (Phase 52 D-03/D-10) — mirrors Task's
 // handleVerifierCompletion (task_controller.go) one level up. Fail-closed by
@@ -1448,10 +1750,9 @@ func (r *PlanReconciler) exhaustPlanVerifyLoop(ctx context.Context, plan *tidepr
 // exhaustPlanVerifyLoop, never markPlanVerifiedApproved. ClassifyVerdict
 // drives the decision: APPROVED (and no deterministic gate-command
 // dominance) -> markPlanVerifiedApproved; REPAIRABLE, or an APPROVED verdict
-// a red gate-command Finding dominates, -> the conservative exhaustion path
-// (a later plan replaces the REPAIRABLE leg with repairOrHaltPlan's
-// findings-seeded re-plan); BLOCKED (and ClassifyVerdict's own fail-closed
-// default) -> the exhaustion path.
+// a red gate-command Finding dominates, -> repairOrHaltPlan (D-04/D-05's
+// findings-seeded re-plan with severity-weighted stall detection); BLOCKED
+// (and ClassifyVerdict's own fail-closed default) -> the exhaustion path.
 func (r *PlanReconciler) handlePlanVerifierCompletion(ctx context.Context, plan *tideprojectv1alpha3.Plan, project *tideprojectv1alpha3.Project, verifierJob *batchv1.Job) (ctrl.Result, error) {
 	out, err := readVerifierEnvelope(ctx, r.Deps.EnvReader, string(project.UID), string(plan.UID))
 	if err != nil {
@@ -1482,14 +1783,14 @@ func (r *PlanReconciler) handlePlanVerifierCompletion(ctx context.Context, plan 
 	switch pkgdispatch.ClassifyVerdict(raw) {
 	case pkgdispatch.VerdictApproved:
 		if hasDeterministicFailure(out.Verdict) {
-			// Same conservative exhaustion path as the REPAIRABLE leg below
-			// — 52-09 replaces this with repairOrHaltPlan's findings-seeded
-			// re-plan.
-			return r.exhaustPlanVerifyLoop(ctx, plan, project, out, "plan-check gate command failed despite an APPROVED verdict")
+			// D-06 defence-in-depth: a red gate-command Finding dominates
+			// even a top-level APPROVED verdict, controller-side — routes
+			// through the SAME re-plan decision tree as REPAIRABLE.
+			return r.repairOrHaltPlan(ctx, plan, project, out)
 		}
 		return r.markPlanVerifiedApproved(ctx, plan, project, out)
 	case pkgdispatch.VerdictRepairable:
-		return r.exhaustPlanVerifyLoop(ctx, plan, project, out, out.Verdict.Summary)
+		return r.repairOrHaltPlan(ctx, plan, project, out)
 	default: // pkgdispatch.VerdictBlocked, and ClassifyVerdict's own fail-closed default.
 		return r.exhaustPlanVerifyLoop(ctx, plan, project, out, out.Verdict.Summary)
 	}
