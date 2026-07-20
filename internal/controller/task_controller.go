@@ -79,6 +79,18 @@ const taskPlanRefIndexKey = ".spec.planRef"
 // classification and the budget/metric reason mapping.
 const outputPathsViolation = "output-paths-violation"
 
+// jobReasonDeadlineExceeded is the batchv1 JobFailed condition Reason set when
+// a Job's ActiveDeadlineSeconds wall-clock cap SIGKILLs the pod before it can
+// write out.json. It is the ONLY failure reason mapped to cap_exceeded in the
+// no-envelope synthesis path (fail-closed — every other reason stays
+// unclassified). Shared by the Task, Plan-check, and level-verify
+// no-envelope synthesizers.
+const jobReasonDeadlineExceeded = "DeadlineExceeded"
+
+// reasonWallClockCapExceeded is the EnvelopeOut.Reason text the no-envelope
+// synthesizers stamp for a wall-clock (ActiveDeadlineSeconds) kill.
+const reasonWallClockCapExceeded = "wall-clock cap exceeded (ActiveDeadlineSeconds): pod was SIGKILLed before it could write out.json"
+
 // ErrParentUnresolved signals that resolveProject (or walkOwnerChainToProject)
 // could not locate the owning Project via either the label fast-path or the
 // bounded owner-ref chain walk. Callers convert this to a
@@ -1325,9 +1337,9 @@ func synthesizeNoEnvelopeOut(task *tideprojectv1alpha3.Task, completedJob *batch
 	}
 	for _, c := range completedJob.Status.Conditions {
 		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
-			if c.Reason == "DeadlineExceeded" {
+			if c.Reason == jobReasonDeadlineExceeded {
 				out.TerminalReason = pkgdispatch.TerminalReasonCapExceeded
-				out.Reason = "wall-clock cap exceeded (ActiveDeadlineSeconds): pod was SIGKILLed before it could write out.json"
+				out.Reason = reasonWallClockCapExceeded
 			}
 			break
 		}

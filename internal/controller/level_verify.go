@@ -668,9 +668,9 @@ func synthesizeNoLevelVerifyEnvelopeOut(obj client.Object, completedJob *batchv1
 	}
 	for _, cond := range completedJob.Status.Conditions {
 		if cond.Type == batchv1.JobFailed && cond.Status == corev1.ConditionTrue {
-			if cond.Reason == "DeadlineExceeded" {
+			if cond.Reason == jobReasonDeadlineExceeded {
 				out.TerminalReason = pkgdispatch.TerminalReasonCapExceeded
-				out.Reason = "wall-clock cap exceeded (ActiveDeadlineSeconds): pod was SIGKILLed before it could write out.json"
+				out.Reason = reasonWallClockCapExceeded
 			}
 			break
 		}

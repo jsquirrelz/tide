@@ -1283,9 +1283,9 @@ func synthesizeNoPlanEnvelopeOut(plan *tideprojectv1alpha3.Plan, completedJob *b
 	}
 	for _, c := range completedJob.Status.Conditions {
 		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
-			if c.Reason == "DeadlineExceeded" {
+			if c.Reason == jobReasonDeadlineExceeded {
 				out.TerminalReason = pkgdispatch.TerminalReasonCapExceeded
-				out.Reason = "wall-clock cap exceeded (ActiveDeadlineSeconds): pod was SIGKILLed before it could write out.json"
+				out.Reason = reasonWallClockCapExceeded
 			}
 			break
 		}
