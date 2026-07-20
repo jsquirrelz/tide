@@ -136,3 +136,14 @@ None — this plan builds shared machinery with no production call sites yet (by
 ## Threat Flags
 
 None beyond what the plan's own `<threat_model>` already registers (T-52-23..26) — this plan implements exactly those mitigations (fail-closed classification, the `ExitReason` convergence guard against re-dispatch DoS, and the `EVALUATOR` span for provenance) with no new surface introduced beyond what was declared.
+
+## Self-Check: PASSED
+
+- FOUND: internal/controller/level_verify.go
+- FOUND: internal/controller/level_verify_unit_test.go
+- FOUND: pkg/dispatch/envelope.go
+- FOUND: .planning/phases/52-per-level-looppolicy-parameterization/52-08-SUMMARY.md
+- FOUND commit: 40b70a1a (feat: level_verify.go)
+- FOUND commit: 7c01f68b (test: unit tests + envelope doc fix)
+- FOUND commit: 7efa7646 (fix: lint findings)
+- FOUND commit: 37090344 (docs: this summary)
