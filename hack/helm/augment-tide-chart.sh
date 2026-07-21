@@ -138,6 +138,13 @@ EOF
 #    Manager Deployment and credproxy sidecar (T-02-12-02/T-02-12-03 mitigations).
 cp "${HACK_DIR}/signing-secret.yaml" "${CHART_DIR}/templates/signing-secret.yaml"
 
+# 5a. verify-posture-configmap.yaml — sticky install-time verify-tier posture
+#     marker (Phase 53 CFG-02/D-05), the exact lookup + if-not +
+#     resource-policy: keep idiom as signing-secret.yaml above, applied to a
+#     ConfigMap instead of a Secret. See the file itself for the full
+#     semantics; the --verify-levels-json arg (8h below) reads it back.
+cp "${HACK_DIR}/verify-posture-configmap.yaml" "${CHART_DIR}/templates/verify-posture-configmap.yaml"
+
 # 6. serviceaccount-subagent.yaml — NEW template for the tide-subagent ServiceAccount
 #    (Warning #9 fix — separate file from Phase 1's serviceaccount.yaml which is NOT
 #    modified). Zero RoleBindings on tide-subagent SA per D-A4 / T-02-12-04.
@@ -220,6 +227,49 @@ if ARGS_MARKER not in content:
     content = re.sub(
         r'args: \{\{- toYaml \.Values\.controllerManager\.manager\.args \| nindent 8 \}\}',
         PHASE2_ARGS_REPLACEMENT,
+        content,
+        count=1,
+    )
+
+# ── 8h: Phase 53 (CFG-01/CFG-02/D-01/D-04/D-05) — verify-levels-json arg ─────
+# Adds the conditional --verify-levels-json manager arg carrying the chart's
+# subagent.verify.levels map (D-01's structured-JSON transport, mirroring
+# --pricing-overrides-json). Emission is gated on the D-05 sticky posture:
+# subagent.verify.posture "enabled"/"disabled" forces the tier on/off
+# unconditionally; "auto" (default) follows the install-time posture marker
+# ConfigMap (tide-verify-posture, hack/helm/verify-posture-configmap.yaml) —
+# ON when the marker records posture "enabled" (fresh-install lineage
+# survives every later upgrade) OR this render IS a fresh install (about to
+# create that marker); OFF for a pre-existing install upgrading in place
+# with no marker (CFG-02's least-surprise contract). `default "auto"` is
+# safe here because posture is a STRING enum, never a boolean — Sprig's
+# `default` silently coerces boolean false to empty (RESEARCH.md Pitfall 2;
+# never apply `default` to a boolean values key). Anchored after the
+# pricing-overrides-json conditional (the literal phase2-args-injected
+# marker line, 10-space indent — deployment.yaml is generated, so the whole
+# posture decision stays inline here rather than a hand-placed _helpers.tpl
+# helper).
+ARGS53_MARKER = "# phase53-verify-args-injected"
+ARGS53_BLOCK = """          {{- $verifyPosture := .Values.subagent.verify.posture | default "auto" }}
+          {{- $verifyMarker := lookup "v1" "ConfigMap" .Release.Namespace "tide-verify-posture" }}
+          {{- $verifyMarkerOn := and $verifyMarker (eq $verifyMarker.data.posture "enabled") }}
+          {{- $verifyOn := false }}
+          {{- if eq $verifyPosture "enabled" }}
+          {{- $verifyOn = true }}
+          {{- else if eq $verifyPosture "disabled" }}
+          {{- $verifyOn = false }}
+          {{- else if or $verifyMarkerOn .Release.IsInstall }}
+          {{- $verifyOn = true }}
+          {{- end }}
+          {{- if $verifyOn }}
+          - --verify-levels-json={{ .Values.subagent.verify.levels | toJson }}
+          {{- end }}
+          # phase53-verify-args-injected
+"""
+if ARGS53_MARKER not in content:
+    content = re.sub(
+        r'(          # phase2-args-injected\n)',
+        r'\1' + ARGS53_BLOCK,
         content,
         count=1,
     )
@@ -458,6 +508,29 @@ if ENV53_MARKER not in content:
     content = re.sub(
         r'(        # phase47-otlp-headers-env-injected\n)',
         r'\1' + ENV53_BLOCK,
+        content,
+        count=1,
+    )
+
+# ── 8f4: Phase 53 (CFG-01/D-02) — TIDE_VERIFIER_MODEL env injection ─────────
+# Adds a guarded TIDE_VERIFIER_MODEL env var on the manager container,
+# conditionally emitted IFF subagent.verify.model is non-empty — matches the
+# pricing-overrides guard idiom rather than always-emitting an empty env,
+# which would shadow cmd/manager/main.go's compiled-in "borrow the task
+# executor model" fallback (D-02) with an explicit empty string instead of
+# leaving TIDE_VERIFIER_MODEL genuinely unset. Anchored immediately after the
+# Phase 53 verifier-image block (the most recent marker).
+ENVMODEL53_MARKER = "# phase53-verify-model-env-injected"
+ENVMODEL53_BLOCK = """        {{- if .Values.subagent.verify.model }}
+        - name: TIDE_VERIFIER_MODEL
+          value: {{ .Values.subagent.verify.model | quote }}
+        {{- end }}
+        # phase53-verify-model-env-injected
+"""
+if ENVMODEL53_MARKER not in content:
+    content = re.sub(
+        r'(        # phase53-verifier-image-env-injected\n)',
+        r'\1' + ENVMODEL53_BLOCK,
         content,
         count=1,
     )
