@@ -235,9 +235,9 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 53-05-PLAN.md — subagent.verify chart surface + sticky posture-marker ConfigMap + conditional --verify-levels-json + D-06 render-pair test
-- [ ] 53-06-PLAN.md — Enablement AND-gates at the 3 dispatch chokepoints + chart-tier LoopPolicy defaults + clamp pin + resolveVerifierModel
-- [ ] 53-07-PLAN.md — SPA vocabulary: Verifying/VerifyHalted/VerifyHalt badge rows + distinctness tests + TS wire types + embed regen
+- [x] 53-05-PLAN.md — subagent.verify chart surface + sticky posture-marker ConfigMap + conditional --verify-levels-json + D-06 render-pair test
+- [x] 53-06-PLAN.md — Enablement AND-gates at the 3 dispatch chokepoints + chart-tier LoopPolicy defaults + clamp pin + resolveVerifierModel
+- [x] 53-07-PLAN.md — SPA vocabulary: Verifying/VerifyHalted/VerifyHalt badge rows + distinctness tests + TS wire types + embed regen
 
 **Wave 3** *(blocked on Wave 2)*
 
@@ -270,4 +270,4 @@ Phases execute in numeric order: 48 → 49 → 50 → 51 → 52 → 53
 | 50. Execution-Loop Hardening + Loop-Native Observability | v1.0.9 | 7/7 | Complete    | 2026-07-19 |
 | 51. The Task Loop | v1.0.9 | 8/8 | Complete    | 2026-07-20 |
 | 52. Per-Level LoopPolicy Parameterization | v1.0.9 | 11/11 | Complete    | 2026-07-21 |
-| 53. Chart Config + Dashboard Provenance Surfacing | v1.0.9 | 4/11 | In Progress|  |
+| 53. Chart Config + Dashboard Provenance Surfacing | v1.0.9 | 7/11 | In Progress|  |
