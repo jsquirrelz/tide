@@ -146,6 +146,8 @@ func main() {
 	// Phase 14 flags (Plan 14-05 wiring — D-02/D-05 operator tuning).
 	var pricingOverridesJSON string
 	var budgetReservePerDispatchCents int64
+	// Phase 53 flag (CFG-01/D-01 — chart config surface for the verify tier).
+	var verifyLevelsJSON string
 
 	flag.StringVar(&configPath, "config", "/etc/tide/config.yaml", "Path to runtime config YAML")
 	flag.BoolVar(&leaderElect, "leader-elect", true, "Enable leader election (CTRL-03)")
@@ -178,6 +180,12 @@ func main() {
 		"JSON map of model-ID to price overrides in cents/MTok (Helm pricing.overrides, D-02); validated at startup")
 	flag.Int64Var(&budgetReservePerDispatchCents, "budget-reserve-per-dispatch-cents", 100,
 		"Flat per-dispatch reservation estimate in cents (Helm budget.reservePerDispatchCents, D-05); 0 disables pre-charge")
+	// Phase 53 flag (CFG-01/D-01/D-04): the structured per-level verify posture
+	// map. Rides a flag (not an env var) per RESEARCH Finding 8 — a single
+	// structured value, same shape as --pricing-overrides-json, not 15
+	// discrete TIDE_VERIFY_* env vars.
+	flag.StringVar(&verifyLevelsJSON, "verify-levels-json", "",
+		"JSON map of level to verify posture defaults (Helm subagent.verify.levels, D-01/D-04); validated at startup")
 
 	// Phase 3 plan 03-09 — Helm env-var wiring. Set by the controller Deployment
 	// env block from charts/tide/values.yaml. Helpers in cmd/manager/env.go.
@@ -218,6 +226,11 @@ func main() {
 	// skip). Injected by the chart images.tideLanggraphVerifier block. PROD_OVERRIDE_REQUIRED.
 	verifierImage := envOrDefault("TIDE_VERIFIER_IMAGE", "ghcr.io/jsquirrelz/tide-langgraph-verifier:v0.1.0-dev")
 
+	// TIDE_VERIFIER_MODEL → VerifyDefaults.Model (Phase 53 CFG-01/D-02). Empty
+	// keeps today's borrow-the-level-executor-model behavior — the chart's
+	// subagent.verify.model supplies a dedicated verifier model default.
+	verifierModel := envOrDefault("TIDE_VERIFIER_MODEL", "")
+
 	// Single source for the cluster-wide workspace PVC name, read by both the
 	// ProjectReconciler and the ImportReconciler so they cannot skew. The chart
 	// exposes this as workspaces.pvc.name; the import Job mounts this PVC, so a
@@ -250,6 +263,23 @@ func main() {
 	if budgetReservePerDispatchCents < 0 {
 		fmt.Fprintf(os.Stderr, "--budget-reserve-per-dispatch-cents must be >= 0 (got %d)\n", budgetReservePerDispatchCents)
 		os.Exit(1)
+	}
+	// Phase 53 startup validation (T-53-03 / ASVS V5): same fail-fast shape as
+	// --pricing-overrides-json above, but the PARSED map is kept (not
+	// discarded) — it populates VerifyDefaults.Levels below.
+	verifyLevelDefaults, err := pkgdispatch.ParseVerifyLevelDefaults(verifyLevelsJSON)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "invalid --verify-levels-json: %v\n", err)
+		os.Exit(1)
+	}
+	// VerifyDefaults is constructed ONCE and assigned onto BOTH Deps literals
+	// below (mirrors the existing VerifierImage dual-wiring — RESEARCH
+	// Assumption A2: if only one Deps gets it, one dispatch tier silently
+	// loses chart enablement).
+	verifyDefaults := controller.VerifyDefaults{
+		Image:  verifierImage,
+		Model:  verifierModel,
+		Levels: verifyLevelDefaults,
 	}
 
 	// Phase 13 DISPATCH-01 compatibility shim: if --subagent-image was passed (non-empty),
@@ -464,6 +494,9 @@ func main() {
 		VerifierImage:        verifierImage,
 		Reservations:         reservationStore,
 		ReserveEstimateCents: budgetReservePerDispatchCents,
+		// Phase 53 CFG-01/D-04: chart-supplied verify-tier defaults, mirroring
+		// the VerifierImage dual-wiring onto TaskReconcilerDeps below.
+		VerifyDefaults: verifyDefaults,
 	}
 	if err := (&controller.ProjectReconciler{
 		Client:                  mgr.GetClient(),
@@ -579,6 +612,9 @@ func main() {
 			ReporterImage:     reporterImage,
 			OTLPEndpoint:      otlpEndpoint,
 			OTLPHeadersSecret: otlpHeadersSecret,
+			// Phase 53 CFG-01/D-04: chart-supplied verify-tier defaults, mirroring
+			// the VerifierImage dual-wiring onto plannerDeps above.
+			VerifyDefaults: verifyDefaults,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Task")
