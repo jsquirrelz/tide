@@ -1,5 +1,28 @@
 # Milestones
 
+## v1.0.9 Slack Tide — The Task Loop (Shipped: 2026-07-21)
+
+**Delivered:** TIDE closes its first real feedback loop — independent verification drives Task iteration, parameterized per level by one shared `LoopPolicy` contract, configured chart-first with a safe default posture, and surfaced on the dashboard.
+
+**Phases completed:** 6 phases (48–53), 46 plans, 98 tasks · 28/28 requirements · ~4 days (2026-07-18 → 2026-07-21) · 354 commits, 339 files, +58.6k/−0.9k LOC
+
+**Key accomplishments:**
+
+- **The Task loop is real** — each Task's artifact is checked by an independent read-only LangGraph evaluator; REPAIRABLE drives fresh evidence-seeded attempts (never the prior agent's context), bounded by `LoopPolicy`, exhausting to `ConditionVerifyHalt`/`requireApproval` — proven by live billable red/green runs on kind (Phases 51 + 52).
+- **One verification contract parameterized per level** — a single `ResolveLoopPolicy` resolver keyed on loop level (never CRD kind): Task auto-repair (maxIterations:N), plan-check re-plan (1, findings-seeded, severity-weighted stall detection), Phase/Milestone/Project escalation (clamped 0); per-value `onExhaustion` split (park-for-approval vs project-wide halt).
+- **The LangGraph successor-runtime beachhead shipped** — `tide-langgraph-verifier`, the first non-CLI runtime behind the unchanged `pkg/dispatch.Subagent` envelope seam; read-only enforced structurally at three layers (mount/credentials/rootfs), credproxy-TLS trust proven live (`SSL_CERT_FILE` alone), `"langgraph"` vendor self-instruments (no double spans).
+- **Fail-closed as a system property** — verdict classification (unparseable → BLOCKED never APPROVED), deterministic gate-command failure dominates the LLM judge (enforced in image AND controller), `TerminalReason` never a silent default, config parsing exits on malformed input, posture typos fail at render; anti-gaming: an attempt that edits the evaluator is a system escalation, never a pass.
+- **Execution-loop evidence + loop-native observability** — derived `loopRunID`/`attemptID` (never minted), bounded references-only `RunEvidence`, `loop.*`/`evaluation.*`/`human_intervention` span keys on the v1.0.8 trace spine, EVALUATOR sibling spans, run-IDs structurally barred from Prometheus labels (dual static+runtime guard).
+- **Chart-first config + dashboard provenance** — the verify tier configures through the `subagent.levels` precedence chain with a sticky install-ON/upgrade-OFF posture (lookup+keep marker; proven by a 5-leg render pair AND a live kind install→upgrade test); the dashboard shows nested loop provenance (current-iteration summary + findings via the existing artifacts API + Phoenix deep-links) with `VerifyHalt` visually distinct from `Failed`.
+
+**Quality loop (the milestone practicing what it ships):** every phase ran code review + goal-backward verification; reviews caught and root-fixed 1 Critical + 20+ warnings across the milestone — including five stacked latent defects in the live Task-loop path (the ship-blocker verdict relay), two live-proof defects at plan level, and a namespace-dropped findings fetch that would have 404'd every real install. Three in-flight gap plans were authored mid-execution when execution surfaced missing links (the verdict-final push trigger, the verifier findings.json producer).
+
+**Known deferred items at close:** 31 (see STATE.md Deferred Items) — 24 SUMMARY-frontmatter bookkeeping quick-tasks, 2 deliberately-deferred todos (GPG signing, CACHE-F1), 2 debug entries (KB file + tracked CI flake class), 3 approved-UAT bookkeeping artifacts (51/53 HUMAN-UAT + 53-VERIFICATION `human_needed`, live items operator-approved).
+
+**Release note:** the `v1.0.9` git tag is NOT created at milestone close — it belongs to the rc-gated release pipeline (chart `appVersion` bump first, rc dry-run, then tag at the release commit; v1.0.8 precedent).
+
+**Archives:** [v1.0.9-ROADMAP.md](milestones/v1.0.9-ROADMAP.md) · [v1.0.9-REQUIREMENTS.md](milestones/v1.0.9-REQUIREMENTS.md)
+
 ## v1.0.8 Phoenix Rising — OpenInference Trace Emission + Self-Hosted Phoenix (Completed: 2026-07-17)
 
 **Phases completed:** 6 phases (42–47), 32 plans, 67 tasks

@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.0.9
 milestone_name: Slack Tide — The Task Loop (Verification-Driven Quality Iteration)
-status: milestone_complete
-stopped_at: Milestone complete (Phase 53 was final phase)
-last_updated: 2026-07-21T12:54:41.449Z
-last_activity: 2026-07-21 -- Phase 53 execution started
+status: Awaiting next milestone
+stopped_at: "Phase 53 execution complete (11/11 plans) — verification human_needed: live dashboard render of OBS-04 surface pending operator"
+last_updated: "2026-07-21T12:59:43.446Z"
+last_activity: 2026-07-21 — Milestone v1.0.9 completed and archived
 progress:
   total_phases: 6
   completed_phases: 6
@@ -25,12 +25,10 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 
 ## Current Position
 
-Phase: 53
-Plan: Not started
-Status: Milestone complete
-Last activity: 2026-07-21
-
-Progress: [█████████░] 96% (23/24 plans; 51-08 Task 2 not yet counted complete)
+Phase: Milestone v1.0.9 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-07-21 — Milestone v1.0.9 completed and archived
 
 ## Performance Metrics
 
@@ -143,15 +141,17 @@ Decisions are logged in PROJECT.md Key Decisions table.
 
 ## Deferred Items
 
-Items acknowledged and deferred at v1.0.8 close (2026-07-17) — 30 carried-forward, none blocking. Phase 47's two PROOF-01 human items were **resolved** (signed off), not deferred.
+Items acknowledged and deferred at v1.0.9 close (2026-07-21) — 31 open artifacts, none blocking. Phase 53's live-render UAT item was operator-**approved** at phase close; its UAT/VERIFICATION files remain `partial`/`human_needed` as the bookkeeping trail (surface via `/gsd:verify-work 53` to formally close).
 
 | Category | Count | Notes |
 |----------|-------|-------|
 | quick_tasks | 24 | SUMMARY frontmatter `status:` field missing/unknown — audit-scanner bookkeeping only; the work itself shipped (same class carried since v1.0.7) |
-| todos | 4 | signed-commits-verified-badge (GPG scope, Future Requirements) · project-dispatch-missing-failurehalt-gate + task-dispatch-gate-order-divergence (audit W-2 dispatch-gate correctness — relevant to v1.0.9's `ConditionVerifyHalt` gate-order work, Phase 51) · cache-f1-direct-sdk-cross-pod-caching (vNext+) |
-| debug_sessions | 2 | knowledge-base.md (a KB file, not a session) · layer-a-envtest-flakes-pr9 [investigating] — CI-side Layer A envtest flakes; local envtest runs green |
+| todos | 2 | signed-commits-verified-badge (GPG scope, Future Requirements) · cache-f1-direct-sdk-cross-pod-caching (vNext+). The two W-2 dispatch-gate todos were FOLDED and closed in Phase 51 (D-09). |
+| debug_sessions | 2 | knowledge-base.md (a KB file, not a session) · layer-a-envtest-flakes-pr9 [investigating] — CI-side Layer A envtest flakes; local envtest runs green (Phase 53's one first-run occurrence matched this class, clean on rerun) |
+| uat_gaps | 2 | 51-HUMAN-UAT.md + 53-HUMAN-UAT.md — both phases' live proofs were operator-approved; files stay `partial` until `/gsd:verify-work` formally records results |
+| verification_gaps | 1 | 53-VERIFICATION.md `human_needed` — the approved live-render item's bookkeeping trail |
 
-Tech-debt still carried forward: W-2 FailureHalt/gate-order divergences (todos above — worth reviewing during Phase 51's `ConditionVerifyHalt` gate wiring), W-4 agentName/agentEmail CRD pattern locks not re-established post-crank, Phase 36 residual 'bot' vocabulary (7 comment/fixture refs), 37-REVIEW advisory warnings (secrets RBAC blast radius, gitfetch timeouts, settings-match determinism, Job-name coupling) + GIT_PAT fetch-path allowance.
+Tech-debt still carried forward: `LoopPolicy.Autonomy` unconsumed (Phase-49 contract field, tracked in 52-REVIEW.md — Oversight-loop arc), `level_verify_dispatch_test.go:682` Eventually-wrap advisory (52-VERIFICATION), no SECURITY.md for Phases 52/53 (`/gsd:secure-phase` recommended), W-4 agentName/agentEmail CRD pattern locks not re-established post-crank, Phase 36 residual 'bot' vocabulary (7 comment/fixture refs), 37-REVIEW advisory warnings (secrets RBAC blast radius, gitfetch timeouts, settings-match determinism, Job-name coupling) + GIT_PAT fetch-path allowance.
 | Phase 48 P01 | 6min | 2 tasks | 13 files |
 | Phase 48 P02 | 8min | 2 tasks | 2 files |
 | Phase 48 P03 | 15min | 3 tasks | 7 files |
@@ -184,5 +184,4 @@ Resume file: .planning/phases/53-chart-config-dashboard-provenance-surfacing/53-
 
 ## Operator Next Steps
 
-- Review the roadmap draft in `.planning/ROADMAP.md` and approve, or provide revision feedback
-- Once approved: `/gsd:plan-phase 48` to begin planning the LangGraph evaluator image + credproxy-TLS spike
+- Start the next milestone with /gsd-new-milestone
