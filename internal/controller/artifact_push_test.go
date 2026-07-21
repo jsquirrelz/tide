@@ -15,6 +15,7 @@ package controller
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -64,6 +65,22 @@ func phaseCR(name, uid, phase string) *tideprojectv1alpha3.Phase {
 	return p
 }
 
+// taskCR builds a Task fixture for the taskFindingsStageable predicate
+// coverage. withEvaluation controls whether Status.LoopStatus.LastEvaluation
+// is set (the applyLoopStatus presence-proxy guard, task_controller.go:2505).
+func taskCR(name, uid, phase string, withEvaluation bool) *tideprojectv1alpha3.Task {
+	t := &tideprojectv1alpha3.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", UID: types.UID(uid)},
+	}
+	t.Status.Phase = phase
+	if withEvaluation {
+		t.Status.LoopStatus.LastEvaluation = &tideprojectv1alpha3.EvaluationSummary{
+			Decision: "APPROVED",
+		}
+	}
+	return t
+}
+
 // ---------- Test 1: collectStageEnvelopes cumulative + deterministic ----------
 
 func TestArtifactPush_CollectStageEnvelopes_CumulativeAndDeterministic(t *testing.T) {
@@ -102,6 +119,110 @@ func TestArtifactPush_CollectStageEnvelopes_CumulativeAndDeterministic(t *testin
 			t.Fatalf("entry[%d] = %q, want %q (full=%v)", i, got[i], want[i], got)
 		}
 	}
+}
+
+// ---------- Task 1: taskFindingsStageable predicate coverage (a)-(f) ----------
+
+// TestCollectStageEnvelopes drives collectStageEnvelopes' task-kind predicate
+// (taskFindingsStageable) through the six fixtures the plan requires: only a
+// verdict-final Task carrying a recorded evaluation stages a "task" entry;
+// mid-loop, pre-verify, and evaluation-less-halted Tasks never do (the poison
+// guard — an entry without findings.json hard-fails the ENTIRE cumulative
+// push in tide-push).
+func TestCollectStageEnvelopes(t *testing.T) {
+	s := fakeSchemeWithAll(t)
+	project := artifactTestProject()
+
+	t.Run("a_VerifyHalted_with_evaluation_stages", func(t *testing.T) {
+		task := taskCR("t-halted-eval", "uid-t1", tideprojectv1alpha3.LevelPhaseVerifyHalted, true)
+		c := fake.NewClientBuilder().WithScheme(s).WithObjects(project, task).Build()
+		got, err := collectStageEnvelopes(context.Background(), c, project)
+		if err != nil {
+			t.Fatalf("collectStageEnvelopes: %v", err)
+		}
+		want := "uid-t1:task/t-halted-eval"
+		if !containsEntry(got, want) {
+			t.Fatalf("entries=%v want to contain %q", got, want)
+		}
+	})
+
+	t.Run("b_VerifyHalted_no_evaluation_excluded", func(t *testing.T) {
+		task := taskCR("t-halted-noeval", "uid-t2", tideprojectv1alpha3.LevelPhaseVerifyHalted, false)
+		c := fake.NewClientBuilder().WithScheme(s).WithObjects(project, task).Build()
+		got, err := collectStageEnvelopes(context.Background(), c, project)
+		if err != nil {
+			t.Fatalf("collectStageEnvelopes: %v", err)
+		}
+		if containsEntry(got, "uid-t2:task/t-halted-noeval") {
+			t.Fatalf("entries=%v must NOT contain the evaluation-less halted task (poison guard)", got)
+		}
+	})
+
+	t.Run("c_Succeeded_with_evaluation_stages", func(t *testing.T) {
+		task := taskCR("t-succeeded-eval", "uid-t3", tideprojectv1alpha3.LevelPhaseSucceeded, true)
+		c := fake.NewClientBuilder().WithScheme(s).WithObjects(project, task).Build()
+		got, err := collectStageEnvelopes(context.Background(), c, project)
+		if err != nil {
+			t.Fatalf("collectStageEnvelopes: %v", err)
+		}
+		want := "uid-t3:task/t-succeeded-eval"
+		if !containsEntry(got, want) {
+			t.Fatalf("entries=%v want to contain %q", got, want)
+		}
+	})
+
+	t.Run("d_Succeeded_no_evaluation_excluded", func(t *testing.T) {
+		task := taskCR("t-succeeded-noeval", "uid-t4", tideprojectv1alpha3.LevelPhaseSucceeded, false)
+		c := fake.NewClientBuilder().WithScheme(s).WithObjects(project, task).Build()
+		got, err := collectStageEnvelopes(context.Background(), c, project)
+		if err != nil {
+			t.Fatalf("collectStageEnvelopes: %v", err)
+		}
+		if containsEntry(got, "uid-t4:task/t-succeeded-noeval") {
+			t.Fatalf("entries=%v must NOT contain the pre-verify Succeeded task", got)
+		}
+	})
+
+	t.Run("e_Verifying_with_evaluation_excluded", func(t *testing.T) {
+		task := taskCR("t-verifying-eval", "uid-t5", tideprojectv1alpha3.LevelPhaseVerifying, true)
+		c := fake.NewClientBuilder().WithScheme(s).WithObjects(project, task).Build()
+		got, err := collectStageEnvelopes(context.Background(), c, project)
+		if err != nil {
+			t.Fatalf("collectStageEnvelopes: %v", err)
+		}
+		if containsEntry(got, "uid-t5:task/t-verifying-eval") {
+			t.Fatalf("entries=%v must NOT contain a mid-loop Verifying task (never stage mid-iteration)", got)
+		}
+	})
+
+	t.Run("f_AwaitingApproval_with_evaluation_stages", func(t *testing.T) {
+		task := taskCR("t-parked-eval", "uid-t6", tideprojectv1alpha3.LevelPhaseAwaitingApproval, true)
+		c := fake.NewClientBuilder().WithScheme(s).WithObjects(project, task).Build()
+		got, err := collectStageEnvelopes(context.Background(), c, project)
+		if err != nil {
+			t.Fatalf("collectStageEnvelopes: %v", err)
+		}
+		want := "uid-t6:task/t-parked-eval"
+		if !containsEntry(got, want) {
+			t.Fatalf("entries=%v want to contain %q", got, want)
+		}
+		// Assert the DestPrefix's first segment (what tide-push's strings.Cut
+		// keys its kind dispatch on, cmd/tide-push/main.go) is exactly "task".
+		for _, e := range got {
+			if e == want {
+				_, destPrefix, _ := strings.Cut(e, ":")
+				kind, _, _ := strings.Cut(destPrefix, "/")
+				if kind != "task" {
+					t.Fatalf("entry %q: kind = %q, want %q", e, kind, "task")
+				}
+			}
+		}
+	})
+}
+
+// containsEntry reports whether entries contains the exact string want.
+func containsEntry(entries []string, want string) bool {
+	return slices.Contains(entries, want)
 }
 
 // ---------- Test 2: triggerArtifactPush creates a Job with --stage-envelopes ----------

@@ -90,10 +90,12 @@ func alphaThroughThetaFixture(planRef string) []string {
 // cleanupPlanFixture deletes a Plan and all its Tasks + Waves.
 func cleanupPlanFixture(planName string, taskNames []string) {
 	for _, name := range taskNames {
-		t := &tideprojectv1alpha3.Task{}
-		if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, t); err == nil {
-			_ = k8sClient.Delete(context.Background(), t)
-		}
+		// Delegates to cleanupTask (task_controller_test.go), which clears
+		// taskFinalizer before deleting — a bare Delete on a
+		// finalizer-carrying Task only sets deletionTimestamp and leaves it
+		// listable (53-03 regression: a leaked verdict-final Task pollutes
+		// any other spec's collectStageEnvelopes namespace-wide List).
+		cleanupTask(name)
 	}
 	// Delete Waves with our plan UID prefix. In v1alpha3 Waves are global-scope
 	// (no Spec.PlanRef); the per-plan stub names them tide-wave-<plan.UID>-<i>,

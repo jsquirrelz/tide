@@ -57,6 +57,7 @@ var artifactKinds = map[string]bool{
 	"milestone": true,
 	"phase":     true,
 	"plan":      true,
+	"task":      true,
 }
 
 // ArtifactsHandler serves GET /api/v1/nodes/{kind}/{name}/artifacts. Unlike the
@@ -113,7 +114,7 @@ func (h *ArtifactsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 
 	if !artifactKinds[kind] {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid kind %q (must be one of project, milestone, phase, plan)", kind))
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid kind %q (must be one of project, milestone, phase, plan, task)", kind))
 		return
 	}
 

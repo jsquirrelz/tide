@@ -322,6 +322,74 @@ func TestArtifactsValidation(t *testing.T) {
 			t.Errorf("status=%d want 404", resp.StatusCode)
 		}
 	})
+	t.Run("kind traversal still 400s (closed allowlist preserved)", func(t *testing.T) {
+		resp, _ := doGet(t, router, "/api/v1/nodes/task%2F..%2Fproject/m1/artifacts?project=prj-1")
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("status=%d want 400", resp.StatusCode)
+		}
+	})
+	t.Run("bad kind 400 body names task in the allowed-kinds enumeration", func(t *testing.T) {
+		resp, body := doGet(t, router, "/api/v1/nodes/bogus/m1/artifacts?project=prj-1")
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("status=%d want 400", resp.StatusCode)
+		}
+		if !strings.Contains(string(body), "task") {
+			t.Errorf("400 body must name task in the allowed-kinds enumeration; got: %s", body)
+		}
+	})
+}
+
+// TestArtifactsTaskKindAdmitted (Finding 10 / 53-03): kind=task no longer
+// 400s — it reaches the normal gitfetch-backed handling and, with no
+// findings.json staged for this fixture, yields the absent-state 200 shape
+// (empty node prefix, same as any other unstaged kind).
+func TestArtifactsTaskKindAdmitted(t *testing.T) {
+	f := &fakeFetcher{
+		sha:   "abc123",
+		files: []gitfetch.File{{Name: "MILESTONE.md", Path: ".tide/planning/milestone/m1/MILESTONE.md", Content: []byte("x")}},
+	}
+	router := newArtifactsHandler(t, fakeclientset.NewSimpleClientset(credsSecret()), f, gitProject())
+	resp, body := doGet(t, router, "/api/v1/nodes/task/t1/artifacts?project=prj-1")
+	if resp.StatusCode == http.StatusBadRequest {
+		t.Fatalf("kind=task must not 400 (allowlist admits task); status=%d body=%s", resp.StatusCode, body)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d want 200; body=%s", resp.StatusCode, body)
+	}
+	var na nodeArtifacts
+	if err := json.Unmarshal(body, &na); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if na.State != "absent" {
+		t.Errorf("state=%q want absent (no findings.json staged under .tide/planning/task/t1/)", na.State)
+	}
+}
+
+// TestArtifactsTaskFindingsAvailable: a staged findings.json under the task
+// node prefix renders through the SAME gitfetch/artifacts path as every
+// other kind — no new endpoint (OBS-04).
+func TestArtifactsTaskFindingsAvailable(t *testing.T) {
+	f := &fakeFetcher{
+		sha: "cafebabe",
+		files: []gitfetch.File{
+			{Name: "findings.json", Path: ".tide/planning/task/t1/findings.json", Content: []byte(`{"verdict":"BLOCKED"}`)},
+		},
+	}
+	router := newArtifactsHandler(t, fakeclientset.NewSimpleClientset(credsSecret()), f, gitProject())
+	resp, body := doGet(t, router, "/api/v1/nodes/task/t1/artifacts?project=prj-1")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d want 200; body=%s", resp.StatusCode, body)
+	}
+	var na nodeArtifacts
+	if err := json.Unmarshal(body, &na); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if na.State != "available" {
+		t.Fatalf("state=%q want available", na.State)
+	}
+	if len(na.Files) != 1 || na.Files[0].Name != "findings.json" {
+		t.Fatalf("files=%v want exactly [findings.json]", na.Files)
+	}
 }
 
 // TestArtifactsHTTPEmptyPATAvailable (Gap 37-G1): an anonymous http:// remote

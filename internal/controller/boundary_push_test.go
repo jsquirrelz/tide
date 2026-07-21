@@ -587,10 +587,13 @@ var _ = Describe("triggerBoundaryPush — cumulative set + D-02 gate (Phase 34)"
 
 	cleanup := func(projectName string, taskNames []string, jobNames []string) {
 		for _, n := range taskNames {
-			tsk := &tideprojectv1alpha3.Task{}
-			if err := k8sClient.Get(ctx, types.NamespacedName{Name: n, Namespace: "default"}, tsk); err == nil {
-				_ = k8sClient.Delete(ctx, tsk)
-			}
+			// Delegates to cleanupTask (task_controller_test.go), which
+			// clears taskFinalizer before deleting — a bare Delete on a
+			// finalizer-carrying Task only sets deletionTimestamp and leaves
+			// it listable (53-03 regression: a leaked verdict-final Task
+			// pollutes any other spec's collectStageEnvelopes namespace-wide
+			// List).
+			cleanupTask(n)
 		}
 		for _, n := range jobNames {
 			j := &batchv1.Job{}
