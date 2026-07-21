@@ -225,10 +225,13 @@ describe("TaskDetailDrawer — findings disclosure (53-UI-SPEC Contract 2)", () 
       ],
     });
 
+    // A NON-default namespace: the fetch must thread task.namespace as the
+    // 4th argument (CR-01 — the backend defaults a missing namespace param
+    // to "default", 404ing every non-default-namespace install).
     renderWithToast(
       <TaskDetailDrawer
         taskName="t1"
-        task={TASK_WITH_VERIFICATION}
+        task={{ ...TASK_WITH_VERIFICATION, namespace: "proj-ns" }}
         onClose={() => undefined}
         onOpenLogStream={() => undefined}
       />,
@@ -243,7 +246,7 @@ describe("TaskDetailDrawer — findings disclosure (53-UI-SPEC Contract 2)", () 
     });
 
     expect(toggle).toHaveAttribute("aria-expanded", "true");
-    expect(mockFetchArtifacts).toHaveBeenCalledWith("task", "t1", "my-project");
+    expect(mockFetchArtifacts).toHaveBeenCalledWith("task", "t1", "my-project", "proj-ns");
 
     const content = await screen.findByTestId("findings-state-available");
     expect(content.textContent).toContain('"blockers": 1');

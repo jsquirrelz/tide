@@ -713,7 +713,16 @@ function FindingsContent({ task }: { task: TaskDetailData }) {
 
   const load = useCallback(async () => {
     try {
-      const result = await fetchNodeArtifacts("task", task.name, task.projectName);
+      // The namespace MUST be threaded through (4th arg) — the backend
+      // defaults a missing `namespace` query param to "default" (debug #14,
+      // lib/tasks.ts), so omitting it 404s every non-default-namespace
+      // install. Mirrors ArtifactViewer's own fetchNodeArtifacts call.
+      const result = await fetchNodeArtifacts(
+        "task",
+        task.name,
+        task.projectName,
+        task.namespace,
+      );
       if (!mountedRef.current) return;
       setData(result);
     } catch (err) {
@@ -724,7 +733,7 @@ function FindingsContent({ task }: { task: TaskDetailData }) {
         error: err instanceof Error ? err.message : String(err),
       });
     }
-  }, [task.name, task.projectName]);
+  }, [task.name, task.projectName, task.namespace]);
 
   useEffect(() => {
     mountedRef.current = true;
