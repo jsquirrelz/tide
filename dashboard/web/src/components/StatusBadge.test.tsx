@@ -1,12 +1,13 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
-import StatusBadge, { type StatusValue } from "./StatusBadge";
+import StatusBadge, { STATUS_TABLE, type StatusValue } from "./StatusBadge";
 
 afterEach(cleanup);
 
 // Verbatim labels + screen-reader descriptions from UI-SPEC §Status Vocabulary.
 // Order matches the spec table; tests are table-driven against this map.
 // 15-05: extended to 11 entries with the Complete row (UI-SPEC C1).
+// 53-07: extended to 13 entries with Verifying/VerifyHalted (53-UI-SPEC).
 const EXPECTED: Record<
   StatusValue,
   {
@@ -89,6 +90,21 @@ const EXPECTED: Record<
     colorVar: "var(--color-status-error)",
     iconName: "Ban",
   },
+  // 53-UI-SPEC §Status Vocabulary (OBS-04).
+  Verifying: {
+    label: "Verifying",
+    srDescription: "Verifying — independent evaluator reviewing this attempt",
+    colorVar: "var(--color-status-running)",
+    iconName: "SearchCheck",
+    animation: "animate-pulse",
+  },
+  VerifyHalted: {
+    label: "Verify halted",
+    srDescription:
+      "Verify halted — verification ended without an approved verdict. Review findings and run `tide resume` to advance",
+    colorVar: "var(--color-status-blocked)",
+    iconName: "ShieldBan",
+  },
 };
 
 const ALL_STATUSES = Object.keys(EXPECTED) as StatusValue[];
@@ -159,5 +175,44 @@ describe("StatusBadge (UI-SPEC §Status Vocabulary — 11 variants)", () => {
     expect(style).toMatch(/font-weight:\s*600/);
     // Border radius 4px per shape diagram.
     expect(style).toMatch(/border-radius:\s*4px/);
+  });
+});
+
+// 53-UI-SPEC §Component Test Contract — the OBS-04 "visually distinct"
+// criterion, executable: VerifyHalted must differ from Failed on all three
+// axes (color token, lucide glyph, label), never a reinterpretation of the
+// Failed wave-semantics class.
+describe("VerifyHalted vs Failed — distinctness contract (OBS-04)", () => {
+  it("colorVar differs — VerifyHalted uses blocked, Failed uses error", () => {
+    expect(STATUS_TABLE.VerifyHalted.colorVar).toBe(
+      "var(--color-status-blocked)",
+    );
+    expect(STATUS_TABLE.Failed.colorVar).toBe("var(--color-status-error)");
+    expect(STATUS_TABLE.VerifyHalted.colorVar).not.toBe(
+      STATUS_TABLE.Failed.colorVar,
+    );
+  });
+
+  it("iconName differs — ShieldBan vs CircleX", () => {
+    expect(STATUS_TABLE.VerifyHalted.iconName).not.toBe(
+      STATUS_TABLE.Failed.iconName,
+    );
+  });
+
+  it("label differs — 'Verify halted' vs 'Failed'", () => {
+    expect(STATUS_TABLE.VerifyHalted.label).not.toBe(STATUS_TABLE.Failed.label);
+  });
+
+  it("status-badge-VerifyHalted renders with data-icon=ShieldBan", () => {
+    render(<StatusBadge status="VerifyHalted" />);
+    const badge = screen.getByTestId("status-badge-VerifyHalted");
+    const icon = badge.querySelector("[data-icon]");
+    expect(icon?.getAttribute("data-icon")).toBe("ShieldBan");
+  });
+
+  it("the Verifying badge carries animate-pulse", () => {
+    render(<StatusBadge status="Verifying" />);
+    const badge = screen.getByTestId("status-badge-Verifying");
+    expect(badge.innerHTML).toContain("animate-pulse");
   });
 });

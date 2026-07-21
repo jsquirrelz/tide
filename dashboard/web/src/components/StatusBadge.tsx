@@ -10,14 +10,16 @@ import {
   LockKeyhole,
   Loader2,
   Pause,
+  SearchCheck,
   ShieldAlert,
+  ShieldBan,
   type LucideIcon,
 } from "lucide-react";
 import type { CSSProperties } from "react";
 import { clsx } from "../lib/clsx";
 
 /**
- * The 11 CRD `.status.phase` values rendered by `<StatusBadge>`. Sourced
+ * The 13 CRD `.status.phase` values rendered by `<StatusBadge>`. Sourced
  * verbatim from UI-SPEC §Status Vocabulary. Order matches the spec table.
  *
  * `Hourglass` is exported by lucide-react and intentionally imported here so
@@ -25,6 +27,10 @@ import { clsx } from "../lib/clsx";
  * icon set with the badge without re-importing lucide entries. The plan's
  * artifact contract requires `Hourglass` to appear in this file (see
  * 04-15-PLAN.md `must_haves.artifacts[StatusBadge].contains`).
+ *
+ * `Verifying`/`VerifyHalted` (53-UI-SPEC §Status Vocabulary, OBS-04) mirror
+ * `LevelPhaseVerifying`/`LevelPhaseVerifyHalted` in api/v1alpha3/shared_types.go
+ * byte-for-byte.
  */
 export type StatusValue =
   | "Pending"
@@ -37,7 +43,9 @@ export type StatusValue =
   | "Failed"
   | "PushLeaseFailed"
   | "PushLeakBlocked"
-  | "Rejected";
+  | "Rejected"
+  | "Verifying"
+  | "VerifyHalted";
 
 type StatusRow = {
   icon: LucideIcon;
@@ -139,6 +147,31 @@ const STATUS_TABLE: Record<StatusValue, StatusRow> = {
     label: "Rejected",
     colorVar: "var(--color-status-error)",
     srDescription: "Rejected by operator — run `tide resume` to clear",
+  },
+  // 53-UI-SPEC §Status Vocabulary (OBS-04): the Task loop's in-progress
+  // state — an independent evaluator is reviewing the current attempt.
+  // running-family: same color token + animate-pulse as Running.
+  Verifying: {
+    icon: SearchCheck,
+    iconName: "SearchCheck",
+    label: "Verifying",
+    colorVar: "var(--color-status-running)",
+    srDescription: "Verifying — independent evaluator reviewing this attempt",
+    animationClass: "animate-pulse",
+  },
+  // 53-UI-SPEC §Status Vocabulary (OBS-04): the Task loop's terminal halt —
+  // verification exhausted its LoopPolicy without an APPROVED verdict.
+  // blocked-family: same color token as PushLeakBlocked, distinct glyph
+  // (ShieldBan, not ShieldAlert) — no shared glyph within a color family.
+  // Distinctness-from-Failed contract: colorVar/iconName/label all differ
+  // from the Failed row above (asserted by StatusBadge.test.tsx).
+  VerifyHalted: {
+    icon: ShieldBan,
+    iconName: "ShieldBan",
+    label: "Verify halted",
+    colorVar: "var(--color-status-blocked)",
+    srDescription:
+      "Verify halted — verification ended without an approved verdict. Review findings and run `tide resume` to advance",
   },
 };
 
