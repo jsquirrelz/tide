@@ -386,6 +386,87 @@ func TestArtifactPush_ParkedMilestoneTriggersAndRequeues(t *testing.T) {
 	}
 }
 
+// ---------- Plan 53-10: ensure-entry union (just-patched Task races the List) ----------
+
+// TestArtifactPush_EnsureEntryUnion_AddsMissingTaskEntry proves the exact race
+// this plan closes: a Task fixture that is NOT visible to collectStageEnvelopes'
+// own List (simulating an informer cache that has not yet observed the
+// just-applied status patch) still rides the push when passed as an ensure entry.
+func TestArtifactPush_EnsureEntryUnion_AddsMissingTaskEntry(t *testing.T) {
+	s := fakeSchemeWithAll(t)
+	project := artifactTestProject()
+	// No Task fixture registered with the fake client at all.
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(project).Build()
+
+	task := &tideprojectv1alpha3.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "t-just-patched", Namespace: "default", UID: types.UID("uid-jp")},
+	}
+
+	if err := triggerArtifactPush(context.Background(), c, s, project, "task", "tide-push:latest", defaultSharedPVCName, ProviderDefaults{}, task); err != nil {
+		t.Fatalf("triggerArtifactPush with ensure: %v", err)
+	}
+
+	var job batchv1.Job
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "tide-push-proj-uid", Namespace: "default"}, &job); err != nil {
+		t.Fatalf("expected push Job created: %v", err)
+	}
+	args := strings.Join(job.Spec.Template.Spec.Containers[0].Args, " ")
+	if !strings.Contains(args, "--stage-envelopes=uid-jp:task/t-just-patched") {
+		t.Errorf("args missing ensure-union task entry; got: %s", args)
+	}
+}
+
+// TestArtifactPush_EnsureEntryUnion_DedupsAgainstListedEntry proves ensure is
+// deduped (by UID/entry, not blindly appended) when the List already found the
+// same Task — no duplicate --stage-envelopes entry.
+func TestArtifactPush_EnsureEntryUnion_DedupsAgainstListedEntry(t *testing.T) {
+	s := fakeSchemeWithAll(t)
+	project := artifactTestProject()
+	listedTask := taskCR("t-listed", "uid-listed", tideprojectv1alpha3.LevelPhaseVerifyHalted, true)
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(project, listedTask).Build()
+
+	if err := triggerArtifactPush(context.Background(), c, s, project, "task", "tide-push:latest", defaultSharedPVCName, ProviderDefaults{}, listedTask); err != nil {
+		t.Fatalf("triggerArtifactPush with duplicate ensure: %v", err)
+	}
+
+	var job batchv1.Job
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "tide-push-proj-uid", Namespace: "default"}, &job); err != nil {
+		t.Fatalf("expected push Job created: %v", err)
+	}
+	args := strings.Join(job.Spec.Template.Spec.Containers[0].Args, " ")
+	count := strings.Count(args, "uid-listed:task/t-listed")
+	if count != 1 {
+		t.Errorf("expected exactly one occurrence of the deduped entry; got %d in args: %s", count, args)
+	}
+}
+
+// TestArtifactPush_EnsureEntryUnion_NoEnsureArgsUnaffected proves the four
+// existing planner-tier callers (which pass no ensure Tasks) behave identically
+// to pre-53-10 — no ensure param means no union, no behavior change.
+func TestArtifactPush_EnsureEntryUnion_NoEnsureArgsUnaffected(t *testing.T) {
+	s := fakeSchemeWithAll(t)
+	project := artifactTestProject()
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(project, milestone("m-alpha", "uid-ma", "Succeeded")).
+		Build()
+
+	if err := triggerArtifactPush(context.Background(), c, s, project, "milestone", "tide-push:latest", defaultSharedPVCName, ProviderDefaults{}); err != nil {
+		t.Fatalf("triggerArtifactPush (no ensure): %v", err)
+	}
+
+	var job batchv1.Job
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "tide-push-proj-uid", Namespace: "default"}, &job); err != nil {
+		t.Fatalf("expected push Job created: %v", err)
+	}
+	args := strings.Join(job.Spec.Template.Spec.Containers[0].Args, " ")
+	if !strings.Contains(args, "--stage-envelopes=uid-ma:milestone/m-alpha") {
+		t.Errorf("args missing collected CSV; got: %s", args)
+	}
+	if strings.Count(args, "--stage-envelopes=") != 1 {
+		t.Errorf("expected exactly one --stage-envelopes arg; got: %s", args)
+	}
+}
+
 // Task 2 (b): Pitfall 8 regression guard — with the deterministic push Job already
 // busy, the parked milestone STILL requeues on the 30s cadence (so the trigger is
 // never permanently swallowed) and the single-flight no-op leaves the Job untouched.

@@ -229,9 +229,50 @@ func collectStageEnvelopes(ctx context.Context, c client.Client, project *tidepr
 
 	out := make([]string, 0, len(entries))
 	for _, e := range entries {
-		out = append(out, fmt.Sprintf("%s:%s/%s", e.uid, e.kind, e.name))
+		out = append(out, stageEntry(e.kind, e.name, e.uid))
 	}
 	return out, nil
+}
+
+// stageEntry formats a single <uid>:<kind>/<name> staging-map entry (37-06
+// layout contract). Shared by collectStageEnvelopes' List-derived entries and
+// triggerArtifactPush's ensure-entry union (plan 53-10) so the two paths
+// never diverge on entry shape.
+func stageEntry(kind, name, uid string) string {
+	return fmt.Sprintf("%s:%s/%s", uid, kind, name)
+}
+
+// ensureTaskEntries unions each ensure Task's own <uid>:task/<name> staging
+// entry into envelopes, deduped against what's already present (plan 53-10).
+// A Task's verdict-final status patch and the informer-cache-backed List
+// collectStageEnvelopes just ran are not ordered with respect to each other —
+// the just-patched Task that triggered THIS push may not yet be visible to
+// that List. Without this union, a stale snapshot could push a cumulative map
+// missing the exact Task the caller is trying to surface, and — because the
+// push Job is single-flight — the frozen VerifyHalted project would never
+// retry until some LATER level's boundary push happened to re-collect it.
+// Callers that pass no ensure Tasks (the four existing planner-tier call
+// sites) get back envelopes unchanged.
+func ensureTaskEntries(envelopes []string, ensure []*tideprojectv1alpha3.Task) []string {
+	if len(ensure) == 0 {
+		return envelopes
+	}
+	present := make(map[string]struct{}, len(envelopes))
+	for _, e := range envelopes {
+		present[e] = struct{}{}
+	}
+	for _, t := range ensure {
+		if t == nil {
+			continue
+		}
+		entry := stageEntry("task", t.Name, string(t.UID))
+		if _, ok := present[entry]; ok {
+			continue
+		}
+		envelopes = append(envelopes, entry)
+		present[entry] = struct{}{}
+	}
+	return envelopes
 }
 
 // buildArtifactStageMessage returns the commit message for an artifact-stage
@@ -264,6 +305,13 @@ func buildArtifactStageMessage(level string) string {
 // pvcName follows the triggerBoundaryPush contract: the caller's configured
 // shared-PVC name (r.sharedPVCName()), empty falling back to
 // defaultSharedPVCName.
+//
+// ensure (plan 53-10) is an optional, variadic set of Tasks whose own
+// <uid>:task/<name> entry MUST ride this push even if collectStageEnvelopes'
+// own List has not yet observed their status patch (see ensureTaskEntries).
+// The four existing planner-tier callers pass nothing and are behaviorally
+// unchanged; the Task verdict-final trigger (task_controller.go) passes the
+// just-patched Task.
 func triggerArtifactPush(
 	ctx context.Context,
 	c client.Client,
@@ -273,6 +321,7 @@ func triggerArtifactPush(
 	tidePushImage string,
 	pvcName string,
 	helmDefaults ProviderDefaults,
+	ensure ...*tideprojectv1alpha3.Task,
 ) error {
 	logger := logf.FromContext(ctx)
 
@@ -297,6 +346,7 @@ func triggerArtifactPush(
 	if err != nil {
 		return fmt.Errorf("collect stage envelopes for %s artifact push: %w", level, err)
 	}
+	envelopes = ensureTaskEntries(envelopes, ensure)
 	if len(envelopes) == 0 {
 		// Nothing planner-completed yet — no artifacts to stage.
 		return nil
