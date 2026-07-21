@@ -40,26 +40,21 @@ package kind_integration
 // cap value"). If a future plan changes the source constant, update this
 // literal in the same commit.
 //
-// KNOWN GAP — internal.controller.TaskReconcilerDeps.VerifierImage (consumed
-// by dispatchVerifier's BuildOptions.SubagentImage, task_controller.go:2106)
-// is NOT wired anywhere in cmd/manager/main.go as of this commit (confirmed
-// via `grep -n VerifierImage cmd/manager/main.go` returning zero hits inside
-// the TaskReconciler's Deps literal — every sibling image field
-// (CredproxyImage, ReporterImage, TidePushImage, ImportImage) IS wired from a
-// flag/env var; VerifierImage alone is not). Until a flag/env var wires it
-// (mirroring --credproxy-image's convention), every dispatchVerifier Job
-// Create call in a real cluster resolves to an empty container image, which
-// the API server rejects at admission ("spec.template.spec.containers[0]
-// .image: Required value") — dispatchVerifier returns an error, the
-// reconcile requeues, and checkVerifyingState's NotFound-retry path repeats
-// the same failing Create indefinitely. Concretely: this spec's cap/drain
-// assertions below will trivially pass (zero Jobs are ever actually
-// persisted) but the final "no Task stranded in Verifying" assertion WILL
-// correctly FAIL until the gap is closed — a deliberate fail-loud design
-// (see that assertion's own comment). Closing the gap (a cmd/manager/main.go
-// + likely a chart values change) is out of this plan's declared file scope
-// (files_modified: this file only) and is called out as a prerequisite in
-// this plan's own Task 2 human-verify runbook.
+// GAP CLOSED (Plan 53-09 D-10 closeout) — the KNOWN GAP this comment used to
+// document (internal.controller.TaskReconcilerDeps.VerifierImage unwired in
+// cmd/manager/main.go, dispatchVerifier's Job Create perpetually failing at
+// admission) is closed: cmd/manager/main.go now reads TIDE_VERIFIER_IMAGE
+// into TaskReconcilerDeps.VerifierImage (mirroring --credproxy-image), and
+// Phase 53 CFG-01 wired the chart's images.tideLanggraphVerifier block +
+// TIDE_VERIFIER_IMAGE env directly (suite_test.go's helmControllerArgs sets
+// images.tideLanggraphVerifier.tag=test, retiring the post-install env patch
+// this suite previously applied). dispatchVerifier's Job Create now resolves
+// a real, schedulable image, so the verify loop genuinely completes — for
+// this spec's trivial `true` gate command (withVerification("true", 1)),
+// often within a single 3s poll interval. That closes the gap this spec was
+// originally written to fail-loudly document, but it also means a Task can
+// race PAST the transient Verifying phase to a terminal one between polls;
+// see the first Eventually below for how that race is now handled.
 //
 // KNOWN LIMITATION — the in-process budget.ReservationStore no-leak
 // invariant (task_controller.go's dispatchVerifier Reserve/Release pair) is
@@ -159,11 +154,18 @@ var _ = Describe("Verifier concurrent-dispatch stays under the sized cap (ESC-04
 			Expect(createFixture(ctx, task)).To(Succeed())
 		}
 
-		By("Waiting for every Task to reach executor-complete (Phase=Verifying) — proves dispatchVerifier was attempted for all N")
+		By("Waiting for every Task to reach executor-complete (Phase=Verifying or a terminal phase past it) — proves dispatchVerifier was attempted for all N")
 		// gateChecks stamps Status.Phase=Verifying BEFORE calling dispatchVerifier
 		// (task_controller.go:1487, unconditionally — regardless of whether the
 		// cap check inside dispatchVerifier immediately dispatches or defers),
-		// so this wait is independent of the VerifierImage gap documented above.
+		// so this wait is independent of the sized cap. Now that the VerifierImage
+		// gap is closed (header comment above), the trivial `true` gate command
+		// completes the whole verify loop fast enough that a Task can race past
+		// the transient Verifying phase to a terminal one (Succeeded or Failed)
+		// between this Eventually's 3s polls — an exact Equal(Verifying) would
+		// then time out watching a permanent state it will never see again.
+		// Accept any phase that proves dispatch was attempted, whether the poll
+		// caught the transient state or the loop had already resolved it.
 		for _, name := range taskNames {
 			n := name
 			Eventually(func() string {
@@ -172,8 +174,11 @@ var _ = Describe("Verifier concurrent-dispatch stays under the sized cap (ESC-04
 					return ""
 				}
 				return t.Status.Phase
-			}, 3*time.Minute, 3*time.Second).Should(Equal(tideprojectv1alpha3.LevelPhaseVerifying),
-				"Task %s should reach Verifying (executor complete; verifier dispatch attempted, Phase 51 EXEC-04)", n)
+			}, 3*time.Minute, 3*time.Second).Should(BeElementOf(
+				tideprojectv1alpha3.LevelPhaseVerifying,
+				tideprojectv1alpha3.LevelPhaseSucceeded,
+				tideprojectv1alpha3.LevelPhaseFailed,
+			), "Task %s should reach Verifying or a terminal phase past it (executor complete; verifier dispatch attempted, Phase 51 EXEC-04)", n)
 		}
 
 		By("Polling the concurrent role=verifier Job count over a window: must never exceed the sized cap")
@@ -209,12 +214,12 @@ var _ = Describe("Verifier concurrent-dispatch stays under the sized cap (ESC-04
 		// to absorb the same cached-client/direct-client completion-patch
 		// race documented in 51-06-SUMMARY.md and 51-07-SUMMARY.md.
 		//
-		// NOTE: until the VerifierImage gap (header comment above) is closed,
-		// this assertion is EXPECTED to fail — the cap/drain assertions above
-		// pass trivially (zero verifier Jobs are ever actually persisted) but
-		// dispatchVerifier's Job Create keeps erroring, so Tasks never leave
-		// Verifying. That is the correct, fail-loud signal for the gap, not a
-		// bug in this spec.
+		// Now that the VerifierImage gap is closed (header comment above), this
+		// assertion is expected to PASS: dispatchVerifier's Job Create resolves
+		// a real image, the verify loop runs to completion, and every Task
+		// reaches a genuine terminal outcome. Kept as a real (not vacuous)
+		// assertion rather than deleted — it still catches a regression that
+		// reopens the gap or strands a Task mid-loop.
 		for _, name := range taskNames {
 			n := name
 			Eventually(func() string {
