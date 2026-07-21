@@ -140,6 +140,50 @@ Everything the first external-repo run surfaced short of new subagent stages: th
 - Planner override `fable` was unavailable and fell back to Opus; verifier ran on Opus (independent envtest re-runs paid off — the verifier re-ran gates rather than trusting SUMMARY claims).
 - Proof cluster left running post-capture for human review, per the one-heavy-workload VM discipline.
 
+## Milestone: v1.0.9 — Slack Tide: The Task Loop (Verification-Driven Quality Iteration)
+
+**Shipped:** 2026-07-21 (milestone complete; release tag pending rc-gated pipeline)
+**Phases:** 6 (48–53) | **Plans:** 46 | **Tasks:** 98 | **Timeline:** ~4 days | **Commits:** ~354, +58.6k/−0.9k LOC
+
+### What Was Built
+
+The first real feedback loop: independent verification (read-only LangGraph evaluator image — the successor-runtime beachhead) drives Task iteration with evidence-seeded fresh attempts, parameterized per level by one shared `LoopPolicy` contract and one level-keyed resolver; execution-loop evidence (`TerminalReason`, `RunEvidence`, derived run IDs) + loop-native observability; chart-first config with a sticky install-ON/upgrade-OFF posture; dashboard loop provenance with `VerifyHalt` distinct from `Failed`.
+
+### What Worked
+
+- **Live proofs as phase gates.** Three phases (51, 52, 53) each ended on a real kind-cluster proof; every one surfaced defects green tests missed (the verdict relay ship-blocker, the attempt-blind reporter name, the swallowed exhausted-plan approve). "envtest feeds fakes" is now a known blind-spot class with a known antidote.
+- **Adding plans mid-flight when execution surfaces gaps.** Three gap plans (53-10, 53-11, plus Phase 51's D-09 todo folds) were authored inside the run instead of deferred — the findings chain would have shipped broken twice without this.
+- **Code review as a distinct pass after green tests.** Across the milestone it caught 1 Critical + 20+ warnings the verifiers and suites missed, including a namespace bug that would have 404'd the headline feature in every real install.
+- **Schema-before-consumer sequencing** (49 → 50 → 51) meant the Task loop landed on settled types; `make manifests` zero-diff checks kept the contract phases honest.
+- **Parallel-worktree waves with post-merge gates.** The gates caught cross-plan integration issues per-worktree checks cannot (goconst across merged plans, embed-hash rotations).
+
+### What Was Inefficient
+
+- **Worktree environment artifacts recurred** — fresh worktrees failing `go build ./...` on gitignored embed dirs, missing envtest etcd, npm ci churn; each wave's executors rediscovered some of it until pre-warned in prompts. A worktree-bootstrap note (or harness fix) would save repeated diagnosis.
+- **The cleanup-wave helper blocks on benign states** (embed-hash rotations read as deletions; untracked kind-suite artifacts) and its re-runs stop at already-cleaned entries — two manual merge interventions this milestone.
+- **`verify-dashboard-freshness` flakes under CPU contention** (known since v1.0.8) cost a diagnosis cycle again.
+- **Requirement phrasing ambiguity** (CFG-02's "enabled at the milestone+project scope") had to be interpreted at discuss-time; tighter requirement wording at roadmap-time would have avoided carrying an interpretation risk through planning.
+
+### Patterns Established
+
+- Fail-closed as a doctrine, not a feature: verdicts, terminal reasons, config parsing, chart posture — the zero value is never the permissive value.
+- Structural enforcement over prompt/document enforcement (read-only at mount/cred/rootfs; anti-gaming via ChangedFiles; model-callable tools never choose their own commands).
+- Infra-retry ≠ quality-iteration, grep-distinguishable at every level.
+- Iteration history lives in traces/artifacts; etcd carries only the current summary (LOOP-03 held under pressure repeatedly).
+- Chart changes author in `hack/helm/` + regenerate same-commit; the chart is generated, never hand-edited.
+
+### Key Lessons
+
+- Nothing counts as done until the shipped path ran end-to-end on a real cluster — twice this milestone the wired-but-never-run path was the broken one (verifier entrypoint, verdict relay).
+- A fail-closed consumer (tide-push's findings.json rule) is only safe once every producer exists; check the producer side before activating a new consumer trigger.
+- Ambiguous requirement text should be resolved into a named, veto-able decision at discuss-time (CFG-02's D-03 pattern) rather than silently interpreted at plan-time.
+
+### Cost Observations
+
+- Model mix: fable (orchestrator + planner), sonnet (executors/researchers/checkers), opus (verifiers/review-adjacent) — heavier tiers reserved for judgment passes.
+- Live-proof spend deliberately bounded: Phase 51/52 billable proofs < $1 combined; Phase 53's kind proofs were $0 (stub subagents).
+- Three full kind-suite runs in one phase (53-09) was the wall-clock long pole (~33 min each).
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
