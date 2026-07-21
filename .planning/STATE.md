@@ -6,7 +6,7 @@ status: planning
 last_updated: "2026-07-21T14:02:25.263Z"
 last_activity: 2026-07-21
 progress:
-  total_phases: 0
+  total_phases: 12
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -20,24 +20,27 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-21)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** v1.0.9 RELEASED 2026-07-21 (tag `v1.0.9`) — planning next milestone (`/gsd:new-milestone`)
+**Current focus:** v1.0.10 "King Tide" ROADMAPPED (2026-07-21) — 12 phases (54–65), 30/30 requirements mapped, awaiting `/gsd:plan-phase 54`
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-07-21 — Milestone v1.0.10 started
+Phase: 54 of 65 (Runtime Selection Foundation + Observability Gap Closure) — 1st of 12 phases in v1.0.10
+Plan: — (not yet planned)
+Status: Ready to plan
+Last activity: 2026-07-21 — ROADMAP.md created for v1.0.10 (Phases 54–65, 30/30 requirements mapped, 0 orphans)
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
 **Velocity (recent milestones):**
 
+- v1.0.9: 46 plans across 6 phases in ~4 days (2026-07-18 → 2026-07-21) · 354 commits · +58.6k/−0.9k LOC
 - v1.0.8: 32 plans across 6 phases in ~3 days (2026-07-15 → 2026-07-17) · 240 commits · +34.8k/−343 LOC
 - v1.0.7: 51 plans across 8 phases in ~12 days (2026-07-03 → 2026-07-15)
 - v1.0.6: 8 plans across 3 phases in ~2 days (2026-06-28 → 2026-06-29)
 - v1.0.5: 3 plans, 1 phase (2026-06-27)
-- Total plans completed v1.0.0–v1.0.8: ~380+
+- Total plans completed v1.0.0–v1.0.9: ~430+
 
 ## Accumulated Context
 
@@ -58,129 +61,60 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - **Cost/concurrency is the biggest multiplier yet** (attempts × evaluator × levels): `LoopPolicy.BudgetCents` + the reservation store + the Phase-32 concurrency gate (verifier pods MUST be counted, same phase as dispatch sites) bound it; `onExhaustion: requireApproval` is the human backstop.
 - **A1 correction:** httpx honors `SSL_CERT_FILE` only (`REQUESTS_CA_BUNDLE` is dead); the credproxy-TLS path through `ChatAnthropic` is a genuine build spike (`langchain#35843`), scheduled first (Phase 48) with an `http_client=`/`anthropic_client=` fallback.
 - **Named future arc:** Product / System / Oversight loops are later milestones; `internal/eval` seeds the System loop, the existing gates seed Oversight enforcement (resolve gate policy from loop level/risk/confidence/history).
-- [Phase 48]: pytest==9.1.1 slopchecked [OK] before addition as the sole dev pin; verify-langgraph-pins loops per-file to avoid grep multi-file 'filename:' prefix breaking the comment/blank-line filter
-- [Phase 48]: D-08 implemented as single ReadOnly bool field on existing BuildOptions/BuildJobSpec (RESEARCH Pattern 2), not a forked buildVerifierJobSpec — git credential omission proven via regression test, not new logic
-- [Phase 48]: git_read tool parameter named git_args, not args — langchain_core's @tool schema builder mis-derives the pydantic schema for a parameter literally named 'args'
-- [Phase 48]: Added EnvelopeMissingError as an EnvelopeError subclass so the verifier entrypoint distinguishes envelope-missing from envelope-invalid TerminationStub reasons
-- [Phase 48]: Scoped Dockerfile COPY to explicit verifier/*.py files (not a blanket verifier/ COPY) so requirements-dev.txt/tests/ never enter the shipped image despite the .dockerignore re-include admitting the whole source tree
-- [Phase 48]: CI provisions Python via astral-sh/setup-uv only (no actions/setup-python) - mirrors make test-langgraph-verifier's local dev recipe exactly
-- [Phase 48-05 Task 1]: tls_spike.py reads ANTHROPIC_BASE_URL/SSL_CERT_FILE purely via ChatAnthropic's own env-resolution (never a constructor kwarg) for exact construction-fidelity with the shipped skeleton; hack/minttoken/main.go is committed (not /tmp-only) since the spike is a retained, re-runnable artifact re-run on every D-10 pin bump
-- [Phase 48-05 Task 1]: verdict classification keys off the anthropic SDK's actual exception hierarchy (APIStatusError = TLS succeeded, APIConnectionError = TLS/connection failed, unwrap __cause__ for the error class) rather than string-matching error messages
-- [Phase 49]: LoopPolicy/LoopStatus/EvaluationSummary declared standalone in api/v1alpha3/loop_types.go (D-01 two-homes precedent); embedded in no Kind this phase, make manifests confirmed zero CRD-YAML diff
-- [Phase 49]: LOOP-03 (no iteration history in .status) enforced via a compile-time struct-literal guard (TestLoopStatus_NoForbiddenFields), not just a runtime shape assertion
-- [Phase 49-02]: ClassifyVerdict returns a bare Verdict (never (Verdict, error)) so unknown/malformed input cannot be mistakenly mapped to APPROVED by a forgetful caller
-- [Phase 49-02]: GateDecision/Finding live in pkg/dispatch (not api/v1alpha3) per D-01 — the verdict is a wire-format document crossing the file-envelope seam, not a CRD type
-- [Phase 49-02]: highSeverityFindingToken (blocker) is a package const rather than a call-site literal so Phase 51's severity rubric can retune it in one place
-- [Phase 49]: Task findings staging: derive kind from DestPrefix first segment via strings.Cut; task-kind entries require findings.json only, fail closed if absent
-- [Phase 49]: A task-kind entry missing findings.json fails loudly (artifact-stage-failed) rather than silent skip, mirroring the existing planner *.md-empty guard
-- [Phase 49-03]: classify_verdict collapses missing-verdict-field and unrecognized-verdict-value into one BLOCKED branch (try Verdict(x) except ValueError), matching the Go switch/default's identical collapsing
-- [Phase 49-03]: write_termination_stub adds gateDecision/findingsCount/highSeverityCount unconditionally (not gated like Go's omitempty) per the plan's explicit instruction
-- [Phase 49-03]: EnvelopeIn.verify stays an untyped dict, not a typed VerifyContext dataclass -- this phase only locks the fail-closed guard, Phase 51 consumes the concrete fields
-- [Phase 50]: [Phase 50-01] TerminalReason.Completed is belief-only (EXEC-04); doc comment states this explicitly on the const, not just the type
-- [Phase 50]: [Phase 50-01] EnvelopeOut.TerminalReason carries no omitempty so an unset reason stays visible as "" on the wire, never silently hidden
-- [Phase 50]: [Phase 50-01] RunEvidence.Bounded() truncates ChangedFiles/Commands/version fields per plan spec; EvaluatorVersions left unbounded (Phase-51-populated, empty today, not in plan's Bounded() contract)
-- [Phase 50]: [Phase 50-02] LoopAttributes' returned-order is kind/run_id/iteration (always) then parent_run_id/candidate_version/exit_reason (conditional) — matches the plan's action-text prose, not the const-declaration order
-- [Phase 50]: [Phase 50-02] loop.*/evaluation.*/human_intervention keys are deliberately NOT tide.-prefixed (cross-vendor loop-native convention Phase 51's LangGraph evaluator reuses); doc comment documents the deviation from the file's tide.* idiom explicitly
-- [Phase 50]: [Phase 50-03] Phase 50 adds NO new Prometheus metric — guard-hardening only (RESEARCH Open Question 3 resolved); loop-outcome metrics wait for Phase 51's real EvaluationSummary.Decision/LoopStatus.ExitReason consumer
-- [Phase 50]: [Phase 50-03] The analyzer's forbiddenLabels map and wave_label_test.go's forbiddenRuntimeLabels slice are intentionally NOT shared via import — hand-synced by design so a bug in one guard layer cannot silently disable the other
-- [Phase 50]: [Phase 50-04] runtimeVersionProbe execs claude --version directly via exec.CommandContext, not through anthropic.Anthropic's execFunc test seam, to avoid overwriting existing tests' captured-args assertions
-- [Phase 50]: [Phase 50-04] cap_exceeded test drives harness.CheckCaps via InputTokens not Iterations — ParseStream never populates Usage.Iterations for any real stream-json transcript (pre-existing gap outside plan scope)
-- [Phase 50]: [Phase 50-04] cmd/claude-subagent's failEnvelope/failOut now take the full EnvelopeIn (not just TaskUID) so LoopRunID/AttemptID echo naturally at every call site with a real envelope
-- [Phase 50-05]: ENVELOPE_OUT_GOLDEN_FIXTURE imports verdict.py's private _repo_root() helper directly rather than duplicating it, per the plan's explicit reuse instruction
-- [Phase 50-05]: Task 1 TDD RED used git checkout -- to revert envelope.py to pre-change state, producing a genuine failing-assertion RED rather than a build-error RED
-- [Phase 50-05]: run_evidence bounding stays Go-side only this phase; the Python writer joins whatever dict the caller passes, matching D-03's scope note that full evidence population is Phase 51
-- [Phase 50]: [Phase 50-06] synthesizeNoEnvelopeOut maps ONLY JobFailed reason DeadlineExceeded to cap_exceeded (fail-closed, never guessed) — the sole controller-side producer for wall-clock kills since a SIGKILLed pod never writes out.json
-- [Phase 50]: [Phase 50-06] synthesizePlannerSpan gates otelai.LoopAttributes on out.AttemptID != "" — planner-level dispatches (unstamped this phase) correctly carry zero loop.* attributes rather than fabricated empties
-- [Phase 50-07]: Doc comments describing --attempt-id/--loop-run-id Args and otelai.LoopIteration avoid the exact literal patterns the plan's acceptance greps count, so prose doesn't double-count alongside the real code line
-- [Phase 50-07]: loopRunID is threaded through EmitSpans for signature symmetry with --loop-run-id and future use but never stamped onto a span attribute this phase — only loop.run_id (from attemptID) and loop.iteration are the D-05 LLM-span correlating subset
-- [Phase 50-07]: golangci-lint's unparam linter does not flag the unused loopRunID parameter on exported EmitSpans — confirmed via a clean make lint run, no nolint suppression needed
-- [Phase 51]: [Phase 51-01] Governing VerificationPhase/Version live on spec.verification (not status) so the CEL oldSelf transition rule is expressible; only lockedSHA (a runtime observation) lives on TaskStatus
-- [Phase 51]: [Phase 51-01] VerificationSpec is a standalone type (Gates/Caps precedent), not inline TaskSpec fields, so the identical shape generalizes to Plan.Spec/Project.Spec with Task > Plan > Project precedence in Phase 52
-- [Phase 51]: [Phase 51-01] The internal/controller shared Ginkgo envtest suite has one Test* entry point (TestControllers) -- a plan verify-command like go test ./internal/controller/... -run <SpecName> vacuously passes without running any specs; use --ginkgo.focus= or the unfiltered suite to genuinely verify
-- [Phase 51-02]: The out-of-band gate-capture/verdict-assembly path only runs when env.verify is present; a non-verify dispatch keeps the exact pre-existing D-01 trivial-shell behavior
-- [Phase 51-02]: A red gate-command finding forces REPAIRABLE unless the LLM's own text already said BLOCKED — dominance always pulls the verdict toward escalation, never silently up
-- [Phase 51-02]: tools._worktree_dir/GATE_COMMAND_TIMEOUT_SECONDS reused (not duplicated) from tools.py into __main__.py per the plan's factor-not-duplicate instruction
-- [Phase 51-03]: human_intervention stamped only when out.Verdict.Verdict == VerdictBlocked -- never for APPROVED/REPAIRABLE/nil (degraded), narrowest reading of the population contract
-- [Phase 51-03]: synthesizeEvaluatorSpan unit tests placed in span_emission_unit_test.go not span_emission_test.go -- internal/controller's sole Ginkgo entry point is TestControllers, so a -run 'EvaluatorSpan|SpanEmission' filter vacuously passes 0 specs against the envtest file; the unit-test file is the repo's own documented home for pure-function span tests and makes the acceptance command genuinely execute
-- [Phase 51-03]: synthesizeEvaluatorSpan's span name is tide.dispatch.<level>.verify, distinct from the AGENT span's tide.dispatch.<level>, so sibling spans are name-distinguishable in addition to openinference.span.kind
-- [Phase 51]: [Phase 51-04]: verifierCapsFloorSeconds=900 (Claude's Discretion) — shorter than executor's 1200s floor per TASK-04, sized for a gate-command subprocess run + one LLM judge pass, no code-authoring tool loop
-- [Phase 51]: [Phase 51-04]: TIDE_GATE_COMMAND injection gated on GateCommand != empty only, not on Kind/ReadOnly — mirrors the unconditional-except-non-empty PricingOverridesJSON/TraceParent shape; only Plan 06 is expected to set it
-- [Phase 51]: [Phase 51-04]: BuildJobSpec's Kind switch gained an explicit case JobKindVerifier (name+role=verifier label) so Plan 06 only needs to set opts.Kind — without it a verifier dispatch would silently fall into the executor default branch
-- [Phase 51]: [Phase 51-04]: the RW envelopes/<uid>/ subPath mount is gated on opts.ReadOnly alone (not Kind) — matches how /scratch and ReadOnlyRootFilesystem are already scoped to the general read-only-dispatch variant
-- [Phase 51]: [Phase 51-05]: setVerifyHaltIfNeeded has no FailureProfile-style gate -- the loop-exhaustion trigger lives entirely at the Plan 07 call site, matching the 4-arg signature setVerifyHaltIfNeeded(ctx,c,project,taskCompletedAt) documented in 51-07-PLAN.md
-- [Phase 51]: [Phase 51-05]: task-only BUDGET-03 headroom hold and the legacy BudgetExceeded phase fallback stay applied by gateChecks AFTER delegating to checkDispatchHolds -- neither has a planner-tier counterpart in the shared chain
-- [Phase 51]: [Phase 51-05]: no VerifyHalt-at-terminal hook added to gateChecks Step 1 -- the real exhaustion trigger fires from the verifier-completion branch Plan 06/07 add, a different code path than the Failed-phase terminal short-circuit
-- [Phase 51]: [Phase 51-06] hasVerificationContract requires GateCommand!="" AND Phase=="Locked" (AND, not GateCommand alone) -- preserves TASK-01's git-show reproducibility guarantee since a Draft contract is still mutable
-- [Phase 51]: [Phase 51-06] task.Status.LockedSHA stamps project.Status.Git.LastPushedSHA at verifier-dispatch time -- closest available git-commit observation to when spec.verification was Locked
-- [Phase 51]: [Phase 51-06] No pool.Pool semaphore wired for the verifier tier this phase -- verifierInFlightCount's count-based List check is the sole ESC-04 enforcement point (defaultVerifierConcurrencyCap=2); cmd/manager/main.go wiring deferred, Plan 08's kind test pins the cap
-- [Phase 51-07]: repairOrHalt halts on Attempt >= MaxIterations (includes the original attempt in the count, not just repairs) -- MaxIterations=1 allows zero repairs
-- [Phase 51-07]: EvidencePacketPath transports through the existing VerifyContext on an executor-role envelope (buildEnvelopeIn gained a trailing param) rather than a new schema field -- pkg/dispatch/envelope.go's stale Verify doc comment corrected
-- [Phase 51-07]: stageEvidencePacket's PVC write is best-effort/non-blocking -- the returned deterministic path never depends on the write succeeding, mirroring PromptPath's controller-sets-reference/executor-validates-at-read precedent
-- [Phase 51-07]: Task 1 (verdict tree/haltVerify/span) and Task 2 (repairOrHalt/anti-gaming/evidence packet) landed in one commit -- handleVerifierCompletion and repairOrHalt have a genuine two-way call dependency, mirrors 51-01/51-06 precedent
-- [Phase 51]: Plan 51-08 kind concurrency spec is verdict-agnostic and does not re-assert the in-process ReservationStore no-leak invariant (verifier Jobs carry no estimated-cost label; already proven by envtest)
+
+**v1.0.10 "King Tide" binding constraints (research committed 2026-07-21, confidence MEDIUM-HIGH):**
+
+- **Nothing new needed at the dispatch spine** — every King Tide capability rides the seam the read-only verifier already proved: `EnvelopeIn`/`EnvelopeOut`, `pkg/dispatch.Subagent`, one Job per dispatch, and three precedence-chain resolvers (`ResolveProvider`, `resolveImage`, `ResolveLoopPolicy`) as the only config chokepoints.
+- **The fan-out + reduce primitive is the one genuinely new, highest-leverage build item** — shadow-pair runtime comparison and all three dynamic-workflow patterns (judge panel, generate-and-filter, tournament) are the SAME mechanism with different N and reduce strategy. Its cost/OOM rails (`maxShape`, per-wave aggregate cap) MUST land in the SAME phase as the first fan-out shape (Phase 57), never retrofitted — direct lesson from the dogfood run-2b OOM incident.
+- **"Wired but never ran the shipped path" is this project's own recurring defect class** (Phase 22 stale embed, Phase 51 nil-verdict relay, Phase 52 DEFECT-B/C). Every phase introducing a NEW loop-closing path (Product re-plan, System promotion, Oversight escalation, a fan-out reduce step) requires a live billable proof run attached to its verification record, not deferred to milestone close.
+- **`SelfInstruments("langgraph")` already returns true with no instrumentation behind it** — every live LangGraph dispatch today produces zero trace spans. Closed in Phase 54, first, not inherited silently into the write-capable authoring image.
+- **System loop precedes the rungs that consume it** (Phase 56 before Phase 58) — the migration ladder's evidence-gate requirement makes System loop's core contract a hard dependency, not a parallel track. SYS-01 requires recorded candidate/experiment artifacts from day one (no separate later "persist it" phase).
+- **Oversight's classifier feature schema (OVR-05/06) lands EARLY** (Phase 55, second phase) specifically so every subsequent loop (System/Product/Oversight itself, every fan-out shape) generates labeled training data from its first iteration onward — not bolted on after the loops exist.
+- **Product/Oversight loops are sequenced last among the loop-closing phases** because each needs real signal (promotion history, verdict/track-record data) to be meaningful; building them earlier would produce loops with nothing real to compute over.
+- **Multi-provider + CLI-deprecation (Phase 65) is explicitly the closing move** — gated on the accumulated evidence from the full ladder (Phase 58 planner rungs + Phase 61 executor rung), not pulled forward just because `init_chat_model` is mechanically simple.
+- **Gemini is out of scope this milestone** (Future Requirements) — its dual CA-trust path (`SSL_CERT_FILE` + `REQUESTS_CA_BUNDLE`) is unverified and needs its own build spike; only Anthropic + OpenAI ship as PROV-01..04.
+- **`sounding-dynamic-orchestration-design.md` is a precedent, not a locked design** — re-confirm the fan-out primitive's actual scope against Phase 57's real requirements at `/gsd:plan-phase 57`, don't assume its full apparatus (judge subagent escalation, ML classifier tiers) is in scope.
 
 ### Pending Todos
 
-- CACHE-F1 direct-SDK cross-pod caching backend — `.planning/todos/pending/cache-f1-direct-sdk-cross-pod-caching.md` (deferred; vNext or later).
+- CACHE-F1 direct-SDK cross-pod caching backend — `.planning/todos/pending/cache-f1-direct-sdk-cross-pod-caching.md` (deferred; carried forward, no v1.0.10 requirement touches it).
 - `subagent.levels` semantic rename — CLOSED, folded into v1.0.7 Phase 40 (CRANK-04).
 
 ### Blockers/Concerns
 
-- **v1.0.8 RELEASED 2026-07-17** (tag `v1.0.8` at `6e5b8f8`; goreleaser 5 binaries + 8 images + 2 Helm OCI charts published to GHCR, all verified anon-pullable). **Release-cascade lesson carried into v1.0.9 planning:** GSD per-phase verification never runs the `ci.yaml`-only gates (`make lint`, `verify-dashboard-freshness`, kind `examples_image_pin_test`) — wire these into each phase's verification, don't wait for release pre-flight to catch them.
-- **Cross-pod clock skew (Pitfall 5) remains unverified** — single-node kind can't surface child-span-outside-parent-window rendering; documented as a known limitation at Phase 47 close, revisit on a multi-node cluster.
-- **Two genuinely open calls gate Phase 51's plan** (not resolved by research): (1) `GateCommand` schema location — a new `Plan.Spec`/`Project.Spec` field vs. convention-based lookup; (2) LangGraph `Vendor` sentinel — new literal (e.g. `"langgraph"`) vs. reusing `"anthropic"` with a runtime discriminator. Both must be decided during `/gsd:plan-phase 51`, not discovered mid-execution.
-- **Phase 48 blocked on 48-05 Task 2 (human checkpoint)**: the retained TLS spike harness (`make spike-langgraph-tls`) is built and committed (`3880852`), but the live measurement — one real, billable `max_tokens=1` `ChatAnthropic.invoke()` through credproxy — has not been run. Requires the operator to run `make spike-langgraph-tls` (needs `~/.tide/anthropic.key`) and record PASS/FAIL in `48-TLS-SPIKE-VERDICT.md`. Phase 49 must not start until this verdict is no longer `PENDING`.
-- Plan 51-08 open: Task 1 (kind concurrency spec, commit 5dfed19c) complete; Task 2 (live billable Task-loop proof on kind) is a checkpoint:human-verify — NOT executed. Prerequisite gap discovered: TaskReconcilerDeps.VerifierImage is unwired in cmd/manager/main.go (every sibling image field is wired from a flag/env var; this one is not), so dispatchVerifier's Job Create will fail against a real cluster until closed. Requires operator approval for a billable live run plus the VerifierImage wiring fix. See 51-08-SUMMARY.md's CHECKPOINT REACHED section for the full runbook. v1.0.9 stays open until this resolves.
+- None currently blocking — v1.0.10 roadmap just created; no phase execution has started.
+- **Carried lesson from v1.0.8/v1.0.9 release cascades:** GSD per-phase verification never runs the `ci.yaml`-only gates (`make lint`, `verify-dashboard-freshness`, kind image-pin tests) — wire these into each v1.0.10 phase's verification, don't wait for release pre-flight to catch them.
+- **Cross-pod clock skew (Pitfall 5, v1.0.8) remains unverified** — single-node kind can't surface child-span-outside-parent-window rendering; relevant again for OBS-06's fan-out-sibling-group Phoenix queries in Phase 64.
 
 ### Roadmap Evolution
 
-- **v1.0.9 roadmap defined 2026-07-18:** Phases 48–53, 28 requirements (LOOP-01..03, EXEC-01..04, TASK-01..06, EVAL-01..05, ESC-01..04, OBS-01..04, CFG-01..02), 100% mapped. Phase numbering continues from v1.0.8 (Phase 47 was the last phase); Phase 48 is the first v1.0.9 phase.
-- Strict dependency chain 48→49→50→51→52→53, matching research's suggested order with no deviation (6 phases as suggested, no merge/split needed — each phase's requirement cluster is coherent and the cross-cutting-safety-lands-with-dispatch-sites instruction maps cleanly onto phase boundaries): 48 de-risks the LangGraph runtime + credproxy TLS trust seam before any stage logic depends on it; 49 locks `LoopPolicy`/`LoopStatus` + the `gate_decision` schema + findings persistence before any halt/reconciler logic touches them; 50 hardens the in-Job execution loop (run-evidence envelope, terminal reasons, `loop.*`/`evaluation.*` spans) that the Task loop consumes; 51 (`research: true` — GateCommand schema location + LangGraph vendor sentinel) is the core: the Task loop itself, with concurrency accounting (ESC-04), `SelfInstruments` registration (OBS-03), and `ConditionVerifyHalt` (ESC-02/03) landing in the SAME phase as the dispatch sites per the research's most-repeated instruction; 52 parameterizes the same contract per level (plan-check re-plan, Phase/Milestone/Project escalation) once the Task loop proves the pattern; 53 closes with chart config + dashboard provenance surfacing, the natural configuration/display layer once all levels exist to configure.
+- **v1.0.10 roadmap defined 2026-07-21:** Phases 54–65 (12 phases), 30 requirements (MIG-01..06, PROV-01..04, PROD-01..03, SYS-01..04, OVR-01..06, FAN-01..05, OBS-05..06), 100% mapped, 0 orphans. Phase numbering continues from v1.0.9 (Phase 53 was the last phase); Phase 54 is the first v1.0.10 phase.
+- Sequencing deviates from research's suggested 12-phase order in one deliberate way: the System loop's controller-CRD persistence stage (research's separate Phase 10) is merged into Phase 56 up front, because SYS-01 requires recorded candidate/experiment artifacts from day one and MIG-04 (Phase 58) has a hard dependency on SYS-02 existing before any rung promotes — matches the milestone brief's explicit sequencing instruction over research's later-persistence suggestion.
+- Dependency chain: 54 (foundation) and 55 (Oversight schema, sequenced early per instruction) have no hard technical dependency on each other; 56 (System loop) and 57 (fan-out primitive) are each independent and both precede 58 (planner rung migration, consumes both); 59/60 (judge panel / generate-filter) each depend only on 57; 61 (executor rung) depends on 58; 62 (tournament) depends on 57+59+60; 63 (Product loop) depends on 56; 64 (Oversight loop + full observability closure) depends on 63+56; 65 (multi-provider + CLI-deprecation) depends on 61+58 as the milestone's closing move.
+- Research-flagged phases (`research: true`): Phase 57 (fan-out + reduce primitive — no existing code precedent beyond `ChildCount`), Phase 61 (executor rung — agent-loop eval dimensions don't exist in any form today), Phase 62 (tournament — budget pre-flight math + tie-break rules are novel), Phase 64 (Oversight — autonomy-resolver heuristic formula is from-scratch design).
+- v1.0.9 roadmap (for reference): Phases 48–53, 28 requirements, 100% mapped, strict chain 48→49→50→51→52→53.
 - v1.0.8 roadmap (for reference): Phases 42–47, 19 requirements, 100% mapped, strict chain 42→43→44→45→46→47.
 
 ## Deferred Items
 
-Items acknowledged and deferred at v1.0.9 close (2026-07-21) — 31 open artifacts, none blocking. Phase 53's live-render UAT item was operator-**approved** at phase close; its UAT/VERIFICATION files remain `partial`/`human_needed` as the bookkeeping trail (surface via `/gsd:verify-work 53` to formally close).
+Items acknowledged and deferred at v1.0.9 close (2026-07-21) — 31 open artifacts, none blocking, carried forward unchanged into v1.0.10.
 
 | Category | Count | Notes |
 |----------|-------|-------|
 | quick_tasks | 24 | SUMMARY frontmatter `status:` field missing/unknown — audit-scanner bookkeeping only; the work itself shipped (same class carried since v1.0.7) |
 | todos | 2 | signed-commits-verified-badge (GPG scope, Future Requirements) · cache-f1-direct-sdk-cross-pod-caching (vNext+). The two W-2 dispatch-gate todos were FOLDED and closed in Phase 51 (D-09). |
-| debug_sessions | 2 | knowledge-base.md (a KB file, not a session) · layer-a-envtest-flakes-pr9 [investigating] — CI-side Layer A envtest flakes; local envtest runs green (Phase 53's one first-run occurrence matched this class, clean on rerun) |
+| debug_sessions | 2 | knowledge-base.md (a KB file, not a session) · layer-a-envtest-flakes-pr9 [investigating] — CI-side Layer A envtest flakes; local envtest runs green |
 | uat_gaps | 2 | 51-HUMAN-UAT.md + 53-HUMAN-UAT.md — both phases' live proofs were operator-approved; files stay `partial` until `/gsd:verify-work` formally records results |
 | verification_gaps | 1 | 53-VERIFICATION.md `human_needed` — the approved live-render item's bookkeeping trail |
 
-Tech-debt still carried forward: `LoopPolicy.Autonomy` unconsumed (Phase-49 contract field, tracked in 52-REVIEW.md — Oversight-loop arc), `level_verify_dispatch_test.go:682` Eventually-wrap advisory (52-VERIFICATION), no SECURITY.md for Phases 52/53 (`/gsd:secure-phase` recommended), W-4 agentName/agentEmail CRD pattern locks not re-established post-crank, Phase 36 residual 'bot' vocabulary (7 comment/fixture refs), 37-REVIEW advisory warnings (secrets RBAC blast radius, gitfetch timeouts, settings-match determinism, Job-name coupling) + GIT_PAT fetch-path allowance.
-| Phase 48 P01 | 6min | 2 tasks | 13 files |
-| Phase 48 P02 | 8min | 2 tasks | 2 files |
-| Phase 48 P03 | 15min | 3 tasks | 7 files |
-| Phase 48 P04 | 45min | 2 tasks | 5 files |
-| Phase 49 P01 | 7min | 2 tasks | 3 files |
-| Phase 49 P02 | 5min | 2 tasks | 5 files |
-| Phase 49 P04 | 8s | 2 tasks | 2 files |
-| Phase 49 P03 | 3min | 2 tasks | 4 files |
-| Phase 50 P01 | 14min | 2 tasks | 6 files |
-| Phase 50 P02 | 1min | 2 tasks | 2 files |
-| Phase 50 P03 | 7min | 2 tasks | 5 files |
-| Phase 50 P04 | 17min | 3 tasks | 9 files |
-| Phase 50 P05 | 3min | 2 tasks | 2 files |
-| Phase 50 P06 | 10min | 3 tasks | 4 files |
-| Phase 50 P07 | 9min | 2 tasks | 7 files |
-| Phase 51 P01 | 15min | 3 tasks | 6 files |
-| Phase 51 P02 | 13min | 2 tasks | 8 files |
-| Phase 51 P03 | 7min | 3 tasks | 7 files |
-| Phase 51 P04 | 5min | 2 tasks | 7 files |
-| Phase 51 P05 | 17min | 2 tasks | 6 files |
-| Phase 51 P06 | 48min | 2 tasks | 6 files |
-| Phase 51 P07 | 65min | 2 tasks | 5 files |
-| Phase 51 P08 | 40min | 1 tasks | 1 files |
+Tech-debt still carried forward: `LoopPolicy.Autonomy` unconsumed until Phase 64 (Oversight loop — this is the v1.0.10 phase that finally consumes it), `level_verify_dispatch_test.go:682` Eventually-wrap advisory, no SECURITY.md for Phases 52/53 (`/gsd:secure-phase` recommended), W-4 agentName/agentEmail CRD pattern locks not re-established post-crank, Phase 36 residual 'bot' vocabulary (7 comment/fixture refs), 37-REVIEW advisory warnings (secrets RBAC blast radius, gitfetch timeouts, settings-match determinism, Job-name coupling) + GIT_PAT fetch-path allowance.
 
 ## Session Continuity
 
-Last session: 2026-07-21T10:17:36.520Z
-Stopped at: Phase 53 execution complete (11/11 plans) — verification human_needed: live dashboard render of OBS-04 surface pending operator
-Resume file: .planning/phases/53-chart-config-dashboard-provenance-surfacing/53-HUMAN-UAT.md
+Last session: 2026-07-21T14:02:25.263Z
+Stopped at: v1.0.10 ROADMAP.md + REQUIREMENTS.md traceability created (Phases 54–65, 30/30 requirements mapped) — awaiting roadmap approval
+Resume file: None
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Review and approve the v1.0.10 roadmap, then start `/gsd:plan-phase 54`

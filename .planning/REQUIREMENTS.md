@@ -82,4 +82,35 @@ Deferred to later milestones:
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| — | — | Pending roadmap |
+| MIG-01 | Phase 58 | Pending |
+| MIG-02 | Phase 58 | Pending |
+| MIG-03 | Phase 54 | Pending |
+| MIG-04 | Phase 58 | Pending |
+| MIG-05 | Phase 61 | Pending |
+| MIG-06 | Phase 65 | Pending |
+| PROV-01 | Phase 65 | Pending |
+| PROV-02 | Phase 65 | Pending |
+| PROV-03 | Phase 65 | Pending |
+| PROV-04 | Phase 65 | Pending |
+| PROD-01 | Phase 63 | Pending |
+| PROD-02 | Phase 63 | Pending |
+| PROD-03 | Phase 63 | Pending |
+| SYS-01 | Phase 56 | Pending |
+| SYS-02 | Phase 58 | Pending |
+| SYS-03 | Phase 56 | Pending |
+| SYS-04 | Phase 56 | Pending |
+| OVR-01 | Phase 64 | Pending |
+| OVR-02 | Phase 64 | Pending |
+| OVR-03 | Phase 64 | Pending |
+| OVR-04 | Phase 64 | Pending |
+| OVR-05 | Phase 55 | Pending |
+| OVR-06 | Phase 55 | Pending |
+| FAN-01 | Phase 57 | Pending |
+| FAN-02 | Phase 57 | Pending |
+| FAN-03 | Phase 59 | Pending |
+| FAN-04 | Phase 60 | Pending |
+| FAN-05 | Phase 62 | Pending |
+| OBS-05 | Phase 54 | Pending |
+| OBS-06 | Phase 64 | Pending |
+
+**Coverage:** 30/30 requirements mapped, 0 orphans, 0 duplicates.
