@@ -4,10 +4,12 @@ import {
   useEffect,
   useId,
   useRef,
+  useState,
 } from "react";
-import { X } from "lucide-react";
+import { Loader2, ScanSearch, X } from "lucide-react";
 
 import { clsx } from "../lib/clsx";
+import { fetchNodeArtifacts, type NodeArtifacts } from "../lib/api";
 import StatusBadge, { type StatusValue, Hourglass } from "./StatusBadge";
 import ClipboardCopyAction from "./ClipboardCopyAction";
 import PhoenixTraceLink from "./PhoenixTraceLink";
@@ -47,6 +49,20 @@ export type TaskLoopEvaluation = {
   decision: string;
   findingsCount: number;
   highSeverityCount: number;
+};
+
+/**
+ * Verdict → status-color-token map (53-UI-SPEC §Component Contract 1 +
+ * §Auto-Resolved Decision Log #12). Exported so App.tsx's plan-level
+ * one-line mirror (Component Contract 3) colors its decision substring
+ * with the SAME map — a single source of truth, never a second copy.
+ * BLOCKED maps to the blocked-family token, never the error token: a
+ * VerifyHalt verdict is a distinct halt class, not a Failed reinterpretation.
+ */
+export const VERDICT_COLOR: Record<string, string> = {
+  APPROVED: "var(--color-status-success)",
+  REPAIRABLE: "var(--color-status-warning)",
+  BLOCKED: "var(--color-status-blocked)",
 };
 
 export type TaskDetailData = {
@@ -150,6 +166,21 @@ function actionsForStatus(task: TaskDetailData): ActionButton[] {
           command: `tide tail ${task.name}`,
         },
       ];
+    case "Verifying":
+      // 53-UI-SPEC §Component Contract 4: mirrors Running's arm — the
+      // independent evaluator is a live process, same cancel/tail affordances.
+      return [
+        {
+          variant: "destructive",
+          label: "Cancel",
+          command: `tide cancel ${proj} --force`,
+        },
+        {
+          variant: "secondary",
+          label: "Tail logs (CLI)",
+          command: `tide tail ${task.name}`,
+        },
+      ];
     case "Failed":
     case "PushLeaseFailed":
     case "PushLeakBlocked":
@@ -173,6 +204,18 @@ function actionsForStatus(task: TaskDetailData): ActionButton[] {
     case "Rejected":
       return [
         { variant: "primary", label: "Resume", command: `tide resume ${proj}` },
+      ];
+    case "VerifyHalted":
+      // 53-UI-SPEC §Component Contract 4: Resume leads (primary) — no
+      // approve/reject buttons, the mutation-free surface stays clipboard-copy
+      // only; the approve-an-exhausted-loop flow is CLI territory.
+      return [
+        { variant: "primary", label: "Resume", command: `tide resume ${proj}` },
+        {
+          variant: "secondary",
+          label: "Inspect wave",
+          command: `tide inspect-wave ${plan}`,
+        },
       ];
     case "Succeeded":
     case "Pending":
@@ -363,6 +406,75 @@ export default function TaskDetailDrawer({
           />
         </dl>
 
+        {/* Verification section (53-UI-SPEC §Component Contract 1, OBS-04).
+            Eligibility owned here: renders ONLY when the task carries a
+            verification contract — a task with none shows no section at
+            all (absence renders nothing, zero noise). Placed immediately
+            after the metadata grid and before the Phoenix deep link, which
+            stays the section's span-level history exit (no second mount). */}
+        {task.hasVerification && (
+          <div
+            data-testid="drawer-verification"
+            className="border-t border-[var(--color-border-subtle)] px-6 py-4"
+          >
+            <div
+              className="text-[var(--color-text-muted)]"
+              style={{
+                fontSize: "11px",
+                textTransform: "uppercase",
+                letterSpacing: "0.04em",
+              }}
+            >
+              Verification
+            </div>
+            <dl
+              className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3"
+              style={{ fontSize: "13px" }}
+            >
+              <MetaRow
+                label="Iteration"
+                value={`${task.loopIteration ?? 0} of ${task.verifyMaxIterations ?? 0}`}
+              />
+              <MetaRow
+                label="Verdict"
+                value={task.lastEvaluation ? task.lastEvaluation.decision : "No verdict yet"}
+                mono={Boolean(task.lastEvaluation)}
+                color={
+                  task.lastEvaluation
+                    ? VERDICT_COLOR[task.lastEvaluation.decision]
+                    : "var(--color-text-muted)"
+                }
+              />
+              <MetaRow
+                label="Findings"
+                value={
+                  task.lastEvaluation
+                    ? `${task.lastEvaluation.findingsCount} total · ${task.lastEvaluation.highSeverityCount} high`
+                    : "—"
+                }
+              />
+              <MetaRow label="Exit reason" value={task.loopExitReason || "—"} mono />
+              <MetaRow
+                label="Loop run"
+                value={task.loopRunId || "—"}
+                mono
+                truncate
+                title={task.loopRunId}
+              />
+              <MetaRow
+                label="Attempt ID"
+                value={task.attemptId || "—"}
+                mono
+                truncate
+                title={task.attemptId}
+              />
+            </dl>
+            <div className="mt-3">
+              <FindingsDisclosure task={task} />
+            </div>
+          </div>
+        )}
+
         {/* Phoenix deep link (UI-SPEC mount 2, OBS-04) — sits with the
             metadata it relates to; border-t matches the section-separator
             convention. Renders nothing when config or trace identity is
@@ -439,12 +551,17 @@ function MetaRow({
   mono = false,
   truncate = false,
   title,
+  color,
 }: {
   label: string;
   value: string;
   mono?: boolean;
   truncate?: boolean;
   title?: string;
+  /** Optional override for the Verdict row's decision coloring (53-UI-SPEC
+   *  §Component Contract 1) — inline style wins over the default text-color
+   *  class below. Absent for every pre-existing MetaRow call site. */
+  color?: string;
 }) {
   return (
     <div className="flex flex-col gap-0.5">
@@ -463,10 +580,224 @@ function MetaRow({
         style={{
           fontFamily: mono ? "var(--font-mono)" : undefined,
           fontSize: "13px",
+          color,
         }}
       >
         {value}
       </dd>
     </div>
+  );
+}
+
+/**
+ * `<FindingsDisclosure>` (53-UI-SPEC §Component Contract 2) — the trigger
+ * link + toggled inline area. Mirrors the Phoenix trace link's anchor
+ * anatomy (mono 13px underline, leading icon) but is a <button> (not an
+ * <a>): it
+ * toggles a disclosure, it never navigates. Mounting <FindingsContent> only
+ * while open is what "clicking toggles ... that fetches" means — the fetch
+ * fires from FindingsContent's own mount effect, never eagerly.
+ */
+function FindingsDisclosure({ task }: { task: TaskDetailData }) {
+  const disclosureId = useId();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={disclosureId}
+        onClick={() => setOpen((v) => !v)}
+        data-testid="drawer-findings-toggle"
+        className="inline-flex items-center gap-1 rounded underline text-[var(--color-text-primary)] hover:bg-[var(--color-surface-overlay)]"
+        style={{ fontFamily: "var(--font-mono)", fontSize: "13px" }}
+      >
+        <ScanSearch size={14} aria-hidden="true" />
+        View findings
+      </button>
+      {open && (
+        <div id={disclosureId} data-testid="drawer-findings-content" className="mt-2">
+          <FindingsContent task={task} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function prettyJSON(content: string): string {
+  try {
+    return JSON.stringify(JSON.parse(content), null, 2);
+  } catch {
+    // Malformed JSON still renders verbatim — never a library, never a throw.
+    return content;
+  }
+}
+
+/**
+ * A compact state placeholder for the findings disclosure — mirrors
+ * ArtifactViewer's StatePanel (same copy contract) at a scale that fits an
+ * inline drawer area rather than a full pane.
+ */
+function FindingsStatePanel({
+  testId,
+  spinner,
+  heading,
+  body,
+  action,
+}: {
+  testId: string;
+  spinner?: boolean;
+  heading: string;
+  body: string;
+  action?: { label: string; onClick: () => void };
+}) {
+  return (
+    <div
+      data-testid={testId}
+      className="flex flex-col items-center px-2 py-6 text-center"
+      style={{ color: "var(--color-text-primary)" }}
+    >
+      {spinner && (
+        <Loader2
+          size={18}
+          aria-label="Loading"
+          className="animate-spin"
+          style={{ color: "var(--color-text-muted)", marginBottom: "8px" }}
+        />
+      )}
+      <h3 style={{ fontSize: "13px", fontWeight: 600 }}>{heading}</h3>
+      <p
+        style={{
+          marginTop: "8px",
+          fontSize: "12px",
+          color: "var(--color-text-muted)",
+        }}
+      >
+        {body}
+      </p>
+      {action && (
+        <button
+          type="button"
+          onClick={action.onClick}
+          className="rounded border px-3 py-2"
+          style={{
+            marginTop: "12px",
+            fontFamily: "var(--font-mono)",
+            fontSize: "12px",
+            fontWeight: 600,
+            borderColor: "var(--color-border-subtle)",
+            color: "var(--color-text-primary)",
+            background: "transparent",
+          }}
+        >
+          {action.label}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * `<FindingsContent>` — fetches the task's staged findings.json via the
+ * EXISTING GET /api/v1/nodes/task/{name}/artifacts endpoint
+ * (fetchNodeArtifacts("task", ...)); no new endpoint. Reuses
+ * ArtifactViewer's StatePanel state vocabulary (loading/error/no-git/
+ * absent/available) with task-kind absent copy per 53-UI-SPEC §Component
+ * Contract 2 — error/no-git copy is the existing locked ArtifactViewer text
+ * verbatim.
+ */
+function FindingsContent({ task }: { task: TaskDetailData }) {
+  const [data, setData] = useState<NodeArtifacts | null>(null);
+  const mountedRef = useRef(true);
+
+  const load = useCallback(async () => {
+    try {
+      const result = await fetchNodeArtifacts("task", task.name, task.projectName);
+      if (!mountedRef.current) return;
+      setData(result);
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setData({
+        state: "error",
+        files: [],
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, [task.name, task.projectName]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    void load();
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [load]);
+
+  if (data === null) {
+    return (
+      <div
+        data-testid="findings-state-loading"
+        className="flex items-center justify-center py-6"
+      >
+        <Loader2
+          size={18}
+          aria-label="Loading"
+          className="animate-spin"
+          style={{ color: "var(--color-text-muted)" }}
+        />
+      </div>
+    );
+  }
+
+  if (data.state === "error") {
+    return (
+      <FindingsStatePanel
+        testId="findings-state-error"
+        heading="Couldn't fetch artifacts"
+        body="The dashboard could not read the run branch. Check the dashboard logs: kubectl logs deploy/tide-dashboard"
+        action={{ label: "Retry", onClick: () => void load() }}
+      />
+    );
+  }
+
+  if (data.state === "no-git") {
+    return (
+      <FindingsStatePanel
+        testId="findings-state-no-git"
+        heading="No git remote configured"
+        body="Artifacts are stored on the run branch — this project has no git remote, so there is nothing to fetch."
+      />
+    );
+  }
+
+  if (data.state === "absent") {
+    return (
+      <FindingsStatePanel
+        testId="findings-state-absent"
+        heading="No findings staged yet"
+        body="Findings land on the run branch after a verifier attempt completes. Check again after the current iteration finishes."
+        action={{ label: "Check again", onClick: () => void load() }}
+      />
+    );
+  }
+
+  // state === "available"
+  const findingsFile = (data.files ?? [])[0];
+  return (
+    <pre
+      data-testid="findings-state-available"
+      style={{
+        fontFamily: "var(--font-mono)",
+        fontSize: "12px",
+        background: "var(--color-surface-overlay)",
+        padding: "12px",
+        borderRadius: "4px",
+        overflowX: "auto",
+        whiteSpace: "pre",
+      }}
+    >
+      {findingsFile ? prettyJSON(findingsFile.content) : ""}
+    </pre>
   );
 }
