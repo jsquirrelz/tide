@@ -209,6 +209,30 @@ def write_envelope_out(
     os.chmod(target, 0o644)
 
 
+def write_findings(path: str | os.PathLike[str], *, verdict: dict[str, Any]) -> None:
+    """Write the FULL findings.json artifact beside out.json (Phase 53-11,
+    closing the 53-03-surfaced gap: `tide-push`'s fail-closed task-kind
+    staging guard, cmd/tide-push/main.go:1242-1252, hard-fails the entire
+    cumulative push when a task envelope dir that recorded LastEvaluation
+    lacks this file).
+
+    The document written is the verdict dict VERBATIM — the full
+    gate_decision (verdict/summary/findings[]), already shaped by
+    `GateDecision.model_dump(by_alias=True)` at the call site; this function
+    adds and drops nothing. Per the Phase-49 size×locality rule this is the
+    FULL findings artifact — PVC + run-branch destined (tide-push stages it
+    to `.tide/planning/task/<name>/findings.json`), NEVER etcd; the bounded
+    projection lives in the TerminationStub
+    (gateDecision/findingsCount/highSeverityCount), so no truncation loop
+    applies here. Mirrors write_envelope_out's writer idiom exactly
+    (mkdir-parents, write_bytes, chmod 0o644).
+    """
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(json.dumps(verdict).encode("utf-8"))
+    os.chmod(target, 0o644)
+
+
 def write_termination_stub(
     path: str | os.PathLike[str],
     *,
