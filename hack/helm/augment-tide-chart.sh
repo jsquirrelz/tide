@@ -442,6 +442,26 @@ if ENV47_MARKER not in content:
         count=1,
     )
 
+# ── 8f3: Phase 53 (CFG-01) — TIDE_VERIFIER_IMAGE env injection ──────────────
+# Adds TIDE_VERIFIER_IMAGE env var on the manager container, mirroring the
+# Phase-9 reporter/Phase-28 import envs. Read by cmd/manager/main.go via
+# envOrDefault (TIDE_VERIFIER_IMAGE) and threaded into TaskReconciler's
+# VerifierImage field (Phase 51 the Task loop). Empty → dispatchVerifier
+# benign-skips (task_controller.go's VerifierImage == "" guard). Anchored
+# immediately after the Phase 47 OTLP-headers block (the most recent marker).
+ENV53_MARKER = "# phase53-verifier-image-env-injected"
+ENV53_BLOCK = """        - name: TIDE_VERIFIER_IMAGE
+          value: "{{ .Values.images.tideLanggraphVerifier.repository }}:{{ .Values.images.tideLanggraphVerifier.tag | default .Chart.AppVersion }}"
+        # phase53-verifier-image-env-injected
+"""
+if ENV53_MARKER not in content:
+    content = re.sub(
+        r'(        # phase47-otlp-headers-env-injected\n)',
+        r'\1' + ENV53_BLOCK,
+        content,
+        count=1,
+    )
+
 # ── 8g: podAnnotations passthrough on the manager pod template ───────────────
 # helmify emits only the static `kubectl.kubernetes.io/default-container: manager`
 # annotation on the pod template and drops any operator-supplied podAnnotations.
