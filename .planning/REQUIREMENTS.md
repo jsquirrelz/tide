@@ -56,12 +56,12 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 - [x] **OBS-01**: Spans carry `loop.kind`, `loop.run_id`, `loop.parent_run_id`, `loop.iteration`, `loop.candidate_version`, `loop.exit_reason`, `evaluation.result`, `evaluation.version`, and `human_intervention`, plus cost/duration/token usage
 - [x] **OBS-02**: Run IDs stay **out of Prometheus labels** (traces + structured logs only); metrics use bounded labels (loop kind, exit reason, evaluator type, risk tier)
 - [x] **OBS-03**: The LangGraph evaluator's vendor registers in `pkg/dispatch.SelfInstruments` (reporter skips `events.jsonl` span synthesis) in the **same phase** as its dispatch sites, and it emits a distinct OpenInference `EVALUATOR`-kind span parented as a **sibling** to the checked level's `AGENT` span — no double-emission into the v1.0.8 trace tree
-- [ ] **OBS-04**: The dashboard shows nested loop provenance (Project run → Task iteration → Execution attempt/tool spans) and surfaces `VerifyHalt` as a visually **distinct** state from `Failed`, with the staged findings browsable through the existing gitfetch/artifacts API (no new endpoint)
+- [x] **OBS-04**: The dashboard shows nested loop provenance (Project run → Task iteration → Execution attempt/tool spans) and surfaces `VerifyHalt` as a visually **distinct** state from `Failed`, with the staged findings browsable through the existing gitfetch/artifacts API (no new endpoint)
 
 ### Config & Surfacing (CFG)
 
-- [ ] **CFG-01**: A chart-first config surface for the verify/loop tier (evaluator image/model + per-level `LoopPolicy` defaults) follows the existing `subagent.levels`/`resolveImage` precedence chain; `charts/tide/values.yaml` remains the FIXED contract (binary catches up to chart)
-- [ ] **CFG-02**: The default posture is bounded and least-surprising — Task-loop auto-repair + Plan/Milestone/Project escalation enabled at the **milestone+project scope** for new installs, and **off** for in-place `helm upgrade` (a verify loop must not silently start spending on upgrade)
+- [x] **CFG-01**: A chart-first config surface for the verify/loop tier (evaluator image/model + per-level `LoopPolicy` defaults) follows the existing `subagent.levels`/`resolveImage` precedence chain; `charts/tide/values.yaml` remains the FIXED contract (binary catches up to chart)
+- [x] **CFG-02**: The default posture is bounded and least-surprising — Task-loop auto-repair + Plan/Milestone/Project escalation enabled at the **milestone+project scope** for new installs, and **off** for in-place `helm upgrade` (a verify loop must not silently start spending on upgrade)
 
 ## Future Requirements
 
@@ -125,9 +125,9 @@ Locked at roadmap creation 2026-07-18 (`ROADMAP.md`): Phase 48 LangGraph evaluat
 | OBS-01 | Phase 50 | Complete |
 | OBS-02 | Phase 50 | Complete |
 | OBS-03 | Phase 51 | Complete |
-| OBS-04 | Phase 53 | Pending |
-| CFG-01 | Phase 53 | Pending |
-| CFG-02 | Phase 53 | Pending |
+| OBS-04 | Phase 53 | Complete |
+| CFG-01 | Phase 53 | Complete |
+| CFG-02 | Phase 53 | Complete |
 
 **Coverage:**
 - v1.0.9 requirements: 28 total
