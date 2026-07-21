@@ -222,8 +222,30 @@ Plans:
   2. A fresh install gets Task-loop auto-repair + Plan/Milestone/Project escalation enabled at milestone+project scope by default; an in-place `helm upgrade` on an existing install leaves the verify/loop tier off — proven by an upgrade-path test.
   3. The dashboard shows nested loop provenance (Project run → Task iteration → Execution attempt/tool spans) and renders `VerifyHalt` as a visually distinct state from `Failed`, with staged findings browsable through the existing gitfetch/artifacts API (no new endpoint).
 
-**Plans**: TBD
-**UI hint**: yes
+**Plans**: 9 plans
+**UI hint**: yes (53-UI-SPEC.md approved — locks the OBS-04 dashboard contract)
+
+Plans:
+**Wave 1**
+
+- [ ] 53-01-PLAN.md — Chart verifier image env plumbing (images.tideLanggraphVerifier + TIDE_VERIFIER_IMAGE via hack/helm/, kind-suite pins, static contract test)
+- [ ] 53-02-PLAN.md — ParseVerifyLevelDefaults fail-closed parser + manager flag/env wiring + VerifyDefaults on both Deps + verificationEnabledForLevel helper
+- [ ] 53-03-PLAN.md — Findings pipeline: collectStageEnvelopes task entries + artifacts endpoint kind allowlist (+task)
+- [ ] 53-04-PLAN.md — Dashboard API loop-provenance payloads (tasks/plans) + ConditionVerifyHalt in blockingConditions
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 53-05-PLAN.md — subagent.verify chart surface + sticky posture-marker ConfigMap + conditional --verify-levels-json + D-06 render-pair test
+- [ ] 53-06-PLAN.md — Enablement AND-gates at the 3 dispatch chokepoints + chart-tier LoopPolicy defaults + clamp pin + resolveVerifierModel
+- [ ] 53-07-PLAN.md — SPA vocabulary: Verifying/VerifyHalted/VerifyHalt badge rows + distinctness tests + TS wire types + embed regen
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 53-08-PLAN.md — TaskDetailDrawer Verification section + findings disclosure + action arms + plan-check mirror line + embed regen
+
+**Wave 4** *(blocked on Wave 3)*
+
+- [ ] 53-09-PLAN.md — Live kind sticky-posture proof (isolated release) + D-10 ci.yaml-only gate closeout
 
 ## Progress
 
