@@ -38,7 +38,13 @@ spec:
           # phase2-args-injected
           {{- $verifyPosture := .Values.subagent.verify.posture | default "auto" }}
           {{- $verifyMarker := lookup "v1" "ConfigMap" .Release.Namespace "tide-verify-posture" }}
-          {{- $verifyMarkerOn := and $verifyMarker (eq $verifyMarker.data.posture "enabled") }}
+          {{- /* dig, not a direct .data.posture deref: a hand-recreated/patched
+               marker ConfigMap with no `data` map (T-53-10 anticipates operators
+               hand-editing this object) would nil-pointer the render and brick
+               every subsequent helm upgrade. dig degrades any missing layer to
+               "" — same $verifyMarkerOn result for absent marker, empty marker,
+               and malformed marker. */}}
+          {{- $verifyMarkerOn := eq (dig "data" "posture" "" ($verifyMarker | default dict)) "enabled" }}
           {{- $verifyOn := false }}
           {{- if eq $verifyPosture "enabled" }}
           {{- $verifyOn = true }}

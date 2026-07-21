@@ -143,3 +143,29 @@ func TestHelmDeploymentTemplateVerifyPostureInstallVsUpgrade(t *testing.T) {
 		}
 	})
 }
+
+// TestHelmDeploymentTemplateMarkerDerefIsNilSafe pins the WR-03 (Phase 53
+// code review) regression class: the ARGS53 posture block must read the
+// tide-verify-posture marker's data.posture through a `dig` chain, never a
+// direct `$verifyMarker.data.posture` deref. A marker ConfigMap that EXISTS
+// without a `data` map (an operator `kubectl create configmap
+// tide-verify-posture`, or a patch that strips `data` — T-53-10 explicitly
+// anticipates hand-edits) nil-pointers the direct deref and bricks every
+// subsequent `helm upgrade` of the release with an opaque template error.
+// `helm template` cannot exercise `lookup` (always empty without a cluster),
+// so this is a static pin against the committed template — the live
+// malformed-marker upgrade is covered by verify_posture_sticky_test.go's
+// kind spec.
+func TestHelmDeploymentTemplateMarkerDerefIsNilSafe(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "charts", "tide", "templates", "deployment.yaml"))
+	if err != nil {
+		t.Fatalf("read deployment template: %v", err)
+	}
+
+	if !bytes.Contains(data, []byte(`dig "data" "posture" "" ($verifyMarker | default dict)`)) {
+		t.Fatal("deployment template must read the posture marker via the nil-safe dig chain (WR-03; regenerate via `make helm-controller` if the augment block was dropped)")
+	}
+	if bytes.Contains(data, []byte("$verifyMarker.data.posture")) {
+		t.Fatal("deployment template must NOT deref $verifyMarker.data.posture directly — a marker ConfigMap without a data map nil-pointers the render and bricks every subsequent helm upgrade (WR-03)")
+	}
+}

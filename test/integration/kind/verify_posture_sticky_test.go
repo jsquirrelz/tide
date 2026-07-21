@@ -168,6 +168,15 @@ var _ = Describe("Verify-tier sticky posture across upgrades (CFG-02)", Label("k
 
 		assertPostureVerifyArg(false, "an upgrade with no marker lineage must render the tier OFF")
 		assertPostureMarkerAbsent("an upgrade (IsInstall=false) must never mint new marker lineage")
+
+		By("Hand-recreating the marker with NO data map, then upgrading: the render must survive (WR-03 nil-safe dig) and treat the malformed marker as no lineage")
+		Expect(createMalformedPostureMarkerConfigMap()).To(Succeed())
+		out, err = runHelm(upgradeArgs...)
+		Expect(err).NotTo(HaveOccurred(),
+			"helm upgrade with a data-less tide-verify-posture marker must not nil-pointer the template render (WR-03): %s", out)
+		deletePostureWebhookConfig()
+
+		assertPostureVerifyArg(false, "a marker without data.posture carries no enabled lineage — the tier must stay OFF")
 	})
 })
 
@@ -242,6 +251,18 @@ func deletePostureMarkerConfigMap() error {
 		return err
 	}
 	return nil
+}
+
+// createMalformedPostureMarkerConfigMap creates the tide-verify-posture
+// ConfigMap with NO data map at all — the `kubectl create configmap
+// tide-verify-posture` shape T-53-10 anticipates operators producing by
+// hand. Pre-WR-03 this bricked every subsequent helm upgrade with a
+// nil-pointer template error at the ARGS53 marker deref.
+func createMalformedPostureMarkerConfigMap() error {
+	cm := &corev1.ConfigMap{}
+	cm.Name = postureMarkerName
+	cm.Namespace = postureNamespace
+	return k8sClient.Create(ctx, cm)
 }
 
 // assertPostureMarkerEnabled asserts the tide-verify-posture ConfigMap
