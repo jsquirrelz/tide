@@ -1,6 +1,6 @@
 # Milestones
 
-## v1.0.9 Slack Tide — The Task Loop (Shipped: 2026-07-21)
+## v1.0.9 Slack Tide — The Task Loop (Shipped: 2026-07-21, tag `v1.0.9`)
 
 **Delivered:** TIDE closes its first real feedback loop — independent verification drives Task iteration, parameterized per level by one shared `LoopPolicy` contract, configured chart-first with a safe default posture, and surfaced on the dashboard.
 
@@ -19,7 +19,7 @@
 
 **Known deferred items at close:** 31 (see STATE.md Deferred Items) — 24 SUMMARY-frontmatter bookkeeping quick-tasks, 2 deliberately-deferred todos (GPG signing, CACHE-F1), 2 debug entries (KB file + tracked CI flake class), 3 approved-UAT bookkeeping artifacts (51/53 HUMAN-UAT + 53-VERIFICATION `human_needed`, live items operator-approved).
 
-**Release note:** the `v1.0.9` git tag is NOT created at milestone close — it belongs to the rc-gated release pipeline (chart `appVersion` bump first, rc dry-run, then tag at the release commit; v1.0.8 precedent).
+**Released 2026-07-21** (tag `v1.0.9` at `97dcc5d9`, rc-gated via `v1.0.9-rc.1` — green on the first candidate): goreleaser 5 platform binaries + 9 images (the langgraph-verifier joins the set) + 2 Helm OCI charts published to GHCR, all verified anon-pullable; published chart appVersion 1.0.9 confirmed (no version skew). Release pre-flight surfaced + root-fixed real drift: the Anthropic pricing page moved (drift-check URL repointed) and claude-sonnet-5 now bills intro rates — adopted (200/1000/20/250 ¢/MTok), making the 2026-07-03 run-mix replay land on exactly the $3.84 console actual (COST-01 gap now zero); the weekly drift automation structurally catches the post-2026-08-31 sticker bump-back.
 
 **Archives:** [v1.0.9-ROADMAP.md](milestones/v1.0.9-ROADMAP.md) · [v1.0.9-REQUIREMENTS.md](milestones/v1.0.9-REQUIREMENTS.md)
 

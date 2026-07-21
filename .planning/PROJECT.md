@@ -8,7 +8,7 @@ A Kubernetes-native orchestrator that runs hierarchical agentic coding work as a
 
 **The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.** If everything else fails, TIDE-on-TIDE must work — that's what proves the paradigm and the implementation simultaneously, and it's the bar for "v1 ships."
 
-## Last Completed Milestone: v1.0.9 — Slack Tide: The Task Loop (COMPLETE 2026-07-21; release tag pending rc-gated pipeline)
+## Last Released Milestone: v1.0.9 — Slack Tide: The Task Loop (SHIPPED 2026-07-21, tag `v1.0.9`)
 
 **Outcome (complete 2026-07-21):** Delivered across 6 phases / 46 plans (48–53); all 28 requirements met. The Task loop runs live (independent LangGraph evaluator, evidence-seeded fresh attempts, `ConditionVerifyHalt` exhaustion — proven by billable red/green runs on kind); one `ResolveLoopPolicy` resolver parameterizes the same contract at every level (plan-check re-plan with stall detection; Phase/Milestone/Project escalate-only); the verify tier configures chart-first with a sticky install-ON/upgrade-OFF posture (render-pair + live kind upgrade proofs); and the dashboard surfaces nested loop provenance with `VerifyHalt` distinct from `Failed`, findings browsable through the existing artifacts API. Fail-closed doctrine held throughout (verdicts, terminal reasons, config parsing, posture). Milestone archive: [milestones/v1.0.9-ROADMAP.md](milestones/v1.0.9-ROADMAP.md).
 
@@ -30,7 +30,7 @@ A Kubernetes-native orchestrator that runs hierarchical agentic coding work as a
 
 **The wider arc:** the [five-loop model](notes/five-loop-model.md) (Execution → Task → Product → System → Oversight) is TIDE's loop-engineering organizing frame; v1.0.9 builds the Task loop + the shared contract, and the **Product / System / Oversight loops** become named future milestones (`internal/eval` already seeds the System loop; the existing gates seed Oversight enforcement). Superseded framing preserved in [milestones/vnext-specialist-verify-MILESTONE.md](milestones/vnext-specialist-verify-MILESTONE.md).
 
-## Last Released Milestone: v1.0.8 — Phoenix Rising: OpenInference Trace Emission + Self-Hosted Phoenix (SHIPPED 2026-07-17, tag `v1.0.8`)
+## Predecessor Milestone: v1.0.8 — Phoenix Rising: OpenInference Trace Emission + Self-Hosted Phoenix (SHIPPED 2026-07-17, tag `v1.0.8`)
 
 **Goal:** TIDE runs are observable in a self-hosted Arize Phoenix — the Milestone→Phase→Plan→Task dispatch chain emits real OpenTelemetry spans with OpenInference attributes (including full LLM input/output message arrays), and a documented Phoenix self-host recipe wires the chart's existing OTLP endpoint to consume them natively.
 
@@ -217,4 +217,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-21 — Phase 53 complete: all six v1.0.9 "Slack Tide" phases (48–53) done, 28/28 requirements delivered; milestone close pending (`/gsd:complete-milestone`). Prior: v1.0.8 Phoenix Rising RELEASE 2026-07-17.*
+*Last updated: 2026-07-21 — v1.0.9 "Slack Tide" RELEASED (tag `v1.0.9` @ `97dcc5d9`, rc-gated via rc.1; 9 images + 2 OCI charts + 5 binaries, anon-verified). Next milestone unscoped — `/gsd:new-milestone`. Prior: v1.0.8 Phoenix Rising 2026-07-17.*

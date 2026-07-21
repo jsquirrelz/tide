@@ -21,7 +21,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-21)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** v1.0.9 complete — planning next milestone (`/gsd:new-milestone`); release of v1.0.9 via the rc-gated pipeline pending
+**Current focus:** v1.0.9 RELEASED 2026-07-21 (tag `v1.0.9`) — planning next milestone (`/gsd:new-milestone`)
 
 ## Current Position
 
