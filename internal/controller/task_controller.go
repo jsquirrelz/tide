@@ -1561,7 +1561,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 		if hErr := setFailureHaltIfNeeded(ctx, r.Client, project, out.CompletedAt); hErr != nil {
 			logger.Error(hErr, "setFailureHaltIfNeeded failed (non-fatal)", "task", task.Name)
 		}
-	} else if hasVerificationContract(task) {
+	} else if hasVerificationContract(task) && verificationEnabledForLevel(project, "task", r.Deps.VerifyDefaults) {
 		// Phase 51 TASK-06 anti-gaming (BL-01): the EXECUTOR's own changed-file
 		// manifest is present in out.RunEvidence HERE — before a verifier
 		// overwrites the shared out.json path with its verdict-only envelope
@@ -2337,7 +2337,7 @@ func (r *TaskReconciler) buildVerifierEnvelopeIn(task *tideprojectv1alpha3.Task,
 		AttemptID: fmt.Sprintf("%s-%d", task.UID, attempt),
 		Provider: pkgdispatch.ProviderSpec{
 			Vendor: "langgraph",
-			Model:  ResolveProvider(project, "task", r.Deps.HelmProviderDefaults).Model,
+			Model:  resolveVerifierModel(project, "task", r.Deps.VerifyDefaults, r.Deps.HelmProviderDefaults),
 		},
 		ProxyEndpoint: credproxyEndpoint,
 		SignedToken:   token,
@@ -2632,7 +2632,7 @@ func (r *TaskReconciler) haltVerify(ctx context.Context, task *tideprojectv1alph
 	// before this function's own Status mutations below — see its doc
 	// comment for why an earlier mutation would be silently dropped by its
 	// DeepCopy-based patch base.
-	policy := ResolveLoopPolicy(project, nil, task, "task")
+	policy := ResolveLoopPolicy(project, nil, task, "task", r.Deps.VerifyDefaults)
 	result, err := exhaustVerifyLoop(ctx, r.Client, project, task, &task.Status.Conditions, &task.Status.Phase, "task", policy, completedAt, message)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -2743,7 +2743,7 @@ func (r *TaskReconciler) repairOrHalt(ctx context.Context, task *tideprojectv1al
 	// raw task.Spec.Verification read — behavior-preserving at Task defaults
 	// (D-02): MaxIterations resolves exactly as authored, same
 	// Attempt>=MaxIterations comparison (MaxIterations=1 allows zero repairs).
-	policy := ResolveLoopPolicy(project, nil, task, "task")
+	policy := ResolveLoopPolicy(project, nil, task, "task", r.Deps.VerifyDefaults)
 	if task.Status.Attempt >= int(policy.MaxIterations) {
 		return r.haltVerify(ctx, task, project, out,
 			fmt.Sprintf("verification loop exhausted MaxIterations=%d without an APPROVED verdict", policy.MaxIterations),

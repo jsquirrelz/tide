@@ -993,7 +993,7 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	verification := ResolveVerificationSpec(project, plan, nil, "plan")
 	patch := client.MergeFrom(plan.DeepCopy())
 	if verification.GateCommand != "" && verification.Phase == verificationPhaseLocked &&
-		!planVerifyResolvedByOperator(plan) {
+		!planVerifyResolvedByOperator(plan) && verificationEnabledForLevel(project, "plan", r.Deps.VerifyDefaults) {
 		plan.Status.Phase = tideprojectv1alpha3.LevelPhaseVerifying
 		meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
 			Type:               tideprojectv1alpha3.ConditionReconciling,
@@ -1263,7 +1263,7 @@ func (r *PlanReconciler) buildPlanVerifierEnvelopeIn(ctx context.Context, plan *
 		AttemptID:  fmt.Sprintf("%s-%d", plan.UID, attempt),
 		Provider: pkgdispatch.ProviderSpec{
 			Vendor: "langgraph",
-			Model:  ResolveProvider(project, "plan", r.Deps.HelmProviderDefaults).Model,
+			Model:  resolveVerifierModel(project, "plan", r.Deps.VerifyDefaults, r.Deps.HelmProviderDefaults),
 		},
 		ProxyEndpoint: credproxyEndpoint,
 		SignedToken:   token,
@@ -1482,7 +1482,7 @@ func (r *PlanReconciler) exhaustPlanVerifyLoop(ctx context.Context, plan *tidepr
 	// before this function's own Status mutations below — an earlier
 	// in-memory mutation would be silently dropped by its DeepCopy-based
 	// patch base (see its doc comment).
-	policy := ResolveLoopPolicy(project, plan, nil, "plan")
+	policy := ResolveLoopPolicy(project, plan, nil, "plan", r.Deps.VerifyDefaults)
 	result, err := exhaustVerifyLoop(ctx, r.Client, project, plan, &plan.Status.Conditions, &plan.Status.Phase, "plan", policy, completedAt, message)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -1688,7 +1688,7 @@ func (r *PlanReconciler) clearReplanFindingsAnnotation(ctx context.Context, plan
 //  3. Otherwise dispatchPlanRepair mints the fresh, findings-seeded planner
 //     attempt (D-04).
 func (r *PlanReconciler) repairOrHaltPlan(ctx context.Context, plan *tideprojectv1alpha3.Plan, project *tideprojectv1alpha3.Project, out pkgdispatch.EnvelopeOut) (ctrl.Result, error) {
-	policy := ResolveLoopPolicy(project, plan, nil, "plan")
+	policy := ResolveLoopPolicy(project, plan, nil, "plan", r.Deps.VerifyDefaults)
 
 	var findingsCount, highSeverity int32
 	if out.Verdict != nil {
@@ -2248,8 +2248,18 @@ func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan 
 		// DEFECT-C guard: an operator-resolved verify exhaustion must proceed
 		// to wave dispatch, never re-enter Verifying (see
 		// planVerifyResolvedByOperator).
+		//
+		// Phase 53 D-04: this is the SAME dispatch-triggering condition as
+		// reconcilePlannerDispatch's chokepoint above (plan.Status.Phase == ""
+		// clearing branch) — per this function's own doc comment, THIS is the
+		// structurally reachable seam for the common case (a Running Plan
+		// whose child Tasks have already started materializing bypasses
+		// handlePlannerJobCompletion's ChildCount gate entirely and lands
+		// here). Omitting the enablement AND-gate here would leave a
+		// chart-disabled level dispatching a verifier anyway through this
+		// path — the exact spend-gate hole T-53-14 exists to close.
 		if verification.GateCommand != "" && verification.Phase == verificationPhaseLocked &&
-			!planVerifyResolvedByOperator(plan) {
+			!planVerifyResolvedByOperator(plan) && verificationEnabledForLevel(project, "plan", r.Deps.VerifyDefaults) {
 			patch := client.MergeFrom(plan.DeepCopy())
 			plan.Status.Phase = tideprojectv1alpha3.LevelPhaseVerifying
 			meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{

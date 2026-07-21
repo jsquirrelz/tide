@@ -140,11 +140,18 @@ const (
 
 // levelVerifyDecision is the pure guard maybeRunLevelVerify evaluates before
 // any I/O: given the resolved VerificationSpec (ResolveVerificationSpec is
-// itself pure — no ctx/client params), the level's current LoopStatus, and
-// its current phase string, decides which of the four mutually-exclusive
-// branches applies. nil-safe on loopStatus.
-func levelVerifyDecision(spec tideprojectv1alpha3.VerificationSpec, loopStatus *tideprojectv1alpha3.LoopStatus, phase string) levelVerifyDecisionKind {
-	if spec.GateCommand == "" || spec.Phase != verificationPhaseLocked {
+// itself pure — no ctx/client params), the level's current LoopStatus, its
+// current phase string, and the D-04 enablement inputs (project + the
+// chart-supplied VerifyDefaults), decides which of the four
+// mutually-exclusive branches applies. nil-safe on loopStatus and project.
+//
+// The verificationEnabledForLevel check sits BESIDE the existing
+// GateCommand==""/not-Locked check in the SAME levelVerifyInactive
+// early-return (Phase 53 D-04): a chart-disabled level with no authored
+// Project-scope entry is byte-identical to the "no contract" off-switch —
+// it never dispatches a verifier, exactly like today's no-contract path.
+func levelVerifyDecision(spec tideprojectv1alpha3.VerificationSpec, loopStatus *tideprojectv1alpha3.LoopStatus, phase string, project *tideprojectv1alpha3.Project, level string, chartDefaults VerifyDefaults) levelVerifyDecisionKind {
+	if spec.GateCommand == "" || spec.Phase != verificationPhaseLocked || !verificationEnabledForLevel(project, level, chartDefaults) {
 		return levelVerifyInactive
 	}
 	if loopStatus != nil && loopStatus.ExitReason != "" {
@@ -179,7 +186,7 @@ func maybeRunLevelVerify(
 		phase = *target.PhasePtr
 	}
 
-	switch levelVerifyDecision(spec, target.LoopStatus, phase) {
+	switch levelVerifyDecision(spec, target.LoopStatus, phase, project, target.Level, deps.VerifyDefaults) {
 	case levelVerifyInactive, levelVerifyConverged:
 		return false, ctrl.Result{}, nil
 
@@ -401,7 +408,7 @@ func buildLevelVerifierEnvelopeIn(
 		AttemptID: fmt.Sprintf("%s-%d", uid, 1),
 		Provider: pkgdispatch.ProviderSpec{
 			Vendor: "langgraph",
-			Model:  ResolveProvider(project, target.Level, deps.HelmProviderDefaults).Model,
+			Model:  resolveVerifierModel(project, target.Level, deps.VerifyDefaults, deps.HelmProviderDefaults),
 		},
 		ProxyEndpoint: credproxyEndpoint,
 		SignedToken:   token,
@@ -542,7 +549,7 @@ func exhaustLevelVerify(
 		completedAt = out.CompletedAt
 	}
 
-	policy := ResolveLoopPolicy(project, nil, nil, target.Level)
+	policy := ResolveLoopPolicy(project, nil, nil, target.Level, deps.VerifyDefaults)
 	result, err := exhaustVerifyLoop(ctx, c, project, target.Obj, target.Conditions, target.PhasePtr, target.Level, policy, completedAt, message)
 	if err != nil {
 		return ctrl.Result{}, err
