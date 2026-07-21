@@ -843,3 +843,95 @@ var _ = Describe("RePlan: findings-seeded re-plan, one-shot at defaults, severit
 			"an improving re-plan must consume the remaining iteration and dispatch a third planner attempt")
 	})
 })
+
+// ─── Approve-resolves-exhaustion (Phase 52 live-proof DEFECT-C) ──────────────
+
+var _ = Describe("RePlan: operator approval resolves a VerifyExhausted park (Phase 52 live-proof DEFECT-C)", Label("envtest", "phase52", "replan"), func() {
+	ctx := context.Background()
+
+	It("(f) an approved requireApproval park resumes to Task dispatch — the Plan must NOT re-enter Verifying against the same consumed verdict", func() {
+		const projName = "rp-proj-approveresolve"
+		const planName = "rp-plan-approveresolve"
+
+		makeProjectForTask(projName)
+		defer cleanupProject(projName)
+
+		plan := makeVerifyPlan(planName, projName, tideprojectv1alpha3.VerificationSpec{
+			Phase: "Locked", Version: 1, GateCommand: "make plan-check", OnExhaustion: "requireApproval",
+		})
+		envReader := newMapEnvReader()
+		r := newVerifyDispatchPlanReconciler(envReader)
+		name := types.NamespacedName{Name: planName, Namespace: "default"}
+
+		childNames1 := driveToPlanVerifying(ctx, r, envReader, plan, name, projName, 1)
+		defer cleanupTask(childNames1[0])
+
+		verdict1 := replanScoreThirteen("dependency ordering looks wrong")
+		childNames2 := driveThroughPlanRepairCycle(ctx, r, envReader, plan, name, projName, 1, verdict1, 1)
+		defer cleanupTask(childNames2[0])
+
+		// Second REPAIRABLE verdict exhausts at default maxIterations:1;
+		// onExhaustion requireApproval parks at AwaitingApproval (not
+		// VerifyHalted) with the loop marked escalated.
+		envReader.SetOut(string(plan.UID), pkgdispatch.EnvelopeOut{
+			CompletedAt: time.Now(),
+			Verdict: &pkgdispatch.GateDecision{
+				Verdict:  pkgdispatch.VerdictRepairable,
+				Summary:  "still not right",
+				Findings: []pkgdispatch.Finding{{Dimension: "goal-alignment", Severity: "advisory", Evidence: "still drifting"}},
+			},
+		})
+		completePlanVerifierJob(ctx, plan, 2)
+
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(k8sClient.Get(ctx, name, plan)).To(Succeed())
+		Expect(plan.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseAwaitingApproval),
+			"requireApproval exhaustion must park, not halt")
+		Expect(plan.Status.LoopStatus.ExitReason).To(Equal(tideprojectv1alpha3.ExitEscalated))
+
+		// Operator approval: `tide approve` writes exactly this annotation on
+		// the discovered AwaitingApproval level.
+		annoPatch := client.MergeFrom(plan.DeepCopy())
+		if plan.Annotations == nil {
+			plan.Annotations = map[string]string{}
+		}
+		plan.Annotations["tideproject.k8s/approve-plan"] = "true"
+		Expect(k8sClient.Patch(ctx, plan, annoPatch)).To(Succeed())
+		Eventually(func(g Gomega) {
+			var fresh tideprojectv1alpha3.Plan
+			g.Expect(mgrClient.Get(ctx, name, &fresh)).To(Succeed())
+			g.Expect(fresh.Annotations["tideproject.k8s/approve-plan"]).To(Equal("true"))
+		}, 5*time.Second, 50*time.Millisecond).Should(Succeed(),
+			"the reconciler's cache must observe the approve annotation before the resume reconcile")
+
+		// Resume reconcile: consumeApproveAndResume clears the park.
+		_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(k8sClient.Get(ctx, name, plan)).To(Succeed())
+		Expect(plan.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseRunning),
+			"the approved park must resume to Running")
+
+		// DEFECT-C pin (observed live, tide-lv5): further reconciles must
+		// honor the operator's resolution — never re-enter Verifying against
+		// the already-consumed attempt-2 verdict, never re-park. Before the
+		// fix, the Running+children+Locked-contract Verifying entry re-fired,
+		// re-processed the SAME completed verifier Job, hit the stall check,
+		// and re-parked — an endless approve→re-verify→re-park cycle that
+		// silently swallowed every operator approval.
+		for range 3 {
+			_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Get(ctx, name, plan)).To(Succeed())
+			Expect(plan.Status.Phase).NotTo(Equal(tideprojectv1alpha3.LevelPhaseVerifying),
+				"an operator-resolved verify exhaustion must not re-enter Verifying")
+			Expect(plan.Status.Phase).NotTo(Equal(tideprojectv1alpha3.LevelPhaseAwaitingApproval),
+				"an operator-resolved verify exhaustion must not re-park")
+		}
+
+		verifier3Name := podjob.VerifierJobName("plan", string(plan.UID), 3)
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: verifier3Name, Namespace: "default"}, &batchv1.Job{})
+		Expect(apierrors.IsNotFound(err)).To(BeTrue(),
+			"no further plan-check verifier may dispatch after the operator resolved the exhausted loop")
+	})
+})

@@ -992,7 +992,8 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	// byte-for-byte (D-01's off-switch).
 	verification := ResolveVerificationSpec(project, plan, nil, "plan")
 	patch := client.MergeFrom(plan.DeepCopy())
-	if verification.GateCommand != "" && verification.Phase == verificationPhaseLocked {
+	if verification.GateCommand != "" && verification.Phase == verificationPhaseLocked &&
+		!planVerifyResolvedByOperator(plan) {
 		plan.Status.Phase = tideprojectv1alpha3.LevelPhaseVerifying
 		meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
 			Type:               tideprojectv1alpha3.ConditionReconciling,
@@ -1412,6 +1413,27 @@ func applyPlanLoopStatus(plan *tideprojectv1alpha3.Plan, out pkgdispatch.Envelop
 		summary.CompletedAt = &ct
 	}
 	plan.Status.LoopStatus.LastEvaluation = &summary
+}
+
+// planVerifyResolvedByOperator reports whether an exhausted plan-check loop
+// (LoopStatus.ExitReason=escalated) was subsequently resolved by the
+// operator — consumeApproveAndResume's ApprovedByUser/ResumedByUser record
+// on the WaveOrLevelPaused condition. Phase 52 live-proof DEFECT-C: BOTH
+// Verifying entry sites (handlePlannerJobCompletion's ChildCount==0 tail and
+// reconcileWaveMaterialization's ChildCount>0 seam) must honor this — an
+// unguarded re-entry re-processes the SAME already-consumed verifier verdict,
+// hits the MaxIterations/stall exhaustion again, and re-parks: an endless
+// approve→re-verify→re-park cycle that silently swallows every operator
+// approval. A descent-gate approval (gates: plan: approve) leaves LoopStatus
+// empty, so it never matches — verification still runs for a merely
+// descent-approved Plan.
+func planVerifyResolvedByOperator(plan *tideprojectv1alpha3.Plan) bool {
+	if plan.Status.LoopStatus.ExitReason != tideprojectv1alpha3.ExitEscalated {
+		return false
+	}
+	c := meta.FindStatusCondition(plan.Status.Conditions, tideprojectv1alpha3.ConditionWaveOrLevelPaused)
+	return c != nil && c.Status == metav1.ConditionFalse &&
+		(c.Reason == tideprojectv1alpha3.ReasonApprovedByUser || c.Reason == tideprojectv1alpha3.ReasonResumedByUser)
 }
 
 // markPlanVerifiedApproved is the sole path that clears a contract-bearing
@@ -2223,7 +2245,11 @@ func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan 
 	if plan.Status.Phase == tideprojectv1alpha3.LevelPhaseRunning && len(taskList.Items) > 0 {
 		project := r.resolveProjectForPlan(ctx, plan)
 		verification := ResolveVerificationSpec(project, plan, nil, "plan")
-		if verification.GateCommand != "" && verification.Phase == verificationPhaseLocked {
+		// DEFECT-C guard: an operator-resolved verify exhaustion must proceed
+		// to wave dispatch, never re-enter Verifying (see
+		// planVerifyResolvedByOperator).
+		if verification.GateCommand != "" && verification.Phase == verificationPhaseLocked &&
+			!planVerifyResolvedByOperator(plan) {
 			patch := client.MergeFrom(plan.DeepCopy())
 			plan.Status.Phase = tideprojectv1alpha3.LevelPhaseVerifying
 			meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
