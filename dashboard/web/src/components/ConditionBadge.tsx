@@ -1,4 +1,4 @@
-import { Wallet, CreditCard, type LucideIcon } from "lucide-react";
+import { Wallet, CreditCard, OctagonPause, type LucideIcon } from "lucide-react";
 import type { CSSProperties } from "react";
 import { clsx } from "../lib/clsx";
 
@@ -11,7 +11,7 @@ import { clsx } from "../lib/clsx";
  * See 14-UI-SPEC.md §C1 for the locked vocabulary table.
  */
 export type ProjectBlockingCondition = {
-  type: string;    // "BudgetBlocked" | "BillingHalt" (open string — unknown types render nothing)
+  type: string;    // "BudgetBlocked" | "BillingHalt" | "VerifyHalt" (open string — unknown types render nothing)
   reason: string;  // e.g. "BudgetCapReached"
   message: string; // controller-stamped human message — surfaces as native title tooltip
   age: string;     // server-formatted relative time, e.g. "4m 12s"
@@ -28,9 +28,9 @@ type ConditionRow = {
 /**
  * Verbatim map from Project blocking-condition type → presentation row.
  * Sourced directly from 14-UI-SPEC.md §C1 vocabulary table (columns: Color
- * token, lucide Icon, Label, Animation, SR Description). Both conditions
- * share --color-status-blocked (policy-halted, recoverable by operator action
- * — not a failure). Any divergence is a UI-SPEC violation.
+ * token, lucide Icon, Label, Animation, SR Description). All three
+ * conditions share --color-status-blocked (policy-halted, recoverable by
+ * operator action — not a failure). Any divergence is a UI-SPEC violation.
  */
 const CONDITION_TABLE: Record<string, ConditionRow> = {
   BudgetBlocked: {
@@ -48,6 +48,20 @@ const CONDITION_TABLE: Record<string, ConditionRow> = {
     colorVar: "var(--color-status-blocked)",
     srDescription:
       "Provider credit balance too low — dispatch halted. Refill credits and run `tide resume`",
+  },
+  // 53-UI-SPEC §Condition Vocabulary (OBS-04): the Task/plan-check loop's
+  // project-wide halt mirror of ConditionVerifyHalt. OctagonPause is
+  // deliberately distinct from the task-level VerifyHalted status badge's
+  // glyph (StatusBadge.tsx) — the project-level condition badge and the
+  // task-level status badge can co-occur in one viewport; the blocked
+  // family never shares a glyph across its rows.
+  VerifyHalt: {
+    icon: OctagonPause,
+    iconName: "OctagonPause",
+    label: "Verify halted",
+    colorVar: "var(--color-status-blocked)",
+    srDescription:
+      "Verification halted without an approved verdict — dispatch held. Review staged findings and run `tide resume`",
   },
 };
 

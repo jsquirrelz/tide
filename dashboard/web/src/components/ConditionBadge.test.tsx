@@ -26,6 +26,14 @@ const BILLING_HALT: ProjectBlockingCondition = {
   age: "2m 0s",
 };
 
+// 53-UI-SPEC §Condition Vocabulary (OBS-04) — verbatim from the spec.
+const VERIFY_HALT: ProjectBlockingCondition = {
+  type: "VerifyHalt",
+  reason: "LoopExhausted",
+  message: "Verification exhausted its loop policy without an approved verdict",
+  age: "1m 30s",
+};
+
 describe("ConditionBadge (14-UI-SPEC §C1 — blocking-condition vocabulary)", () => {
   // Test 1: BudgetBlocked renders with correct testid, icon, label, and role.
   it("BudgetBlocked renders data-testid, Wallet icon, label 'Budget blocked', role=status", () => {
@@ -82,6 +90,39 @@ describe("ConditionBadge (14-UI-SPEC §C1 — blocking-condition vocabulary)", (
     );
   });
 
+  // 53-UI-SPEC: VerifyHalt renders with correct testid, OctagonPause icon,
+  // label 'Verify halted', blocked color token, and SR text naming tide resume.
+  it("VerifyHalt renders data-testid, OctagonPause icon, label 'Verify halted'", () => {
+    render(<ConditionBadge condition={VERIFY_HALT} />);
+    const badge = screen.getByTestId("condition-badge-VerifyHalt");
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveAttribute("data-condition", "VerifyHalt");
+    expect(badge).toHaveAttribute("role", "status");
+    expect(badge).toHaveTextContent("Verify halted");
+
+    const icon = badge.querySelector("[data-icon]");
+    expect(icon).not.toBeNull();
+    expect(icon?.getAttribute("data-icon")).toBe("OctagonPause");
+
+    const style = badge.getAttribute("style") ?? "";
+    expect(style).toContain("var(--color-status-blocked)");
+  });
+
+  it("VerifyHalt aria-label carries the vocabulary SR description naming tide resume", () => {
+    render(<ConditionBadge condition={VERIFY_HALT} />);
+    const badge = screen.getByTestId("condition-badge-VerifyHalt");
+    expect(badge).toHaveAttribute(
+      "aria-label",
+      "Verification halted without an approved verdict — dispatch held. Review staged findings and run `tide resume`",
+    );
+  });
+
+  it("VerifyHalt title attribute equals condition.message verbatim (native tooltip)", () => {
+    render(<ConditionBadge condition={VERIFY_HALT} />);
+    const badge = screen.getByTestId("condition-badge-VerifyHalt");
+    expect(badge).toHaveAttribute("title", VERIFY_HALT.message);
+  });
+
   // Test 5: unknown condition type renders nothing (null guard — mirrors coerce() philosophy).
   it("unknown condition type renders nothing (returns null)", () => {
     const unknown: ProjectBlockingCondition = {
@@ -96,12 +137,14 @@ describe("ConditionBadge (14-UI-SPEC §C1 — blocking-condition vocabulary)", (
     ).toBeNull();
   });
 
-  // Test 6: CONDITION_TABLE is exported and iterable with exactly the two known keys.
-  it("CONDITION_TABLE is exported and has exactly keys BudgetBlocked and BillingHalt", () => {
+  // Test 6: CONDITION_TABLE is exported and iterable with exactly the three known keys.
+  // 53-07: extended from 2 to 3 keys with VerifyHalt (53-UI-SPEC §Condition Vocabulary).
+  it("CONDITION_TABLE is exported and has exactly keys BudgetBlocked, BillingHalt, VerifyHalt", () => {
     const keys = Object.keys(CONDITION_TABLE);
-    expect(keys).toHaveLength(2);
+    expect(keys).toHaveLength(3);
     expect(keys).toContain("BudgetBlocked");
     expect(keys).toContain("BillingHalt");
+    expect(keys).toContain("VerifyHalt");
   });
 
   // Pill shape mirrors StatusBadge: inline-flex gap-1 p-1 px-2 + mono 12px 600.
