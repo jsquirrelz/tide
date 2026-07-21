@@ -222,7 +222,7 @@ Plans:
   2. A fresh install gets Task-loop auto-repair + Plan/Milestone/Project escalation enabled at milestone+project scope by default; an in-place `helm upgrade` on an existing install leaves the verify/loop tier off — proven by an upgrade-path test.
   3. The dashboard shows nested loop provenance (Project run → Task iteration → Execution attempt/tool spans) and renders `VerifyHalt` as a visually distinct state from `Failed`, with staged findings browsable through the existing gitfetch/artifacts API (no new endpoint).
 
-**Plans**: 9 plans
+**Plans**: 10 plans
 **UI hint**: yes (53-UI-SPEC.md approved — locks the OBS-04 dashboard contract)
 
 Plans:
@@ -242,6 +242,7 @@ Plans:
 **Wave 3** *(blocked on Wave 2)*
 
 - [ ] 53-08-PLAN.md — TaskDetailDrawer Verification section + findings disclosure + action arms + plan-check mirror line + embed regen
+- [ ] 53-10-PLAN.md — Task verdict-final findings-push trigger (haltVerify/markVerifiedSucceeded seam + VerifyHalted retry arm, TidePushImage on TaskReconcilerDeps)
 
 **Wave 4** *(blocked on Wave 3)*
 

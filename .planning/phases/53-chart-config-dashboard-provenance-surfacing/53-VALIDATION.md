@@ -42,7 +42,7 @@ created: 2026-07-21
 | 53-01-T2 | 53-01 | 1 | CFG-01 | T-53-02 | dropped augment block caught by fast test | go unit (no cluster) | `go test ./test/integration/kind/... -run TestHelmDeploymentTemplateRendersVerifierEnv -count=1` | ❌ Wave 0 (new file) | ⬜ pending |
 | 53-02-T1 | 53-02 | 1 | CFG-01 | T-53-03 | malformed/out-of-range levels JSON rejected fail-closed | go unit (TDD) | `go test ./pkg/dispatch/... -run TestParseVerifyLevelDefaults -count=1` | ❌ Wave 0 (new file) | ⬜ pending |
 | 53-02-T2 | 53-02 | 1 | CFG-01 | T-53-04 | absent config resolves OFF; authored > chart > off | go unit (own file, no Ginkgo filter) | `go test ./internal/controller/... -run TestVerificationEnabledForLevel -count=1` | ❌ Wave 0 (new file) | ⬜ pending |
-| 53-03-T1 | 53-03 | 1 | OBS-04 | T-53-07 | verdict-final-only task staging | go unit | `go test ./internal/controller/... -run TestCollectStageEnvelopes -count=1` | ✓ extend | ⬜ pending |
+| 53-03-T1 | 53-03 | 1 | OBS-04 | T-53-07 | verdict-final + LastEvaluation-guarded task staging (push-poison guard on ALL arms) | go unit | `go test ./internal/controller/... -run TestCollectStageEnvelopes -count=1` | ✓ extend | ⬜ pending |
 | 53-03-T2 | 53-03 | 1 | OBS-04 | T-53-05 | closed kind allowlist preserved (traversal 400s) | go unit | `go test ./cmd/dashboard/api/... -run TestArtifacts -count=1` | ✓ extend | ⬜ pending |
 | 53-04-T1 | 53-04 | 1 | OBS-04 | T-53-08 | LOOP-03: no history array on the wire; attemptMax≠verifyMaxIterations | go unit | `go test ./cmd/dashboard/api/... -run TestTask -count=1` | ✓ extend | ⬜ pending |
 | 53-04-T2 | 53-04 | 1 | OBS-04 | T-53-09 | condition whitelist stays literal 3-way | go unit | `go test ./cmd/dashboard/api/... -run 'TestPlan|TestProject|TestSummarize' -count=1` | ✓ extend | ⬜ pending |
@@ -54,6 +54,8 @@ created: 2026-07-21
 | 53-07-T2 | 53-07 | 2 | OBS-04 | — | wire types byte-match Go tags; embed fresh | tsc + vitest + freshness gate | `cd dashboard/web && npx tsc --noEmit -p . && npx vitest run && cd ../.. && make verify-dashboard-freshness` | ✓ | ⬜ pending |
 | 53-08-T1 | 53-08 | 3 | OBS-04 | T-53-19/20 | findings rendered text-only (React escaping); clipboard-copy actions only | vitest | `cd dashboard/web && npx vitest run TaskDetailDrawer` | ❌ Wave 0 (new test file) | ⬜ pending |
 | 53-08-T2 | 53-08 | 3 | OBS-04 | — | plan mirror; absence renders nothing; embed fresh | tsc + vitest + freshness gate | `cd dashboard/web && npx tsc --noEmit -p . && npx vitest run && cd ../.. && make verify-dashboard-freshness` | ✓ | ⬜ pending |
+| 53-10-T1 | 53-10 | 3 | OBS-04 | T-53-23/24/25 | verdict-final trigger ungated by dispatch holds; ensure-entry union; non-fatal errors; existing 4 callers unchanged | go build + go unit | `go build ./... && go test ./internal/controller/... -run TestArtifactPush -count=1` | ✓ extend | ⬜ pending |
+| 53-10-T2 | 53-10 | 3 | OBS-04 | T-53-23/25 | push Job created WHILE ConditionVerifyHalt=True; annotation edge-gate (no churn); busy-race retry; nil-evaluation poison guard | go unit (own file, own Test entry) | `go test ./internal/controller/... -run TestTaskFindingsPush -count=1` | ❌ Wave 0 (new file) | ⬜ pending |
 | 53-09-T1 | 53-09 | 4 | CFG-02 | T-53-21/22 | sticky posture proven live, isolated from shared release | kind (Ginkgo Label kind, Serial) | `go test ./test/integration/kind/... -run TestIntegrationKind --ginkgo.focus='sticky posture' -count=1` | ❌ Wave 0 (new file) | ⬜ pending |
 | 53-09-T2 | 53-09 | 4 | CFG-01, CFG-02, OBS-04 | — | D-10 ci.yaml-only gates green in-phase | full gates | `make lint && make verify-chart-reproducible && make verify-dashboard-freshness && (cd dashboard/web && npm test) && make test-int` (MAKE_EXIT + FAIL-grep) | ✓ | ⬜ pending |
 
@@ -69,6 +71,7 @@ Created by the plan that needs them (each plan's first verify writes its own tes
 - [ ] `pkg/dispatch/verify_defaults_test.go` — 53-02 T1 (TDD RED first)
 - [ ] `internal/controller/verification_enabled_unit_test.go` — 53-02 T2 (own Test entry, never a TestControllers filter — Phase 51-03 lesson)
 - [ ] `dashboard/web/src/components/TaskDetailDrawer.test.tsx` — 53-08 T1 (confirmed absent 2026-07-21)
+- [ ] `internal/controller/task_findings_push_test.go` — 53-10 T2 (own Test entries — the frozen-halt push proof)
 - [ ] `test/integration/kind/verify_posture_sticky_test.go` — 53-09 T1
 
 *Existing infrastructure (envtest suite, kind suite, vitest, helm-template contract tests, artifact_push/artifacts/tasks/plans/projects test files, StatusBadge/ConditionBadge test files) covers the remainder — verified present 2026-07-21.*
@@ -92,4 +95,4 @@ Created by the plan that needs them (each plan's first verify writes its own tes
 - [x] Feedback latency < 120s (narrowest-command discipline per task)
 - [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** planned 2026-07-21 (planner-filled from 53-01..53-09 PLAN.md tasks)
+**Approval:** planned 2026-07-21 (planner-filled from 53-01..53-10 PLAN.md tasks; revised 2026-07-21 — plan-check BLOCKER closure added 53-10)
