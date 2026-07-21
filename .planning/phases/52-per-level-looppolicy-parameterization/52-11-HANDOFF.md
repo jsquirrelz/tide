@@ -36,7 +36,7 @@ Driving the full hierarchy to a billable verifier dispatch hit two fixture gaps:
    Phase never reaches its pre-Succeeded verify seam. The Phase-51 Task proof never hit this
    because the Task ran independently without needing succession.
 
-**Spend so far: ~1 cent** (budget cap 100000 cents). Only stub planners ran; NO verifier
+**Spend so far: ~1 cent** (budget cap 500 cents ($5)). Only stub planners ran; NO verifier
 has billed. The real-model verifier dispatch is the still-unreached step.
 
 ## DEPLOYED CLUSTER STATE (left UP)
@@ -108,7 +108,7 @@ any defect you find (the 51-08 precedent — this gate exists to catch what gree
 6. Record kubectl/manager-log proof artifacts + approximate spend in 52-11-SUMMARY.md, flip
    52-HUMAN-UAT.md to resolved, run gsd-sdk query phase.complete 52, commit, and present.
 
-Budget cap is 100000 cents; spend so far ~1 cent. If you find another shipped defect like
+Budget cap is 500 cents ($5, a tight safety backstop — was wrongly 100000=$1,000, now fixed); spend so far ~1 cent. If you find another shipped defect like
 DEFECT-A, fix it at the root and commit before continuing. If the cluster is gone, re-deploy
 per the recipe in 52-11-HANDOFF.md.
 ```

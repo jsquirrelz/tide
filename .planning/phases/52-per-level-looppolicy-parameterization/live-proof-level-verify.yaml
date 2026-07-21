@@ -44,7 +44,10 @@ spec:
   schemaRevision: v1alpha3
   targetRepo: https://github.com/example/tide-lv-proof.git
   providerSecretRef: tide-provider-secret
-  budget: {absoluteCapCents: 100000}
+  # Tight safety ceiling ($5). A targeted loop proof realistically costs a few
+  # cents; this is a hard backstop against a runaway loop, NOT a target. (Was
+  # 100000 = $1,000, copied unadjusted from the Phase-51 fixture — far too loose.)
+  budget: {absoluteCapCents: 500}
   # Real model — the level verifier inherits the task-level model
   # (ResolveProvider(project,"task")) and makes a real Anthropic call; "stub"
   # 404s, haiku spirals (Phase-51 lesson). Only the verifier bills.
