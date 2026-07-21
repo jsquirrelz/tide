@@ -615,6 +615,11 @@ func main() {
 			// Phase 53 CFG-01/D-04: chart-supplied verify-tier defaults, mirroring
 			// the VerifierImage dual-wiring onto plannerDeps above.
 			VerifyDefaults: verifyDefaults,
+			// Phase 53-10 OBS-04: the SAME tidePushImage local plannerDeps
+			// receives above, so the Task verdict-final findings-push trigger
+			// (maybeTriggerTaskFindingsPush) reuses the identical push image —
+			// no second image source.
+			TidePushImage: tidePushImage,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Task")

@@ -167,6 +167,14 @@ type TaskReconcilerDeps struct {
 	// PlannerReconcilerDeps.VerifyDefaults; no dispatch-site behavior
 	// changes in this plan — the AND gates land in 53-06.
 	VerifyDefaults VerifyDefaults
+
+	// TidePushImage is the image ref for the tide-push container; empty =
+	// trigger skipped — mirrors ProjectReconciler's field (main.go:454) /
+	// PlannerReconcilerDeps.TidePushImage. Consumed by plan 53-10's Task
+	// verdict-final findings-push trigger (maybeTriggerTaskFindingsPush),
+	// which reuses the SAME triggerArtifactPush machinery the planner tier
+	// already dispatches through — no second push mechanism.
+	TidePushImage string
 }
 
 // TaskReconciler reconciles a Task object at Standard depth (D-C1).
@@ -377,8 +385,29 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 	// ConditionVerifyHalt (checkDispatchHolds/gateChecks); this Task simply
 	// halts here with no additional failure propagation. Recovery is
 	// `tide resume` (clears ConditionVerifyHalt), never `--retry-failed`.
+	//
+	// Plan 53-10 terminal-arm retry: mirrors the Failed branch's
+	// setFailureHaltIfNeeded-at-terminal precedent directly below — re-run
+	// the findings-push trigger on every reconcile of an already-halted Task
+	// so the carried-entry edge gate converges even if haltVerify's own
+	// verdict-final call raced a busy push Job. Converts the empty
+	// ctrl.Result{} into a 5s RequeueAfter ONLY while the entry is not yet
+	// carried by any push Job; once carried, steady state — no further
+	// requeue, no churn (T-53-23). Project resolution is best-effort, same
+	// posture as the Failed branch below: an unresolvable project just skips
+	// this reconcile's retry and tries again next time.
 	if task.Status.Phase == tideprojectv1alpha3.LevelPhaseVerifyHalted {
-		return taskGateResult{shouldHalt: true, result: ctrl.Result{}}, nil
+		result := ctrl.Result{}
+		if project, pErr := r.resolveProject(ctx, task); pErr == nil && project != nil {
+			carried, pushErr := r.maybeTriggerTaskFindingsPush(ctx, task, project)
+			if pushErr != nil {
+				logf.FromContext(ctx).Error(pushErr, "verdict-final findings push trigger failed at VerifyHalted terminal (non-fatal)", "task", task.Name)
+			}
+			if !carried {
+				result = ctrl.Result{RequeueAfter: 5 * time.Second}
+			}
+		}
+		return taskGateResult{shouldHalt: true, result: result}, nil
 	}
 	if task.Status.Phase == tideprojectv1alpha3.LevelPhaseFailed {
 		// Phase 25 D-02b: conservative failure halt check at terminal short-circuit.
@@ -2601,6 +2630,68 @@ func (r *TaskReconciler) finishVerifierTerminal(ctx context.Context, task *tidep
 	}
 }
 
+// maybeTriggerTaskFindingsPush implements the Task verdict-final findings-push
+// trigger (Plan 53-10 / OBS-04): stages and pushes a Task's verifier findings
+// through the EXISTING artifact-push machinery (triggerArtifactPush) at the
+// Task's verdict-final transition, even while a project-wide VerifyHalt
+// freezes ALL dispatch (checkVerifyHalt/checkDispatchHolds). This is a git
+// write of already-computed evaluator output, not a dispatch action — it must
+// NEVER be gated by dispatch holds, and every call site below sits AFTER
+// them.
+//
+// Eligibility reuses taskFindingsStageable (artifact_push.go) EXACTLY — the
+// SAME named predicate the collector applies — so the trigger and the
+// collector never diverge on which Tasks are push-eligible; a Task with a nil
+// LoopStatus.LastEvaluation (verifier crashed before a verdict) is never
+// pushed (T-53-25 poison guard).
+//
+// Edge-gated on stagedEnvelopesAnnotation (Defect E / DASH-02): once a push
+// Job's carried-entry set includes this Task's own <uid>:task/<name> entry,
+// carried=true — callers stop retrying (T-53-23 no-churn). While a push Job
+// exists but has not YET carried the entry (a race with an in-flight push
+// snapshotted before this Task's status patch landed), returns
+// carried=false, err=nil — the ProjectReconciler's isStaleArtifactPush
+// supersede path independently heals this once the in-flight Job completes.
+// While no push Job exists, dispatches a fresh one via triggerArtifactPush,
+// passing this Task as the ensure-entry so the just-patched Task rides the
+// push even though the informer cache backing collectStageEnvelopes' List may
+// not yet have observed the patch.
+//
+// Errors ARE returned to the caller (never swallowed here), but every call
+// site treats them as non-fatal — logged and continued, never failing the
+// verdict-final Status patch (mirrors setVerifyHaltIfNeeded's tolerated-error
+// posture, level_status.go:228-230).
+func (r *TaskReconciler) maybeTriggerTaskFindingsPush(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project) (carried bool, err error) {
+	if project == nil || !taskFindingsStageable(task) {
+		return false, nil
+	}
+
+	pushJobName := fmt.Sprintf("tide-push-%s", project.UID)
+	entry := stageEntry("task", task.Name, string(task.UID))
+
+	var existing batchv1.Job
+	getErr := r.Get(ctx, client.ObjectKey{Name: pushJobName, Namespace: project.Namespace}, &existing)
+	switch {
+	case getErr == nil:
+		for e := range strings.SplitSeq(existing.Annotations[stagedEnvelopesAnnotation], ",") {
+			if e == entry {
+				return true, nil
+			}
+		}
+		// Busy but not yet carrying this Task's entry: isStaleArtifactPush
+		// (project_controller.go) independently heals this once the
+		// in-flight Job completes — nothing more to do here.
+		return false, nil
+	case apierrors.IsNotFound(getErr):
+		if tErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "task", r.Deps.TidePushImage, r.sharedPVCName(), r.Deps.HelmProviderDefaults, task); tErr != nil {
+			return false, tErr
+		}
+		return false, nil
+	default:
+		return false, getErr
+	}
+}
+
 // haltVerify handles the fail-closed non-APPROVED exit of the verify loop —
 // an unreadable envelope, a missing Verdict, a classified BLOCKED verdict,
 // an anti-gaming escalation, or MaxIterations exhaustion without an APPROVED
@@ -2665,6 +2756,16 @@ func (r *TaskReconciler) haltVerify(ctx context.Context, task *tideprojectv1alph
 		return ctrl.Result{}, pErr
 	}
 
+	// Plan 53-10: stage + push this Task's findings at the verdict-final seam —
+	// covers BOTH exhaustVerifyLoop legs in one place, escalate→VerifyHalted
+	// (the frozen-halt blocker case) and requireApproval→AwaitingApproval
+	// (ESC-02 park; the operator needs findings to decide `tide approve`).
+	// Never gated by dispatch holds (this is a git write, not dispatch); never
+	// fails the verdict-final patch already applied above.
+	if _, pushErr := r.maybeTriggerTaskFindingsPush(ctx, task, project); pushErr != nil {
+		logf.FromContext(ctx).Error(pushErr, "verdict-final findings push trigger failed (non-fatal)", "task", task.Name)
+	}
+
 	r.settleVerifierSpend(ctx, task, project, out)
 	// finishVerifierTerminal emits the Task-level completion/failure metric
 	// counter — deliberately skipped on the requireApproval leg: the Task
@@ -2701,6 +2802,14 @@ func (r *TaskReconciler) markVerifiedSucceeded(ctx context.Context, task *tidepr
 	if err := r.Status().Patch(ctx, task, patch); err != nil {
 		return ctrl.Result{}, err
 	}
+
+	// Plan 53-10: stage + push this Task's findings immediately at the
+	// approved verdict-final — no waiting for the next boundary push. Never
+	// gated by dispatch holds; never fails the Status patch already applied.
+	if _, pushErr := r.maybeTriggerTaskFindingsPush(ctx, task, project); pushErr != nil {
+		logf.FromContext(ctx).Error(pushErr, "verdict-final findings push trigger failed (non-fatal)", "task", task.Name)
+	}
+
 	r.settleVerifierSpend(ctx, task, project, out)
 	r.finishVerifierTerminal(ctx, task, project, out, "")
 	return ctrl.Result{}, nil
