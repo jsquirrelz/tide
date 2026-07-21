@@ -228,10 +228,10 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 53-01-PLAN.md — Chart verifier image env plumbing (images.tideLanggraphVerifier + TIDE_VERIFIER_IMAGE via hack/helm/, kind-suite pins, static contract test)
-- [ ] 53-02-PLAN.md — ParseVerifyLevelDefaults fail-closed parser + manager flag/env wiring + VerifyDefaults on both Deps + verificationEnabledForLevel helper
-- [ ] 53-03-PLAN.md — Findings pipeline: collectStageEnvelopes task entries + artifacts endpoint kind allowlist (+task)
-- [ ] 53-04-PLAN.md — Dashboard API loop-provenance payloads (tasks/plans) + ConditionVerifyHalt in blockingConditions
+- [x] 53-01-PLAN.md — Chart verifier image env plumbing (images.tideLanggraphVerifier + TIDE_VERIFIER_IMAGE via hack/helm/, kind-suite pins, static contract test)
+- [x] 53-02-PLAN.md — ParseVerifyLevelDefaults fail-closed parser + manager flag/env wiring + VerifyDefaults on both Deps + verificationEnabledForLevel helper
+- [x] 53-03-PLAN.md — Findings pipeline: collectStageEnvelopes task entries + artifacts endpoint kind allowlist (+task)
+- [x] 53-04-PLAN.md — Dashboard API loop-provenance payloads (tasks/plans) + ConditionVerifyHalt in blockingConditions
 
 **Wave 2** *(blocked on Wave 1)*
 
@@ -269,4 +269,4 @@ Phases execute in numeric order: 48 → 49 → 50 → 51 → 52 → 53
 | 50. Execution-Loop Hardening + Loop-Native Observability | v1.0.9 | 7/7 | Complete    | 2026-07-19 |
 | 51. The Task Loop | v1.0.9 | 8/8 | Complete    | 2026-07-20 |
 | 52. Per-Level LoopPolicy Parameterization | v1.0.9 | 11/11 | Complete    | 2026-07-21 |
-| 53. Chart Config + Dashboard Provenance Surfacing | v1.0.9 | 0/TBD | Not started | - |
+| 53. Chart Config + Dashboard Provenance Surfacing | v1.0.9 | 4/10 | In Progress|  |
