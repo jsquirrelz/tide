@@ -484,21 +484,6 @@ func applyController() {
 	}
 	GinkgoWriter.Printf("helm upgrade --install completed in %s\n%s\n", elapsed, out)
 
-	// Phase 51 (ESC-04/TASK-04): the chart does not yet wire TIDE_VERIFIER_IMAGE
-	// (that env lands in Phase 53's chart-config surface, mirroring the existing
-	// TIDE_REPORTER_IMAGE/TIDE_IMPORT_IMAGE wiring). Until then, patch it onto the
-	// manager env post-install so dispatchVerifier resolves the kind-loaded
-	// verifier image instead of the unschedulable :v0.1.0-dev binary default —
-	// otherwise every verifier Job ImagePullBackOffs and contract-bearing Tasks
-	// strand in Verifying. Triggers a rollout that waitForControllerReady() awaits.
-	setEnv := exec.CommandContext(ctx, "kubectl", "set", "env",
-		"deploy/tide-controller-manager", "-c", "manager",
-		"-n", kindControllerNamespace, "--kubeconfig", kubeconfigPath,
-		"TIDE_VERIFIER_IMAGE=ghcr.io/jsquirrelz/tide-langgraph-verifier:test")
-	if seOut, seErr := setEnv.CombinedOutput(); seErr != nil {
-		GinkgoWriter.Printf("kubectl set env TIDE_VERIFIER_IMAGE failed (non-fatal): %v\n%s\n", seErr, seOut)
-	}
-
 	// NOTE: tide-signing-key mirroring into kindNamespace was MOVED to a
 	// separate BeforeSuite step after waitForControllerReady() — Phase 04.1
 	// Plan 12 iter-3 Cascade 4-b. The chart creates the source Secret in
@@ -533,6 +518,14 @@ func helmControllerArgs(chartDir string, rolloutNonce string) []string {
 		// ImagePullBackoff -> imported envelopes never staged at new-UID paths).
 		"--set", "images.tideImport.tag=test",
 		"--set", "images.tideImport.pullPolicy=IfNotPresent",
+		// Phase 53 (CFG-01): point TIDE_VERIFIER_IMAGE at the kind-loaded
+		// tide-langgraph-verifier:test so dispatchVerifier's Job Create resolves
+		// a schedulable image instead of the unbuilt v0.1.0-dev binary default.
+		// The chart now supplies this env directly (images.tideLanggraphVerifier),
+		// retiring the Phase-51 post-install env patch this suite previously
+		// applied to the manager Deployment after helm install.
+		"--set", "images.tideLanggraphVerifier.tag=test",
+		"--set", "images.tideLanggraphVerifier.pullPolicy=IfNotPresent",
 		// Phase 34 (PR #3 run 8): point TIDE_PUSH_IMAGE at the kind-loaded
 		// tide-push:test. The chart default tag is Chart.AppVersion — a
 		// PUBLISHED binary that predates --integration-only, so every
