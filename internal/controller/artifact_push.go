@@ -61,6 +61,80 @@ func plannerMaterialized(phase string) bool {
 	}
 }
 
+// taskFindingsStageable reports whether a Task's verifier findings are safe to
+// stage onto the run branch (Finding 10 / 53-03; consumed by both this file's
+// collectStageEnvelopes loop and plan 53-10's Task verdict-final push
+// trigger, which MUST apply the identical eligibility check — this is the
+// shared, named predicate the plan requires).
+//
+// Deliberately does NOT reuse plannerMaterialized: that predicate's phase
+// vocabulary (AwaitingApproval/Succeeded/Complete keyed off PLANNER
+// completion) doesn't fit a Task's verify-loop phase vocabulary, and reusing
+// it would admit a pre-verify Succeeded Task (Task's "Running exit 0, no
+// verification contract" path — OQ2) with no verdict at all.
+//
+// Verdict-final AND evaluation-recorded (supersedes RESEARCH Assumption A4's
+// unguarded VerifyHalted arm): a Task qualifies only when BOTH hold —
+//
+//  1. Status.Phase is one of the three verdict-final phases: VerifyHalted
+//     (the escalate-leg halt), Succeeded (an APPROVED verdict consumed via
+//     markVerifiedSucceeded), or AwaitingApproval (the ESC-02 requireApproval
+//     park — the operator needs the findings to decide `tide approve`,
+//     mirroring plannerMaterialized already admitting AwaitingApproval for
+//     the other four kinds). Verifying/Running (mid-loop) are excluded —
+//     never stage mid-iteration.
+//  2. Status.LoopStatus.LastEvaluation != nil. applyLoopStatus
+//     (task_controller.go:2505-2530) sets LastEvaluation if-and-only-if
+//     out.Verdict != nil — i.e. the verifier's own envelope was read AND
+//     carried a parsed verdict. haltVerify calls applyLoopStatus
+//     unconditionally on every halt leg (VerifierEnvelopeUnreadable,
+//     VerifierVerdictMissing, VerifyBlocked, ...), so a VerifyHalted Task
+//     whose verifier crashed before producing a verdict (an unreadable
+//     envelope) still has a nil LastEvaluation and is excluded by guard (2)
+//     alone. This guard is REQUIRED on every arm, VerifyHalted included: a
+//     PVC envelope dir can exist (the executor's own out.json created it)
+//     with no verdict ever recorded, and tide-push hard-fails the ENTIRE
+//     cumulative push if any staged entry's dir lacks findings.json
+//     (cmd/tide-push/main.go:1242-1252) — poisoning every other level's
+//     artifacts in that push.
+//
+// uid->srcDir verified: entries key by the Task's own UID (t.UID below), and
+// tide-push resolves srcDir as filepath.Join(cfg.Workspace, "envelopes",
+// es.UID) (cmd/tide-push/main.go's stageEnvelopeArtifacts). The verifier Job
+// dispatched for a Task (dispatchVerifier, task_controller.go:2164) is built
+// with podjob.BuildOptions.Task = the same Task, and BuildJobSpec's
+// JobKindVerifier branch derives its envelope dir from opts.Task.UID
+// (internal/dispatch/podjob/jobspec.go) — so the Task's own UID is exactly
+// the directory the verifier writes its envelope into. The mapping is
+// correct as-is; no ENTRY-construction fix was needed.
+//
+// LastEvaluation-as-presence-proxy — SURFACED CONTRADICTION (never loosen the
+// predicate to compensate): as of this plan, nothing in the verifier's write
+// path (cmd/tide-langgraph-verifier/verifier/__main__.py:211-225) ever writes
+// a findings.json file — it writes only out.json (write_envelope_out) and the
+// termination-log TerminationStub (write_termination_stub). A recorded
+// LastEvaluation therefore does NOT yet imply findings.json landed on the PVC;
+// it implies only that out.Verdict was non-nil when applyLoopStatus ran. This
+// guard is still the TIGHTEST predicate expressible from Task.Status alone
+// (the controller never mounts the PVC and cannot stat findings.json
+// directly) — the fix is a verifier-side findings.json writer, out of this
+// plan's declared file scope (files_modified: artifact_push.go/_test.go,
+// dashboard artifacts.go/_test.go only). Until that writer lands, a
+// tide-push carrying a task-kind entry will hard-fail on the missing
+// findings.json regardless of how this predicate is shaped — flagged for
+// whichever plan wires the verifier-side writer.
+func taskFindingsStageable(t *tideprojectv1alpha3.Task) bool {
+	if t.Status.LoopStatus.LastEvaluation == nil {
+		return false
+	}
+	switch t.Status.Phase {
+	case tideprojectv1alpha3.LevelPhaseVerifyHalted, tideprojectv1alpha3.LevelPhaseSucceeded, tideprojectv1alpha3.LevelPhaseAwaitingApproval:
+		return true
+	default:
+		return false
+	}
+}
+
 // collectStageEnvelopes builds the cumulative, deterministically-ordered
 // <uid>:<kind>/<name> staging map of every planner-completed level in the
 // Project's namespace (37-06 / DASH-02). Each entry maps a level's PVC-side
@@ -69,10 +143,13 @@ func plannerMaterialized(phase string) bool {
 // .tide/planning/<kind>/<name>/.
 //
 // Listing idiom mirrors assembleProjectDepGraph (project_controller.go): the
-// Project's Milestone/Phase/Plan children are namespace-scoped (one Project per
-// namespace), listed with client.InNamespace. Only planner-materialized levels
-// (see plannerMaterialized) are included so the resulting push never stages an
-// envelope that lacks a *.md.
+// Project's Milestone/Phase/Plan/Task children are namespace-scoped (one
+// Project per namespace), listed with client.InNamespace. Only
+// planner-materialized levels (see plannerMaterialized) are included so the
+// resulting push never stages an envelope that lacks a *.md; Tasks use the
+// distinct taskFindingsStageable predicate (verdict-final + evaluation-
+// recorded, Finding 10 / 53-03) so a task-kind entry never stages without a
+// parsed verdict.
 //
 // The Project itself is included when its own planner has completed — proven by
 // any materialized child Milestone (the reporter creates Milestones from the
@@ -121,6 +198,17 @@ func collectStageEnvelopes(ctx context.Context, c client.Client, project *tidepr
 		p := &planList.Items[i]
 		if plannerMaterialized(p.Status.Phase) {
 			entries = append(entries, entry{"plan", p.Name, string(p.UID)})
+		}
+	}
+
+	var taskList tideprojectv1alpha3.TaskList
+	if err := c.List(ctx, &taskList, inNS); err != nil {
+		return nil, fmt.Errorf("list tasks: %w", err)
+	}
+	for i := range taskList.Items {
+		t := &taskList.Items[i]
+		if taskFindingsStageable(t) {
+			entries = append(entries, entry{"task", t.Name, string(t.UID)})
 		}
 	}
 
