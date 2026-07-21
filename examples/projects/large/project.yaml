@@ -105,7 +105,7 @@ spec:
   # acceptance test (haiku/sonnet are for cost-discipline samples like medium;
   # opus is the model the acceptance run deserves).
   subagent:
-    image: ghcr.io/jsquirrelz/tide-claude-subagent:1.0.8
+    image: ghcr.io/jsquirrelz/tide-claude-subagent:1.0.9
     model: claude-opus-4-7
 
   # Phase 3 D-B6 per-project git target. TIDE pushes per-Phase / per-Plan /
