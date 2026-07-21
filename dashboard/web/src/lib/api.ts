@@ -150,7 +150,14 @@ export type PlanTaskCard = {
   dependsOn: string[];
 };
 
-/** Mirrors cmd/dashboard/api/plans.go::planDetail (plan 04-17). */
+/**
+ * Mirrors cmd/dashboard/api/plans.go::planDetail (plan 04-17).
+ *
+ * Plan 53-07: `loopIteration`/`verifyMaxIterations`/`loopDecision` mirror
+ * the additive plan-check loop summary fields (Phase 53 D-07 / OBS-04) —
+ * emitted only once the plan-check loop has actually run (planDetail's
+ * omitempty trio); all three absent renders no "Plan check" line (53-08).
+ */
 export type PlanDetail = {
   name: string;
   namespace: string;
@@ -158,6 +165,9 @@ export type PlanDetail = {
   phaseRef: string;
   tasks: PlanTaskCard[];
   activeDispatchWave: number | null;
+  loopIteration?: number;
+  verifyMaxIterations?: number;
+  loopDecision?: string;
 };
 
 /** Mirrors cmd/dashboard/api/tasks.go::taskCondition (plan 04-17). */
@@ -165,6 +175,17 @@ export type TaskCondition = {
   type: string;
   reason: string;
   age: string;
+};
+
+/**
+ * Mirrors cmd/dashboard/api/tasks.go::taskLoopEvaluation (plan 53-07).
+ * The bounded current-iteration verdict summary — never an iteration-history
+ * array (LOOP-03).
+ */
+export type TaskLoopEvaluation = {
+  decision: string;
+  findingsCount: number;
+  highSeverityCount: number;
 };
 
 /**
@@ -181,6 +202,14 @@ export type TaskCondition = {
  * broken Task->Plan->Phase->Milestone->Project resolution chain degrades
  * both to absent together, since a spanId with no traceId to anchor it is
  * not a usable Phoenix link.
+ *
+ * Plan 53-07: `hasVerification`/`loopIteration`/`verifyMaxIterations`/
+ * `loopExitReason`/`lastEvaluation`/`loopRunId`/`attemptId` mirror the
+ * additive Task loop summary fields (Phase 53 D-07 / OBS-04) byte-for-byte
+ * against the Go json tags. `verifyMaxIterations` reads
+ * Spec.Verification.MaxIterations — a DIFFERENT field/source from
+ * `attemptMax` above (which stays sourced from Caps.Iterations; the
+ * Phase-51 infra-vs-quality firewall holds on the wire).
  */
 export type TaskDetailJSON = {
   name: string;
@@ -199,6 +228,13 @@ export type TaskDetailJSON = {
   conditions: TaskCondition[];
   traceId?: string;
   traceSpanId?: string;
+  hasVerification?: boolean;
+  loopIteration?: number;
+  verifyMaxIterations?: number;
+  loopExitReason?: string;
+  lastEvaluation?: TaskLoopEvaluation;
+  loopRunId?: string;
+  attemptId?: string;
 };
 
 /**

@@ -43,6 +43,12 @@ export type TaskCondition = {
   age: string;
 };
 
+export type TaskLoopEvaluation = {
+  decision: string;
+  findingsCount: number;
+  highSeverityCount: number;
+};
+
 export type TaskDetailData = {
   name: string;
   /** Project name needed for tide approve/reject/cancel/resume commands. */
@@ -63,6 +69,19 @@ export type TaskDetailData = {
   /** Plan 46-05: OBS-04 deep-link identity — absent hides <PhoenixTraceLink>. */
   traceId?: string;
   traceSpanId?: string;
+  /**
+   * Plan 53-07: the Task loop's current-iteration summary (Phase 53 D-07 /
+   * OBS-04) — typed here so lib/tasks.ts's mapper has a target; the
+   * "Verification" drawer section that RENDERS these fields is 53-08's
+   * scope, not this plan's.
+   */
+  hasVerification?: boolean;
+  loopIteration?: number;
+  verifyMaxIterations?: number;
+  loopExitReason?: string;
+  lastEvaluation?: TaskLoopEvaluation;
+  loopRunId?: string;
+  attemptId?: string;
 };
 
 export type TaskDetailDrawerProps = {

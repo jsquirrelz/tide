@@ -120,6 +120,15 @@ function taskDetailJSONToData(t: TaskDetailJSON): TaskDetailData {
     conditions: t.conditions ?? [],
     traceId: t.traceId,
     traceSpanId: t.traceSpanId,
+    // Plan 53-07: thread the Task loop summary fields unchanged — plain
+    // scalars/object, no coercion (only `status` above needs coerceStatus).
+    hasVerification: t.hasVerification,
+    loopIteration: t.loopIteration,
+    verifyMaxIterations: t.verifyMaxIterations,
+    loopExitReason: t.loopExitReason,
+    lastEvaluation: t.lastEvaluation,
+    loopRunId: t.loopRunId,
+    attemptId: t.attemptId,
   };
 }
 
