@@ -1002,6 +1002,12 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 			Message:            "Planner materialized child Tasks; dispatching an independent plan-check verifier before any Task dispatches",
 			LastTransitionTime: metav1.Now(),
 		})
+		// WR-01 (Phase 53): stamp the RESOLVED plan-check MaxIterations at
+		// loop engagement — the dashboard API never receives the chart tier
+		// and must not surface the raw authored Spec value (which is 0 for
+		// project-scope/unset-authored contracts governed by the chart tier
+		// or the floor-to-1 compiled default).
+		plan.Status.LoopStatus.EffectiveMaxIterations = ResolveLoopPolicy(project, plan, nil, "plan", r.Deps.VerifyDefaults).MaxIterations
 	} else {
 		// Clear Running phase so the Phase 2 Wave path takes over on next reconcile.
 		plan.Status.Phase = ""
@@ -2269,6 +2275,10 @@ func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan 
 				Message:            "Child Tasks materialized; dispatching an independent plan-check verifier before any Task dispatches",
 				LastTransitionTime: metav1.Now(),
 			})
+			// WR-01 (Phase 53): same effective-MaxIterations stamp as
+			// handlePlannerJobCompletion's Verifying entry — this is the
+			// structurally reachable engagement seam for the common case.
+			plan.Status.LoopStatus.EffectiveMaxIterations = ResolveLoopPolicy(project, plan, nil, "plan", r.Deps.VerifyDefaults).MaxIterations
 			if err := r.Status().Patch(ctx, plan, patch); err != nil {
 				return ctrl.Result{}, err
 			}

@@ -707,15 +707,18 @@ export default function App() {
             : projectDetail?.plans;
       const nodeRef = refs?.find((r) => r.name === selectedNode.name);
       const gateParked = nodeRef?.phase === "AwaitingApproval";
-      // Plan 53-08 (Contract 3): eligibility is all-three-or-nothing — the
-      // server emits loopIteration/verifyMaxIterations/loopDecision as an
-      // omitempty trio, so any one being undefined means the plan-check
-      // loop hasn't run yet (absence renders nothing, D-08 minimal shape).
+      // Plan 53-08 (Contract 3), WR-01 gate fix: eligibility keys on the
+      // loop having RUN (loopIteration + the resolved verifyMaxIterations
+      // present), NOT on loopDecision — a loop parked without a recorded
+      // verdict (crashed verifier) still mirrors its iteration state, and
+      // the fields are independently omitempty server-side so
+      // all-three-or-nothing silently hid the mirror for common configs.
+      // A never-run loop still omits all fields (absence renders nothing,
+      // D-08 minimal shape).
       const planCheckEligible =
         selectedNode.kind === "plan" &&
         planCheckDetail?.loopIteration !== undefined &&
-        planCheckDetail?.verifyMaxIterations !== undefined &&
-        planCheckDetail?.loopDecision !== undefined;
+        planCheckDetail?.verifyMaxIterations !== undefined;
       nodePanelContent = (
         <>
           {/* Plan 46-05 (OBS-04), UI-SPEC mount 1: first child inside the
@@ -740,15 +743,20 @@ export default function App() {
               </div>
               <div className="mt-0.5" style={{ fontSize: "13px" }}>
                 iteration {planCheckDetail.loopIteration} of{" "}
-                {planCheckDetail.verifyMaxIterations} ·{" "}
-                <span
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    color: VERDICT_COLOR[planCheckDetail.loopDecision as string],
-                  }}
-                >
-                  {planCheckDetail.loopDecision}
-                </span>
+                {planCheckDetail.verifyMaxIterations}
+                {planCheckDetail.loopDecision !== undefined && (
+                  <>
+                    {" · "}
+                    <span
+                      style={{
+                        fontFamily: "var(--font-mono)",
+                        color: VERDICT_COLOR[planCheckDetail.loopDecision],
+                      }}
+                    >
+                      {planCheckDetail.loopDecision}
+                    </span>
+                  </>
+                )}
               </div>
             </div>
           )}

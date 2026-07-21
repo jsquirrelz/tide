@@ -76,7 +76,17 @@ type planDetail struct {
 	// when the plan-check loop has actually run
 	// (Status.LoopStatus.Iteration > 0 || LastEvaluation != nil) — the
 	// UI-SPEC plan-line eligibility rule "absence renders nothing"; a
-	// zero-value LoopStatus (plan-check never ran) omits all three.
+	// zero-value LoopStatus (plan-check never ran) omits all three. Each
+	// field still carries its own omitempty, so a loop that ran without a
+	// recorded verdict (crashed verifier) emits loopIteration/
+	// verifyMaxIterations without loopDecision — the frontend's mirror
+	// eligibility keys on the first two only (WR-01).
+	// VerifyMaxIterations is the EFFECTIVE bound (Status.LoopStatus.
+	// EffectiveMaxIterations, ResolveLoopPolicy's output stamped at
+	// Verifying entry), falling back to the authored Spec value for
+	// pre-Phase-53 objects — never the raw authored 0 of a project-scope/
+	// unset-authored contract governed by the chart tier or the floor-to-1
+	// compiled default.
 	LoopIteration       int32  `json:"loopIteration,omitempty"`
 	VerifyMaxIterations int32  `json:"verifyMaxIterations,omitempty"`
 	LoopDecision        string `json:"loopDecision,omitempty"`
@@ -188,7 +198,13 @@ func (h *PlansHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var loopDecision string
 	if pl.Status.LoopStatus.Iteration > 0 || pl.Status.LoopStatus.LastEvaluation != nil {
 		loopIteration = pl.Status.LoopStatus.Iteration
-		verifyMaxIterations = pl.Spec.Verification.MaxIterations
+		// Effective-over-authored (WR-01): the controller-stamped resolved
+		// bound wins; 0 (pre-Phase-53 object) falls back to the authored
+		// value.
+		verifyMaxIterations = pl.Status.LoopStatus.EffectiveMaxIterations
+		if verifyMaxIterations == 0 {
+			verifyMaxIterations = pl.Spec.Verification.MaxIterations
+		}
 		if le := pl.Status.LoopStatus.LastEvaluation; le != nil {
 			loopDecision = le.Decision
 		}

@@ -584,6 +584,63 @@ func TestTasksHandlerLoopProvenance(t *testing.T) {
 	}
 }
 
+// TestTasksHandlerLoopProvenanceEffectiveMaxIterations covers WR-01 (Phase
+// 53 code review): a Task whose authored maxIterations is unset (0 — the
+// chart tier or compiled floor governs the loop) surfaces the
+// CONTROLLER-STAMPED effective bound from
+// Status.LoopStatus.EffectiveMaxIterations, never the raw authored 0 that
+// rendered "Iteration 2 of 0" in the drawer. The authored value remains the
+// fallback when the stamp is absent (pinned by
+// TestTasksHandlerLoopProvenance above, whose fixture has no stamp).
+func TestTasksHandlerLoopProvenanceEffectiveMaxIterations(t *testing.T) {
+	tk := &tidev1alpha3.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "task-effective",
+			Namespace: "default",
+			UID:       types.UID("task-effective-uid"),
+		},
+		Spec: tidev1alpha3.TaskSpec{
+			PlanRef:             "missing",
+			FilesTouched:        []string{"a.go"},
+			DeclaredOutputPaths: []string{"/workspace/a"},
+			Verification: tidev1alpha3.VerificationSpec{
+				Phase:       "Locked",
+				GateCommand: "make test",
+				// MaxIterations deliberately unset (0): the chart tier supplies
+				// the real bound, which the controller stamped below.
+			},
+		},
+		Status: tidev1alpha3.TaskStatus{
+			Phase:   "Verifying",
+			Attempt: 2,
+			LoopStatus: tidev1alpha3.LoopStatus{
+				Iteration:              2,
+				EffectiveMaxIterations: 3,
+			},
+		},
+	}
+	_, router := newTasksHandler(t, nil, tk)
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/tasks/task-effective")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var body taskDetail
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.VerifyMaxIterations != 3 {
+		t.Errorf("VerifyMaxIterations=%d want 3 (the stamped effective bound, not the authored 0)", body.VerifyMaxIterations)
+	}
+	if body.LoopIteration != 2 {
+		t.Errorf("LoopIteration=%d want 2", body.LoopIteration)
+	}
+}
+
 // TestTasksHandlerLoopProvenanceAbsentWithoutContract covers the omitempty +
 // gating half of D-07: a Task with no verification contract (zero-value
 // Spec.Verification, zero-value Status.LoopStatus) emits none of the new

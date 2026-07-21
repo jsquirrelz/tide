@@ -253,6 +253,15 @@ func driveToPlanVerifying(ctx context.Context, r *PlanReconciler, envReader *map
 	ExpectWithOffset(1, k8sClient.Get(ctx, name, plan)).To(Succeed())
 	ExpectWithOffset(1, plan.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseVerifying),
 		"a Locked-contract Plan must enter Verifying after child materialization (D-03)")
+	// WR-01: the Verifying entry stamps ResolveLoopPolicy's resolved bound.
+	// The fixture's VerifyDefaults carries no plan MaxIterations, so the
+	// effective value is the authored one, floored to 1 when unset.
+	wantEffective := plan.Spec.Verification.MaxIterations
+	if wantEffective == 0 {
+		wantEffective = 1
+	}
+	ExpectWithOffset(1, plan.Status.LoopStatus.EffectiveMaxIterations).To(Equal(wantEffective),
+		"WR-01: the plan Verifying entry must stamp the resolved MaxIterations into LoopStatus for read-only consumers")
 
 	// Third reconcile: Reconcile()'s own Verifying routing dispatches the
 	// plan-check verifier Job via checkPlanVerifyingState.

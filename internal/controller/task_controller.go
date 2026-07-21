@@ -1653,6 +1653,13 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 		// by itself reproduce the dispatched contract — a best-effort temporal
 		// anchor, not a literal git-show reproduction guarantee.
 		task.Status.LockedSHA = project.Status.Git.LastPushedSHA
+		// WR-01 (Phase 53): stamp the RESOLVED MaxIterations at loop
+		// engagement so read-only consumers (the dashboard API, which never
+		// receives the chart tier) surface the bound that actually governs
+		// the loop, not the raw authored Spec value. Re-stamped on every
+		// Verifying entry (each repair attempt re-enters here), so a chart
+		// re-config mid-loop refreshes it.
+		task.Status.LoopStatus.EffectiveMaxIterations = ResolveLoopPolicy(project, nil, task, "task", r.Deps.VerifyDefaults).MaxIterations
 		// BL-01/LO-02: persist the executor's bounded changed-file manifest so
 		// the repairOrHalt anti-gaming belt-and-suspenders (TASK-06) and the
 		// repair evidence packet (stageEvidencePacket, TASK-02) can read it

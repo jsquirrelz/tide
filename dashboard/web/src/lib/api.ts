@@ -155,8 +155,11 @@ export type PlanTaskCard = {
  *
  * Plan 53-07: `loopIteration`/`verifyMaxIterations`/`loopDecision` mirror
  * the additive plan-check loop summary fields (Phase 53 D-07 / OBS-04) —
- * emitted only once the plan-check loop has actually run (planDetail's
- * omitempty trio); all three absent renders no "Plan check" line (53-08).
+ * emitted only once the plan-check loop has actually run; a loop without a
+ * recorded verdict emits the first two without `loopDecision` (each field
+ * is independently omitempty — WR-01). `verifyMaxIterations` is the
+ * EFFECTIVE resolved bound (see TaskDetailJSON note). All absent renders
+ * no "Plan check" line (53-08).
  */
 export type PlanDetail = {
   name: string;
@@ -206,8 +209,10 @@ export type TaskLoopEvaluation = {
  * Plan 53-07: `hasVerification`/`loopIteration`/`verifyMaxIterations`/
  * `loopExitReason`/`lastEvaluation`/`loopRunId`/`attemptId` mirror the
  * additive Task loop summary fields (Phase 53 D-07 / OBS-04) byte-for-byte
- * against the Go json tags. `verifyMaxIterations` reads
- * Spec.Verification.MaxIterations — a DIFFERENT field/source from
+ * against the Go json tags. `verifyMaxIterations` carries the EFFECTIVE
+ * bound governing the loop (controller-stamped
+ * Status.LoopStatus.effectiveMaxIterations, falling back to the authored
+ * Spec value pre-engagement — WR-01) — a DIFFERENT field/source from
  * `attemptMax` above (which stays sourced from Caps.Iterations; the
  * Phase-51 infra-vs-quality firewall holds on the wire).
  */

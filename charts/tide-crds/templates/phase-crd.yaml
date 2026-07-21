@@ -216,6 +216,20 @@ spec:
                     format: int64
                     minimum: 0
                     type: integer
+                  effectiveMaxIterations:
+                    description: |-
+                      EffectiveMaxIterations is the RESOLVED MaxIterations governing this
+                      loop — ResolveLoopPolicy's output (authored > chart tier > compiled
+                      default/floor), stamped by the controller at every Verifying entry so
+                      read-only consumers (the dashboard API, which never receives the chart
+                      tier) can surface the bound that actually governs the loop instead of
+                      the raw authored Spec value (Phase 53 WR-01). A bounded scalar of the
+                      CURRENT loop's parameterization — never history (LOOP-03-compatible).
+                      0 means "not yet stamped" (loop never engaged, or a pre-Phase-53
+                      object); consumers fall back to the authored Spec value.
+                    format: int32
+                    minimum: 0
+                    type: integer
                   exitReason:
                     description: |-
                       ExitReason records the bounded exit/escalation outcome once the loop

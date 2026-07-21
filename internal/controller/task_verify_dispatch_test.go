@@ -382,6 +382,8 @@ var _ = Describe("Task loop: verifier dispatch (Phase 51 Plan 06, VerifierDispat
 		Expect(task.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseVerifying),
 			"a contract-bearing Task must transition to Verifying, never Succeeded, on executor exit-0 (EXEC-04)")
 		Expect(task.Status.LockedSHA).To(Equal(wantLockedSHA))
+		Expect(task.Status.LoopStatus.EffectiveMaxIterations).To(Equal(int32(3)),
+			"WR-01: the Verifying entry must stamp ResolveLoopPolicy's resolved MaxIterations into LoopStatus so read-only consumers surface the effective bound")
 
 		verifierJobName := podjob.VerifierJobName("task", string(task.UID), attempt)
 		var verifierJob batchv1.Job

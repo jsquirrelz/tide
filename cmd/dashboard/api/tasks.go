@@ -102,13 +102,19 @@ type taskDetail struct {
 	//
 	// HasVerification mirrors hasVerificationContract's semantics
 	// (GateCommand set AND Phase=="Locked") — the drawer's Verification
-	// section only renders when true. VerifyMaxIterations reads
-	// Spec.Verification.MaxIterations — a DIFFERENT field from AttemptMax
-	// above (which stays sourced from Caps.Iterations; the Phase-51
-	// infra-vs-quality firewall holds on the wire). LoopRunID/AttemptID are
-	// re-derived by the controller's exact task_controller.go:2088-2089
-	// formula, never persisted, and only emitted when HasVerification is
-	// true (they anchor the Verification section, not the Attempt row).
+	// section only renders when true. VerifyMaxIterations carries the
+	// EFFECTIVE bound governing the loop: Status.LoopStatus.
+	// EffectiveMaxIterations (ResolveLoopPolicy's output, stamped by the
+	// controller at Verifying entry — WR-01: this process never receives the
+	// chart tier and must not emit the raw authored value), falling back to
+	// the authored Spec.Verification.MaxIterations for pre-engagement /
+	// pre-Phase-53 objects. Either way it is a DIFFERENT field from
+	// AttemptMax above (which stays sourced from Caps.Iterations; the
+	// Phase-51 infra-vs-quality firewall holds on the wire).
+	// LoopRunID/AttemptID are re-derived by the controller's exact
+	// task_controller.go:2088-2089 formula, never persisted, and only
+	// emitted when HasVerification is true (they anchor the Verification
+	// section, not the Attempt row).
 	HasVerification     bool                `json:"hasVerification,omitempty"`
 	LoopIteration       int32               `json:"loopIteration,omitempty"`
 	VerifyMaxIterations int32               `json:"verifyMaxIterations,omitempty"`
@@ -223,6 +229,14 @@ func (h *TasksHandler) Get(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Effective-over-authored (WR-01): once the loop engaged, the
+	// controller-stamped resolved bound wins; 0 (never engaged, or a
+	// pre-Phase-53 object) falls back to the authored value.
+	verifyMaxIterations := tk.Status.LoopStatus.EffectiveMaxIterations
+	if verifyMaxIterations == 0 {
+		verifyMaxIterations = tk.Spec.Verification.MaxIterations
+	}
+
 	writeJSON(w, http.StatusOK, taskDetail{
 		Name:                tk.Name,
 		ProjectName:         projectName,
@@ -242,7 +256,7 @@ func (h *TasksHandler) Get(w http.ResponseWriter, r *http.Request) {
 		TraceSpanID:         traceSpanID,
 		HasVerification:     hasVerification,
 		LoopIteration:       tk.Status.LoopStatus.Iteration,
-		VerifyMaxIterations: tk.Spec.Verification.MaxIterations,
+		VerifyMaxIterations: verifyMaxIterations,
 		LoopExitReason:      string(tk.Status.LoopStatus.ExitReason),
 		LastEvaluation:      lastEvaluation,
 		LoopRunID:           loopRunID,

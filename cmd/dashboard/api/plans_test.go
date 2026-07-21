@@ -306,6 +306,59 @@ func TestPlansHandlerLoopSummaryPresent(t *testing.T) {
 	}
 }
 
+// TestPlansHandlerLoopSummaryEffectiveMaxIterations covers WR-01 (Phase 53
+// code review): a Plan whose plan-check contract comes from the
+// project-scope authored default (pl.Spec.Verification zero) or leaves
+// maxIterations unset surfaces the CONTROLLER-STAMPED effective bound
+// (Status.LoopStatus.EffectiveMaxIterations — ResolveLoopPolicy's output,
+// which this process cannot re-derive because it never receives the chart
+// tier), and the trio no longer requires a recorded verdict: a loop that
+// ran without one (crashed verifier) still emits loopIteration +
+// verifyMaxIterations, omitting only loopDecision.
+func TestPlansHandlerLoopSummaryEffectiveMaxIterations(t *testing.T) {
+	plan := newPlanCRD("p-effective", "default", "ph-1", "Running")
+	// Authored spec left entirely zero (project-scope contract) — the raw
+	// Spec.Verification.MaxIterations is 0.
+	plan.Status.LoopStatus = tidev1alpha3.LoopStatus{
+		Iteration:              1,
+		EffectiveMaxIterations: 2,
+	}
+
+	_, router := newPlansHandler(t, plan)
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/plans/p-effective")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	rawBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	var body planDetail
+	if err := json.Unmarshal(rawBody, &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.LoopIteration != 1 {
+		t.Errorf("LoopIteration=%d want 1", body.LoopIteration)
+	}
+	if body.VerifyMaxIterations != 2 {
+		t.Errorf("VerifyMaxIterations=%d want 2 (the stamped effective bound, not the authored 0)", body.VerifyMaxIterations)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(rawBody, &m); err != nil {
+		t.Fatalf("decode raw: %v", err)
+	}
+	if _, present := m["loopDecision"]; present {
+		t.Errorf("loopDecision present, want omitted when no verdict was recorded: %s", rawBody)
+	}
+	if _, present := m["verifyMaxIterations"]; !present {
+		t.Errorf("verifyMaxIterations absent — the mirror's eligibility keys on it (WR-01): %s", rawBody)
+	}
+}
+
 // TestPlansHandlerLoopSummaryAbsentWhenNeverRun covers the eligibility rule:
 // a Plan with a zero-value LoopStatus (plan-check never ran) omits all three
 // loop-summary keys from the JSON body.

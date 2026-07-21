@@ -70,8 +70,9 @@ func fullyPopulatedLoopStatus() tidev1alpha3.LoopStatus {
 	// in-memory Location differs otherwise).
 	completedAt := metav1.NewTime(time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC).Local())
 	return tidev1alpha3.LoopStatus{
-		Iteration:   2,
-		ParentRunID: "run-abc123",
+		Iteration:              2,
+		EffectiveMaxIterations: 3,
+		ParentRunID:            "run-abc123",
 		LastEvaluation: &tidev1alpha3.EvaluationSummary{
 			Decision:          "REPAIRABLE",
 			FindingsCount:     4,
@@ -147,12 +148,13 @@ func TestLoopStatus_JSONRoundTrip(t *testing.T) {
 // compile with "unknown field" — intentional.
 func TestLoopStatus_NoForbiddenFields(t *testing.T) {
 	_ = tidev1alpha3.LoopStatus{
-		Iteration:      0,
-		ParentRunID:    "",
-		LastEvaluation: nil,
-		ExitReason:     "",
-		CostCents:      0,
-		Conditions:     nil,
+		Iteration:              0,
+		EffectiveMaxIterations: 0,
+		ParentRunID:            "",
+		LastEvaluation:         nil,
+		ExitReason:             "",
+		CostCents:              0,
+		Conditions:             nil,
 	}
 
 	// Runtime assertion: marshalled JSON must not contain a history-shaped key.

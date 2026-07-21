@@ -130,6 +130,29 @@ describe("TaskDetailDrawer — Verification section eligibility + firewall (53-U
     expect(screen.queryByTestId("drawer-verification")).not.toBeInTheDocument();
   });
 
+  it("renders an em-dash denominator (never 'of 0') when the effective bound is unknown", () => {
+    // WR-01: pre-engagement (or a pre-Phase-53 object) the server has no
+    // stamped effective bound and omits verifyMaxIterations — the drawer
+    // must render "1 of —", never the wrong "1 of 0".
+    const task: TaskDetailData = {
+      ...BASE_TASK,
+      hasVerification: true,
+      loopIteration: 1,
+      lastEvaluation: { decision: "REPAIRABLE", findingsCount: 1, highSeverityCount: 0 },
+    };
+    renderWithToast(
+      <TaskDetailDrawer
+        taskName="t1"
+        task={task}
+        onClose={() => undefined}
+        onOpenLogStream={() => undefined}
+      />,
+    );
+    const verification = screen.getByTestId("drawer-verification");
+    expect(verification.textContent).toMatch(/1 of —/);
+    expect(verification.textContent).not.toMatch(/1 of 0/);
+  });
+
   it("(c) renders 'No verdict yet' when lastEvaluation is absent", () => {
     const task: TaskDetailData = {
       ...BASE_TASK,

@@ -433,7 +433,7 @@ export default function TaskDetailDrawer({
             >
               <MetaRow
                 label="Iteration"
-                value={`${task.loopIteration ?? 0} of ${task.verifyMaxIterations ?? 0}`}
+                value={`${task.loopIteration ?? 0} of ${task.verifyMaxIterations || "—"}`}
               />
               <MetaRow
                 label="Verdict"

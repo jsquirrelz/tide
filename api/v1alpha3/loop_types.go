@@ -104,6 +104,19 @@ type LoopStatus struct {
 	// +optional
 	Iteration int32 `json:"iteration,omitempty"`
 
+	// EffectiveMaxIterations is the RESOLVED MaxIterations governing this
+	// loop — ResolveLoopPolicy's output (authored > chart tier > compiled
+	// default/floor), stamped by the controller at every Verifying entry so
+	// read-only consumers (the dashboard API, which never receives the chart
+	// tier) can surface the bound that actually governs the loop instead of
+	// the raw authored Spec value (Phase 53 WR-01). A bounded scalar of the
+	// CURRENT loop's parameterization — never history (LOOP-03-compatible).
+	// 0 means "not yet stamped" (loop never engaged, or a pre-Phase-53
+	// object); consumers fall back to the authored Spec value.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	EffectiveMaxIterations int32 `json:"effectiveMaxIterations,omitempty"`
+
 	// ParentRunID identifies the run that produced the mutable candidate
 	// this LoopStatus is evaluating, correlating LoopStatus back to the
 	// trace/artifact history where iteration-by-iteration detail lives
