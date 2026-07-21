@@ -31,7 +31,7 @@ package anthropic
 //   - claude-opus-4-8:  $5/M input,  $25/M output
 //   - claude-opus-4-7:  $5/M input,  $25/M output
 //   - claude-opus-4-6:  $5/M input,  $25/M output
-//   - claude-sonnet-5:  $3/M input,  $15/M output (sticker; intro $2/$10 through 2026-08-31)
+//   - claude-sonnet-5:  $2/M input,  $10/M output (intro rate through 2026-08-31 — see row comment)
 //   - claude-sonnet-4-6: $3/M input, $15/M output
 //   - claude-haiku-4-5:  $1/M input,  $5/M output
 //
@@ -121,15 +121,18 @@ var priceTable = map[string]modelPrice{
 
 	// Claude Sonnet 5 — the missing row behind the 2026-07-03 first-run 2.8×
 	// overcount ($10.86 TIDE tally vs $3.84 console actual — COST-01).
-	// Sticker rates $3/M input, $15/M output (claude-api skill model table,
-	// verified 2026-07-04). Intro pricing $2/M-in, $10/M-out runs through
-	// 2026-08-31; the sticker rate is compiled deliberately — it never
-	// under-counts and stays correct past the intro window (RESEARCH Pitfall 1).
+	// Intro rates $2/M input, $10/M output (live pricing page, verified
+	// 2026-07-21), billed through 2026-08-31. Adopted over the sticker
+	// $3/$15 deliberately (operator decision 2026-07-21, v1.0.9 release):
+	// TIDE's tally must match console actuals — COST-01's whole point — and
+	// the weekly hack/check-pricing-drift.sh automation re-reddens the gate
+	// the moment the live page flips back to sticker, so the post-intro
+	// bump-back is structurally caught, not remembered.
 	"claude-sonnet-5": {
-		inputCentsPerMTok:      300,
-		outputCentsPerMTok:     1500,
-		cacheReadCentsPerMTok:  30,
-		cacheWriteCentsPerMTok: 300 * cacheWriteMultNum / cacheWriteMultDen, // 375 (D-08)
+		inputCentsPerMTok:      200,
+		outputCentsPerMTok:     1000,
+		cacheReadCentsPerMTok:  20,
+		cacheWriteCentsPerMTok: 250, // input × 125/100 (D-08)
 	},
 
 	// Chart per-level defaults for phase, plan, and top-level fallback.

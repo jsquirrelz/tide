@@ -24,7 +24,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PRICING_URL="https://platform.claude.com/docs/en/pricing.md"
+PRICING_URL="https://platform.claude.com/docs/en/about-claude/pricing.md"
 PRICING_TMP="$(mktemp /tmp/anthropic-pricing-XXXXXX)"
 # BSD/macOS mktemp only randomizes TRAILING X's — a suffix after the X's makes
 # the path literal and predictable, and a second run after an interrupted one
@@ -217,6 +217,11 @@ LIVE_MODELS=$(grep -E '^\|' "${PRICING_TMP}" | grep '\$' | grep -viE 'deprecated
 while IFS= read -r LIVE_MODEL; do
     # Only check models that look like real versioned model IDs (must contain a digit).
     if ! printf '%s' "${LIVE_MODEL}" | grep -qE '[0-9]'; then
+        continue
+    fi
+    # Skip page presentation rows — "claude-<model>-introductory-pricing" is a
+    # slugified section label on the live page, not a billable model ID.
+    if printf '%s' "${LIVE_MODEL}" | grep -qE -- '-introductory-pricing$'; then
         continue
     fi
     # Skip if already in compiled models.

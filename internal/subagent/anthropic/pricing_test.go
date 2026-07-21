@@ -313,19 +313,20 @@ func TestCacheSavingsCents(t *testing.T) {
 		// D-01: cacheSavingsCents resolves through the same lookupPrice
 		// normalizer as estimatedCostCents — a dated sonnet-5 ID uses the
 		// sonnet-5 rates, not the conservative tier.
-		// sonnet-5: input=300, cacheRead=30 → savings = 1M × (300 − 30) / 1M = 270.
+		// sonnet-5: input=200, cacheRead=20 → savings = 1M × (200 − 20) / 1M = 180.
 		u := pkgdispatch.Usage{CacheReadTokens: 1_000_000}
 		got := a.cacheSavingsCents("claude-sonnet-5-20260514", u)
-		if got != 270 {
-			t.Errorf("dated sonnet-5 cacheRead=1M: want 270 cents (sonnet-5 rates via normalizer), got %d", got)
+		if got != 180 {
+			t.Errorf("dated sonnet-5 cacheRead=1M: want 180 cents (sonnet-5 rates via normalizer), got %d", got)
 		}
 	})
 }
 
 // TestEstimatedCostCents_Sonnet5Row pins the claude-sonnet-5 price row
 // (COST-01): the missing row behind the 2026-07-03 first-run 2.8× overcount.
-// Sticker rates: input=300, output=1500, cacheRead=30 cents/MTok;
-// cacheWrite=375 (input × 125/100, the D-08 probe-verified multiplier).
+// Intro rates (through 2026-08-31, adopted 2026-07-21): input=200,
+// output=1000, cacheRead=20 cents/MTok; cacheWrite=250 (input × 125/100,
+// the D-08 probe-verified multiplier).
 func TestEstimatedCostCents_Sonnet5Row(t *testing.T) {
 	a := New(Options{})
 
@@ -334,10 +335,10 @@ func TestEstimatedCostCents_Sonnet5Row(t *testing.T) {
 		u    pkgdispatch.Usage
 		want int64
 	}{
-		{"input", pkgdispatch.Usage{InputTokens: 1_000_000}, 300},
-		{"output", pkgdispatch.Usage{OutputTokens: 1_000_000}, 1500},
-		{"cache_read", pkgdispatch.Usage{CacheReadTokens: 1_000_000}, 30},
-		{"cache_write", pkgdispatch.Usage{CacheCreationTokens: 1_000_000}, 375},
+		{"input", pkgdispatch.Usage{InputTokens: 1_000_000}, 200},
+		{"output", pkgdispatch.Usage{OutputTokens: 1_000_000}, 1000},
+		{"cache_read", pkgdispatch.Usage{CacheReadTokens: 1_000_000}, 20},
+		{"cache_write", pkgdispatch.Usage{CacheCreationTokens: 1_000_000}, 250},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

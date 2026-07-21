@@ -156,19 +156,22 @@ func TestRunMixRegression_FirstRun20260703(t *testing.T) {
 		totalCents += a.estimatedCostCents(d.Model, d.Usage)
 	}
 
-	// (a) Pinned exact tally. Derivation: 128 + 86 + 51 (sonnet-5 planners at
-	// sticker 300/1500/30/375) + 133 (fable-5 planner) + 3×25 (haiku-4-5
-	// tasks) = 473¢. Re-derive this literal if the fixture ever gains real
-	// dispatches or a table rate legitimately changes.
-	const pinnedCents = int64(473)
+	// (a) Pinned exact tally. Re-derived 2026-07-21 (v1.0.9 release) when the
+	// sonnet-5 row moved from sticker (300/1500/30/375) to the intro rates
+	// the console actually bills (200/1000/20/250, through 2026-08-31): the
+	// replay now lands on 384¢ — EXACTLY the $3.84 console actual from the
+	// 2026-07-03 run, closing COST-01's tally-vs-console gap to zero for this
+	// mix. Re-derive this literal only for an intentional rate change (the
+	// post-intro sticker bump-back will require 473 again).
+	const pinnedCents = int64(384)
 	if totalCents != pinnedCents {
 		t.Errorf("run-mix tally drifted: got %d cents, pinned %d — price table or normalizer changed; re-derive the pin only for an intentional rate change", totalCents, pinnedCents)
 	}
 
-	// (b) Pitfall-1 tolerance: sticker-rate replay must stay under 1.6× the
-	// console's intro-priced 384¢ actual.
+	// (b) Pitfall-1 tolerance: the replay must stay under 1.6× the console's
+	// intro-priced 384¢ actual (guards a future sticker/conservative drift).
 	if totalCents >= 615 {
-		t.Errorf("run-mix tally %d cents >= 615 (1.6 × the $3.84 console actual) — sticker rates should exceed the intro-priced bill only within tolerance", totalCents)
+		t.Errorf("run-mix tally %d cents >= 615 (1.6 × the $3.84 console actual) — table rates should exceed the intro-priced bill only within tolerance", totalCents)
 	}
 
 	// (c) The headline regression: the old conservative-fallback tally was
