@@ -70,6 +70,16 @@ type planDetail struct {
 	PhaseRef           string         `json:"phaseRef"`
 	Tasks              []planTaskCard `json:"tasks"`
 	ActiveDispatchWave *int           `json:"activeDispatchWave"`
+
+	// LoopIteration/VerifyMaxIterations/LoopDecision (Phase 53 D-07 / OBS-04)
+	// project the plan-check loop's current-iteration summary. Emitted only
+	// when the plan-check loop has actually run
+	// (Status.LoopStatus.Iteration > 0 || LastEvaluation != nil) — the
+	// UI-SPEC plan-line eligibility rule "absence renders nothing"; a
+	// zero-value LoopStatus (plan-check never ran) omits all three.
+	LoopIteration       int32  `json:"loopIteration,omitempty"`
+	VerifyMaxIterations int32  `json:"verifyMaxIterations,omitempty"`
+	LoopDecision        string `json:"loopDecision,omitempty"`
 }
 
 // Get implements GET /api/v1/plans/{name}[?namespace=foo]. Returns the Plan
@@ -170,12 +180,29 @@ func (h *PlansHandler) Get(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Plan-check loop summary (D-07): emit only once the loop has actually
+	// run — a zero-value LoopStatus (plan-check never ran) omits all three
+	// fields via omitempty, matching the eligibility rule.
+	var loopIteration int32
+	var verifyMaxIterations int32
+	var loopDecision string
+	if pl.Status.LoopStatus.Iteration > 0 || pl.Status.LoopStatus.LastEvaluation != nil {
+		loopIteration = pl.Status.LoopStatus.Iteration
+		verifyMaxIterations = pl.Spec.Verification.MaxIterations
+		if le := pl.Status.LoopStatus.LastEvaluation; le != nil {
+			loopDecision = le.Decision
+		}
+	}
+
 	writeJSON(w, http.StatusOK, planDetail{
-		Name:               pl.Name,
-		Namespace:          pl.Namespace,
-		Phase:              pl.Status.Phase,
-		PhaseRef:           pl.Spec.PhaseRef,
-		Tasks:              cards,
-		ActiveDispatchWave: activeDispatchWave,
+		Name:                pl.Name,
+		Namespace:           pl.Namespace,
+		Phase:               pl.Status.Phase,
+		PhaseRef:            pl.Spec.PhaseRef,
+		Tasks:               cards,
+		ActiveDispatchWave:  activeDispatchWave,
+		LoopIteration:       loopIteration,
+		VerifyMaxIterations: verifyMaxIterations,
+		LoopDecision:        loopDecision,
 	})
 }

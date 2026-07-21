@@ -618,6 +618,69 @@ func TestBlockingConditionsBothWhitelistedTypes(t *testing.T) {
 	assertBlockingConditions(t, list[0], 2)
 }
 
+// TestBlockingConditionsTrueVerifyHalt covers Phase 53 D-09: a Project with
+// a True VerifyHalt condition exposes it under blockingConditions with the
+// message verbatim (the entire D-09 server half — the whitelist admits
+// ConditionVerifyHalt alongside BudgetBlocked/BillingHalt).
+func TestBlockingConditionsTrueVerifyHalt(t *testing.T) {
+	msg := "verify loop exhausted maxIterations without an APPROVED evaluation"
+	p := newProject("alpha", "default", "Running")
+	p.Status.Conditions = []metav1.Condition{
+		{
+			Type:               "VerifyHalt",
+			Status:             metav1.ConditionTrue,
+			Reason:             "VerifyExhausted",
+			Message:            msg,
+			LastTransitionTime: metav1.Now(),
+		},
+	}
+	_, router := newHandler(t, p)
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/projects")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	var list []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	bc := assertBlockingConditions(t, list[0], 1)
+	assertConditionEntry(t, bc[0], "VerifyHalt", "VerifyExhausted", msg)
+}
+
+// TestBlockingConditionsFalseVerifyHaltExcluded covers the Status==True
+// filter preserved for the new whitelist entry: a Status=False VerifyHalt
+// condition is excluded.
+func TestBlockingConditionsFalseVerifyHaltExcluded(t *testing.T) {
+	p := newProject("alpha", "default", "Running")
+	p.Status.Conditions = []metav1.Condition{
+		{
+			Type:               "VerifyHalt",
+			Status:             metav1.ConditionFalse,
+			Reason:             "VerifyRecovered",
+			Message:            "verify loop resumed",
+			LastTransitionTime: metav1.Now(),
+		},
+	}
+	_, router := newHandler(t, p)
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/projects")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	var list []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	assertBlockingConditions(t, list[0], 0)
+}
+
 // assertBlockingConditions verifies the blockingConditions field is present,
 // is an array (never null), and has the expected length. Returns the entries.
 func assertBlockingConditions(t *testing.T, proj map[string]any, wantLen int) []map[string]any {

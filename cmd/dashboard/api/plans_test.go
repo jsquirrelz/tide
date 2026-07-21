@@ -12,6 +12,7 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -258,5 +259,79 @@ func TestPlansHandlerPhaseDefaultsPending(t *testing.T) {
 	}
 	if len(body.Tasks) != 1 || body.Tasks[0].Phase != "Pending" {
 		t.Errorf("tasks[0].Phase=%q want Pending", body.Tasks[0].Phase)
+	}
+}
+
+// TestPlansHandlerLoopSummaryPresent covers Phase 53 D-07/OBS-04: a Plan
+// whose plan-check loop has run (LoopStatus.Iteration=1 + a LastEvaluation)
+// surfaces loopIteration/verifyMaxIterations/loopDecision on planDetail.
+func TestPlansHandlerLoopSummaryPresent(t *testing.T) {
+	plan := newPlanCRD("p-loop", "default", "ph-1", "Running")
+	plan.Spec.Verification = tidev1alpha3.VerificationSpec{
+		Phase:         "Locked",
+		GateCommand:   "make plan-check",
+		MaxIterations: 1,
+	}
+	plan.Status.LoopStatus = tidev1alpha3.LoopStatus{
+		Iteration: 1,
+		LastEvaluation: &tidev1alpha3.EvaluationSummary{
+			Decision: "APPROVED",
+		},
+	}
+
+	_, router := newPlansHandler(t, plan)
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/plans/p-loop")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d want 200", resp.StatusCode)
+	}
+	var body planDetail
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.LoopIteration != 1 {
+		t.Errorf("LoopIteration=%d want 1", body.LoopIteration)
+	}
+	if body.VerifyMaxIterations != 1 {
+		t.Errorf("VerifyMaxIterations=%d want 1", body.VerifyMaxIterations)
+	}
+	if body.LoopDecision != "APPROVED" {
+		t.Errorf("LoopDecision=%q want APPROVED", body.LoopDecision)
+	}
+}
+
+// TestPlansHandlerLoopSummaryAbsentWhenNeverRun covers the eligibility rule:
+// a Plan with a zero-value LoopStatus (plan-check never ran) omits all three
+// loop-summary keys from the JSON body.
+func TestPlansHandlerLoopSummaryAbsentWhenNeverRun(t *testing.T) {
+	plan := newPlanCRD("p-noloop", "default", "ph-1", "Running")
+
+	_, router := newPlansHandler(t, plan)
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/plans/p-noloop")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, key := range []string{"loopIteration", "verifyMaxIterations", "loopDecision"} {
+		if _, present := m[key]; present {
+			t.Errorf("key %q present in body, want absent (plan-check never ran): %s", key, body)
+		}
 	}
 }
