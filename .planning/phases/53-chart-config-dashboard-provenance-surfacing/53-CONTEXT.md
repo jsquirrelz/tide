@@ -111,6 +111,17 @@ Q6 for the precedence/posture reasoning, not its literal YAML.
   Dedicated verifier-model default replaces the "borrow the task executor
   model" fallback only when the chart/env supplies one; absent config keeps
   today's behavior.
+  **Scope amendment (2026-07-21, planning):** research verified
+  `VerificationSpec.Evaluator` has always been write-only — no image/model
+  registry exists for it anywhere. This phase ships the two REAL tiers
+  (chart default > compiled default) and documents the authored-`Evaluator`
+  slot as reserved. Rationale beyond "it doesn't exist yet": honoring a raw
+  LLM-planner-authored string as a dispatch image ref is a supply-chain
+  surface that needs an allowlist/registry design of its own — bolting it on
+  mid-phase would be the wrong shape. The reserved tier is recorded in
+  `<deferred>`; plan 53-06 documents the slot at the resolver. **Operator
+  veto point:** if 3 literal tiers are required now, re-plan 53-06 with
+  research Finding 6 option (b) plus an image allowlist.
 
 ### Default posture semantics (CFG-02) (auto-resolved)
 
@@ -468,6 +479,10 @@ Q6 for the precedence/posture reasoning, not its literal YAML.
   on `Project.Spec.Verification.<level>` overriding an authored contract)
   — the chart + authored-contract precedence covers v1.0.9; add only when
   a real operator needs per-CR opt-out.
+- **Authored-`Evaluator` image/model resolution tier** (D-02's first tier)
+  — deferred per the D-02 scope amendment: needs an evaluator
+  allowlist/registry design before an LLM-authored string may pick a
+  dispatch image. The resolver documents the reserved slot.
 
 ### Reviewed Todos (not folded)
 The `--auto` ≥0.4 auto-fold default was overridden by the scope guardrail —

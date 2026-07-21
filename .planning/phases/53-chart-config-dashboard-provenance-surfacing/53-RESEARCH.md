@@ -494,14 +494,20 @@ Not applicable in the traditional "ecosystem moved on" sense — this phase exte
 
 **If this table is empty:** N/A — all four entries above are genuine implementation-shape assumptions flagged for planner attention; none are speculative facts about the codebase (every fact cited elsewhere in this document was verified via direct file read or a working command).
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Should the D-06 kind sticky-posture test run as part of the shared `test/integration/kind` suite, or as a separate isolated test binary/target?**
+> Both questions were settled at planning time (2026-07-21): Q1 → plan 53-09 runs the
+> sticky-posture spec as an isolated-release kind spec with the marker-deletion
+> fallback pre-authorized; Q2 → plans 53-05/53-06 keep verify-tier config
+> manager-internal only (no new env stamped onto verifier Job pods), per this
+> section's own recommendation.
+
+1. **(RESOLVED — plan 53-09) Should the D-06 kind sticky-posture test run as part of the shared `test/integration/kind` suite, or as a separate isolated test binary/target?**
    - What we know: the shared suite's `BeforeSuite` does one `helm upgrade --install` reused by 14+ specs (Finding 7, 9); a second `helm upgrade` mid-suite risks destabilizing concurrently-relevant specs.
    - What's unclear: whether the repo's CI/Makefile conventions favor adding a new `make test-int-kind-X` target vs. folding into the existing `Label("kind")` set.
    - Recommendation: default to the marker-ConfigMap-deletion trick (Finding 7) run as the LAST spec in the existing suite (minimizes new harness surface, avoids a second full kind cluster spin-up) unless the planner determines the destabilization risk is too high, in which case an isolated `Describe` with its own release name is the fallback.
 
-2. **Does `VerifyDefaults`/the per-level JSON config need to reach the dispatched subagent/verifier Job containers at all, or is it purely manager-internal defaulting?**
+2. **(RESOLVED — plans 53-05/53-06) Does `VerifyDefaults`/the per-level JSON config need to reach the dispatched subagent/verifier Job containers at all, or is it purely manager-internal defaulting?**
    - What we know: `TIDE_PRICING_OVERRIDES_JSON` is forwarded to DOWNSTREAM Job containers because the subagent process itself needs to read pricing at runtime; the verify-tier per-level defaults (`enabled`, `maxIterations`, `onExhaustion`) are consumed entirely by the MANAGER's resolvers (`ResolveLoopPolicy`) before a Job is ever built — the verifier Job itself doesn't need to know its own `maxIterations`.
    - What's unclear: whether any part of the verify-tier config needs to reach the verifier subprocess (Python/LangGraph) directly, vs. being fully resolved server-side into the `VerifyContext` envelope fields that already exist.
    - Recommendation: default to manager-internal-only (no new env var stamped onto verifier Job pods) unless a specific consuming need is identified during planning — this keeps the transport asymmetric from `TIDE_PRICING_OVERRIDES_JSON` (Finding 8 already flags this asymmetry) but consistent with what the data is actually for.
