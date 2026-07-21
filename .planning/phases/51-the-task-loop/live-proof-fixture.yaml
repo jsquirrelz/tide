@@ -33,7 +33,10 @@ spec:
   schemaRevision: v1alpha3
   targetRepo: https://github.com/example/tide-verify-proof.git
   providerSecretRef: tide-provider-secret
-  budget: {absoluteCapCents: 100000}
+  # Tight safety ceiling ($5) — a hard backstop against a runaway loop on the
+  # REAL key, NOT a target. (Was 100000 = $1,000, an inappropriate safety rail
+  # for a real-key fixture; a targeted proof costs a few cents.)
+  budget: {absoluteCapCents: 500}
   # Model must be REAL (not "stub"): buildVerifierEnvelopeIn inherits the
   # task-level model (task_controller.go ResolveProvider(project,"task")), and
   # the verifier makes a real Anthropic call with it — "stub" 404s upstream.

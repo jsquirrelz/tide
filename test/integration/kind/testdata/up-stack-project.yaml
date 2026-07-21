@@ -53,7 +53,7 @@ spec:
   targetRepo: "https://github.com/example/up-stack.git"
   providerSecretRef: "tide-provider-secret"
   budget:
-    absoluteCapCents: 100000
+    absoluteCapCents: 5000  # $50 — generous stub-test headroom; stub spends $0 so the cap never fires
 ---
 apiVersion: tideproject.k8s/v1alpha3
 kind: Milestone

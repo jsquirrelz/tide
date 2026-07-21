@@ -60,7 +60,7 @@ spec:
   targetRepo: "https://example.invalid/owner/push-lease-repo.git"
   providerSecretRef: "tide-provider-secret"
   budget:
-    absoluteCapCents: 100000  # $1000 — no budget cap during tests
+    absoluteCapCents: 5000  # $50 — generous stub-test headroom; stub spends $0 so the cap never fires
   git:
     repoURL: "https://example.invalid/owner/push-lease-repo.git"
     credsSecretRef: "push-lease-creds"

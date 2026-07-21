@@ -64,7 +64,7 @@ spec:
   targetRepo: "https://github.com/example/chaos-resume.git"
   providerSecretRef: "tide-provider-secret"
   budget:
-    absoluteCapCents: 100000  # $1000 — no budget cap during tests
+    absoluteCapCents: 5000  # $50 — generous stub-test headroom; stub spends $0 so the cap never fires
   # Intentionally no `git` block: chaos-resume does NOT exercise push.
 ---
 apiVersion: tideproject.k8s/v1alpha3
