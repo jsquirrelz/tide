@@ -731,7 +731,15 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	if alreadySpawned {
 		// Already spawned for this attempt (durable marker honored) — skip the Create.
 	} else if r.Deps.ReporterImage != "" && project != nil {
-		reporterJobName := fmt.Sprintf("tide-reporter-%s", plan.UID)
+		// Phase 52 DEFECT-B: the plan level re-dispatches its planner (52-09's
+		// findings-seeded re-plan), so the reporter name must be per-attempt —
+		// an attempt-blind name lets attempt N>1's spawn find attempt 1's
+		// completed reporter Job (still inside its 300s TTL), skip the Create
+		// as idempotent success, stamp the marker below, and dead-stall the
+		// loop with the re-planned children never materialized. Same
+		// Iteration-derived attempt formula as planJobName above.
+		attempt := int(plan.Status.LoopStatus.Iteration) + 1
+		reporterJobName := ReporterJobNameFor(plan.UID, attempt)
 		pvcName := r.sharedPVCName()
 		var existingReporterJob batchv1.Job
 		if gErr := r.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: plan.Namespace}, &existingReporterJob); gErr != nil {
@@ -753,6 +761,7 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 					SessionID:         projectUID,
 					MetadataJSON:      enrichmentMD,
 					Tags:              enrichmentTags,
+					Attempt:           attempt,
 				}, r.Scheme)
 			if cErr := r.Create(ctx, reporterJob); cErr != nil {
 				if !apierrors.IsAlreadyExists(cErr) {

@@ -46,6 +46,17 @@ limitations under the License.
 // inline arm, Plan's inline arm, and Task's trace-only path are structurally
 // distinct code; project and task each get their own spec.
 //
+// Phase 52 live-proof DEFECT-B (the plan inline arm's own spec, at the bottom
+// of this file): the plan level is the ONE level whose planner re-dispatches
+// (52-09's findings-seeded re-plan), and its reporter Job name was
+// attempt-blind ("tide-reporter-<planUID>"). Attempt 2's spawn found attempt
+// 1's completed reporter Job by name (still inside its 300s TTL — a stub
+// planner attempt takes ~20s), skipped the Create as T-09-13 idempotency,
+// stamped the durable marker, and the re-planned attempt's children were
+// NEVER materialized: the plan-check loop dead-stalled in Running with zero
+// errors. The fix suffixes re-plan attempts ("tide-reporter-<planUID>-<n>",
+// n>1); attempt 1 keeps the historical unsuffixed name.
+//
 // CR-01 re-fix (Phase 47 gap-closure #2): the first-generation marker above
 // closed only the reporter-Job-GC window and left a SECOND window open. The
 // marker is stamped in TWO key spaces — the live planner Job's UID (when a Job
@@ -742,5 +753,161 @@ var _ = Describe("ReporterSpawnIdempotency — Project level (planner-Job TTL-GC
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: rsiProjGCName, Namespace: "default"}, &afterSecond)).To(Succeed())
 		Expect(afterSecond.Status.ProjectReporterSpawnedUID).To(Equal(string(plannerJob.UID)),
 			"marker must still hold the original planner-Job UID after the skipped nil-Job re-drive")
+	})
+})
+
+// ─── Plan level (inline arm — re-plan attempt reporter collision, DEFECT-B) ──
+
+var _ = Describe("ReporterSpawnIdempotency — Plan level (re-plan attempt reporter collision)", Label("envtest", "heavy"), func() {
+	ctx := context.Background()
+
+	const (
+		rsiPlanProjName = "rsi-plan-proj"
+		rsiPlanMSName   = "rsi-plan-ms"
+		rsiPlanPhName   = "rsi-plan-ph"
+		rsiPlanName     = "rsi-plan"
+	)
+
+	var envReader *mapEnvReader
+
+	BeforeEach(func() {
+		childRollupProject(ctx, rsiPlanProjName)
+		ms := &tideprojectv1alpha3.Milestone{
+			ObjectMeta: metav1.ObjectMeta{Name: rsiPlanMSName, Namespace: "default"},
+			Spec:       tideprojectv1alpha3.MilestoneSpec{ProjectRef: rsiPlanProjName},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		waitForCacheSync(rsiPlanMSName, "default", &tideprojectv1alpha3.Milestone{})
+		ph := &tideprojectv1alpha3.Phase{
+			ObjectMeta: metav1.ObjectMeta{Name: rsiPlanPhName, Namespace: "default"},
+			Spec:       tideprojectv1alpha3.PhaseSpec{MilestoneRef: rsiPlanMSName},
+		}
+		Expect(k8sClient.Create(ctx, ph)).To(Succeed())
+		waitForCacheSync(rsiPlanPhName, "default", &tideprojectv1alpha3.Phase{})
+		envReader = newMapEnvReader()
+	})
+
+	AfterEach(func() {
+		plan := &tideprojectv1alpha3.Plan{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: rsiPlanName, Namespace: "default"}, plan); err == nil {
+			plan.Finalizers = nil
+			_ = k8sClient.Update(ctx, plan)
+			_ = k8sClient.Delete(ctx, plan)
+		}
+		ph := &tideprojectv1alpha3.Phase{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: rsiPlanPhName, Namespace: "default"}, ph); err == nil {
+			ph.Finalizers = nil
+			_ = k8sClient.Update(ctx, ph)
+			_ = k8sClient.Delete(ctx, ph)
+		}
+		ms := &tideprojectv1alpha3.Milestone{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: rsiPlanMSName, Namespace: "default"}, ms); err == nil {
+			ms.Finalizers = nil
+			_ = k8sClient.Update(ctx, ms)
+			_ = k8sClient.Delete(ctx, ms)
+		}
+		cleanupChildRollupProject(ctx, rsiPlanProjName)
+
+		var jobs batchv1.JobList
+		_ = k8sClient.List(ctx, &jobs, client.InNamespace("default"))
+		for i := range jobs.Items {
+			j := jobs.Items[i]
+			if strings.HasPrefix(j.Name, "tide-reporter-") || strings.HasPrefix(j.Name, "tide-plan-") {
+				_ = k8sClient.Delete(ctx, &j, client.PropagationPolicy(metav1.DeletePropagationBackground))
+			}
+		}
+	})
+
+	It("spawns a fresh attempt-suffixed reporter Job for a re-planned attempt while attempt 1's reporter Job still lives (52 D-04; live-proof DEFECT-B)", func() {
+		plan := &tideprojectv1alpha3.Plan{
+			ObjectMeta: metav1.ObjectMeta{Name: rsiPlanName, Namespace: "default"},
+			Spec:       tideprojectv1alpha3.PlanSpec{PhaseRef: rsiPlanPhName},
+		}
+		Expect(k8sClient.Create(ctx, plan)).To(Succeed())
+		waitForCacheSync(rsiPlanName, "default", &tideprojectv1alpha3.Plan{})
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: rsiPlanName, Namespace: "default"}, plan)).To(Succeed())
+
+		statusPatch := client.MergeFrom(plan.DeepCopy())
+		plan.Status.Phase = "Running"
+		Expect(k8sClient.Status().Patch(ctx, plan, statusPatch)).To(Succeed())
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: rsiPlanName, Namespace: "default"}, plan)).To(Succeed())
+
+		envReader.SetOut(string(plan.UID), pkgdispatch.EnvelopeOut{
+			TaskUID:    string(plan.UID),
+			ExitCode:   0,
+			ChildCount: 0,
+		})
+
+		r := &PlanReconciler{
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				Dispatcher:     &stubDispatcher{},
+				EnvReader:      envReader,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+				ReporterImage:  testReporterImage,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
+			},
+			PlannerPool: newPlannerPoolForTest(),
+		}
+
+		// Attempt 1 (Iteration 0): a live planner Job completes → the reporter
+		// spawns under the historical unsuffixed name (backcompat pin — every
+		// non-re-planned level keeps this exact name).
+		start := time.Now().Add(-5 * time.Minute)
+		job1 := succeededPlannerJob("rsi-plan-attempt-1", start, time.Now())
+		_, err := r.handlePlannerJobCompletion(ctx, plan, job1)
+		Expect(err).NotTo(HaveOccurred())
+
+		unsuffixedName := fmt.Sprintf("tide-reporter-%s", plan.UID)
+		Eventually(func() error {
+			return mgrClient.Get(ctx, types.NamespacedName{Name: unsuffixedName, Namespace: "default"}, &batchv1.Job{})
+		}, "5s", "100ms").Should(Succeed(), "attempt 1's reporter Job must keep the unsuffixed name")
+
+		Eventually(func(g Gomega) {
+			var fresh tideprojectv1alpha3.Plan
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: rsiPlanName, Namespace: "default"}, &fresh)).To(Succeed())
+			g.Expect(fresh.Status.PlanReporterSpawnedUID).To(Equal(string(job1.UID)),
+				"marker must hold attempt 1's live-Job UID")
+		}, "5s", "100ms").Should(Succeed())
+
+		// Simulate 52-09 dispatchPlanRepair's quality bump: a REPAIRABLE verdict
+		// deleted the rejected children and set LoopStatus.Iteration=1, so the
+		// next planner completion is attempt 2. Attempt 1's reporter Job is
+		// deliberately NOT deleted — the live-proof race: a stub planner attempt
+		// takes ~20s, far inside the reporter's 300s TTL.
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: rsiPlanName, Namespace: "default"}, plan)).To(Succeed())
+		iterPatch := client.MergeFrom(plan.DeepCopy())
+		plan.Status.LoopStatus.Iteration = 1
+		Expect(k8sClient.Status().Patch(ctx, plan, iterPatch)).To(Succeed())
+		Eventually(func(g Gomega) {
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: rsiPlanName, Namespace: "default"}, plan)).To(Succeed())
+			g.Expect(plan.Status.LoopStatus.Iteration).To(BeEquivalentTo(1))
+		}, "5s", "100ms").Should(Succeed(), "cache must observe the repair's Iteration bump before re-driving completion")
+
+		job2 := succeededPlannerJob("rsi-plan-attempt-2", start, time.Now())
+		_, err = r.handlePlannerJobCompletion(ctx, plan, job2)
+		Expect(err).NotTo(HaveOccurred())
+
+		// DEFECT-B pin: attempt 2's reporter must be a DISTINCT Job. The
+		// unsuffixed name is occupied by attempt 1's completed reporter, so a
+		// name-only gate silently skips the spawn, stamps the marker, and the
+		// re-planned attempt's children are never materialized (the loop
+		// dead-stalls in Running with zero errors — observed live, tide-lv4).
+		suffixedName := fmt.Sprintf("tide-reporter-%s-2", plan.UID)
+		Eventually(func() error {
+			return mgrClient.Get(ctx, types.NamespacedName{Name: suffixedName, Namespace: "default"}, &batchv1.Job{})
+		}, "5s", "100ms").Should(Succeed(),
+			"attempt 2's reporter Job must spawn under the attempt-suffixed name while attempt 1's Job still exists")
+
+		Eventually(func(g Gomega) {
+			var fresh tideprojectv1alpha3.Plan
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: rsiPlanName, Namespace: "default"}, &fresh)).To(Succeed())
+			g.Expect(fresh.Status.PlanReporterSpawnedUID).To(Equal(string(job2.UID)),
+				"marker must advance to attempt 2's live-Job UID")
+		}, "5s", "100ms").Should(Succeed())
 	})
 })

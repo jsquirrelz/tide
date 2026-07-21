@@ -41,6 +41,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 
 	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/owner"
@@ -146,6 +147,19 @@ type ReporterOptions struct {
 	// trace-only spawn can never block a later materialization spawn. Only
 	// consulted when TraceOnly is true.
 	TraceOnlyJobKey string
+
+	// Attempt is the 1-based planner attempt number this materialization
+	// reporter reads for (Phase 52 live-proof DEFECT-B). The plan level is
+	// the one level whose planner re-dispatches (52-09's findings-seeded
+	// re-plan), and an attempt-blind "tide-reporter-<parentUID>" name lets
+	// attempt N>1's spawn find attempt 1's completed reporter Job (still
+	// inside its 300s TTL) and skip the Create as idempotent success — the
+	// re-planned attempt's children are then never materialized and the
+	// plan-check loop dead-stalls in Running. Attempts > 1 get a
+	// "-<attempt>" name suffix; 0 (unset) and 1 keep the historical
+	// unsuffixed name, so every non-re-planned level is byte-identical.
+	// Ignored by the trace-only shape.
+	Attempt int
 
 	// SkipMessageSpans (ADAPT-01/Phase 45): set true when the manager's
 	// pkgdispatch.SelfInstruments(vendor) lookup reports the dispatching
@@ -263,6 +277,21 @@ type ReporterOptions struct {
 //     dispatch-completion watch can discriminate reader Jobs from dispatch Jobs
 //     (T-09-13 — prevents the handler from re-firing on the reader Job's own
 //     completion event).
+//
+// ReporterJobNameFor is the single source of the materialization reporter's
+// deterministic Job name, shared by BuildReporterJob and every controller-side
+// existence Get so the two can never diverge (Phase 52 DEFECT-B). Attempts
+// <= 1 keep the historical unsuffixed "tide-reporter-<parentUID>" name;
+// re-plan attempts (> 1, plan level only today) append "-<attempt>" so a
+// fresh attempt's spawn can never be satisfied by a previous attempt's
+// still-live completed Job.
+func ReporterJobNameFor(parentUID types.UID, attempt int) string {
+	if attempt > 1 {
+		return fmt.Sprintf("tide-reporter-%s-%d", parentUID, attempt)
+	}
+	return fmt.Sprintf("tide-reporter-%s", parentUID)
+}
+
 func BuildReporterJob(
 	parent metav1.Object,
 	project *tideprojectv1alpha3.Project,
@@ -391,12 +420,14 @@ func BuildReporterJob(
 		Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 	}
 
-	// jobName: the materialization shape keys on the parent UID (deterministic
-	// per parent, AlreadyExists on Create is idempotent success, D-B5). The
-	// trace-only shape keys on TraceOnlyJobKey (the completed dispatch Job's
-	// UID) instead, in the "tide-reporter-trace-" namespace so it can never
-	// collide with a materialization reporter's name for the same parent.
-	jobName := fmt.Sprintf("tide-reporter-%s", parent.GetUID())
+	// jobName: the materialization shape keys on the parent UID plus the
+	// re-plan attempt number (deterministic per parent+attempt, AlreadyExists
+	// on Create is idempotent success, D-B5; see ReporterOptions.Attempt for
+	// the DEFECT-B suffix rule). The trace-only shape keys on TraceOnlyJobKey
+	// (the completed dispatch Job's UID) instead, in the
+	// "tide-reporter-trace-" namespace so it can never collide with a
+	// materialization reporter's name for the same parent.
+	jobName := ReporterJobNameFor(parent.GetUID(), opts.Attempt)
 	if opts.TraceOnly {
 		jobName = "tide-reporter-trace-" + opts.TraceOnlyJobKey
 	}
