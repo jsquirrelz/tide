@@ -13,6 +13,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -25,6 +27,45 @@ import (
 	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 )
+
+// workspacesRoot is the manager-side mount point of the shared per-project
+// workspace PVC (the tide-projects volumeMount in the chart's manager
+// Deployment) — the same /workspaces/<projectUID>/workspace/... path
+// convention stageEvidencePacket (task_controller.go) writes evidence
+// packets through. Package variable so tests can point it at a temp dir.
+var workspacesRoot = "/workspaces"
+
+// taskFindingsProvenMissing reports whether the manager can PROVE the
+// Task's verifier envelope dir exists on the shared PVC WITHOUT a
+// findings.json (WR-05, Phase 53 code review). Two real skew shapes
+// produce this state despite a recorded LastEvaluation: a verifier image
+// predating the 53-11 findings writer (out.json + verdict written, no
+// findings.json — the chart lets operators pin
+// images.tideLanggraphVerifier.tag independently), and the deliberately
+// tolerated write_findings OSError swallow (__main__.py). Because
+// tide-push stays fail-closed (a staged task entry without findings.json
+// hard-fails the ENTIRE cumulative push, boundary pushes included), a
+// proven-missing entry must never be staged — the file will never appear
+// (the verifier Job is complete), so staging it would freeze the
+// project's whole push pipeline with no self-heal.
+//
+// Fail-open ONLY on unobservability: when the envelope dir itself cannot
+// be statted (the manager has no PVC visibility — always true under
+// envtest, same tolerated posture as stageEvidencePacket's write path)
+// the Status-only taskFindingsStageable proxy stands unchanged. This is a
+// skew-window narrowing on top of the fail-closed push, not a softening
+// of it.
+func taskFindingsProvenMissing(projectUID string, t *tideprojectv1alpha3.Task) bool {
+	if projectUID == "" {
+		return false
+	}
+	dir := filepath.Join(workspacesRoot, projectUID, "workspace", "envelopes", string(t.UID))
+	if _, err := os.Stat(dir); err != nil {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(dir, "findings.json"))
+	return err != nil
+}
 
 // plannerMaterialized reports whether a level's planner has completed and its
 // planning *.md envelope is GUARANTEED present on the shared PVC.
@@ -108,21 +149,21 @@ func plannerMaterialized(phase string) bool {
 // the directory the verifier writes its envelope into. The mapping is
 // correct as-is; no ENTRY-construction fix was needed.
 //
-// LastEvaluation-as-presence-proxy — SURFACED CONTRADICTION (never loosen the
-// predicate to compensate): as of this plan, nothing in the verifier's write
-// path (cmd/tide-langgraph-verifier/verifier/__main__.py:211-225) ever writes
-// a findings.json file — it writes only out.json (write_envelope_out) and the
-// termination-log TerminationStub (write_termination_stub). A recorded
-// LastEvaluation therefore does NOT yet imply findings.json landed on the PVC;
-// it implies only that out.Verdict was non-nil when applyLoopStatus ran. This
-// guard is still the TIGHTEST predicate expressible from Task.Status alone
-// (the controller never mounts the PVC and cannot stat findings.json
-// directly) — the fix is a verifier-side findings.json writer, out of this
-// plan's declared file scope (files_modified: artifact_push.go/_test.go,
-// dashboard artifacts.go/_test.go only). Until that writer lands, a
-// tide-push carrying a task-kind entry will hard-fail on the missing
-// findings.json regardless of how this predicate is shaped — flagged for
-// whichever plan wires the verifier-side writer.
+// LastEvaluation-as-presence-proxy + the WR-05 disk check: the verifier's
+// write_findings (cmd/tide-langgraph-verifier/verifier/__main__.py, T-53-28)
+// writes findings.json iff a parseable verdict was assembled — the EXACT
+// condition applyLoopStatus's LastEvaluation predicate reads through the
+// role-aware ReadVerifierOut relay (out.Verdict != nil) — so disk presence
+// tracks this predicate 1:1 in the common case. Two skew shapes remain
+// (see taskFindingsProvenMissing above): a verifier image predating the
+// 53-11 writer, and the deliberately tolerated write_findings OSError
+// swallow. Every staging site (collectStageEnvelopes' task loop, the
+// ensureTaskEntries union, and maybeTriggerTaskFindingsPush's trigger
+// gate) therefore ALSO requires taskFindingsProvenMissing to be false:
+// when the manager can observe the envelope dir on the shared PVC it must
+// not stage an entry it can prove would poison the fail-closed push. When
+// the PVC is not observable (envtest), this Status-only predicate alone
+// governs — the tightest check expressible from Task.Status.
 func taskFindingsStageable(t *tideprojectv1alpha3.Task) bool {
 	if t.Status.LoopStatus.LastEvaluation == nil {
 		return false
@@ -207,7 +248,7 @@ func collectStageEnvelopes(ctx context.Context, c client.Client, project *tidepr
 	}
 	for i := range taskList.Items {
 		t := &taskList.Items[i]
-		if taskFindingsStageable(t) {
+		if taskFindingsStageable(t) && !taskFindingsProvenMissing(string(project.UID), t) {
 			entries = append(entries, entry{"task", t.Name, string(t.UID)})
 		}
 	}
@@ -253,7 +294,11 @@ func stageEntry(kind, name, uid string) string {
 // retry until some LATER level's boundary push happened to re-collect it.
 // Callers that pass no ensure Tasks (the four existing planner-tier call
 // sites) get back envelopes unchanged.
-func ensureTaskEntries(envelopes []string, ensure []*tideprojectv1alpha3.Task) []string {
+//
+// projectUID feeds the same WR-05 taskFindingsProvenMissing gate the
+// collector applies — an ensure entry whose envelope dir observably lacks
+// findings.json would hard-fail the whole push and must never ride it.
+func ensureTaskEntries(envelopes []string, projectUID string, ensure []*tideprojectv1alpha3.Task) []string {
 	if len(ensure) == 0 {
 		return envelopes
 	}
@@ -262,7 +307,7 @@ func ensureTaskEntries(envelopes []string, ensure []*tideprojectv1alpha3.Task) [
 		present[e] = struct{}{}
 	}
 	for _, t := range ensure {
-		if t == nil {
+		if t == nil || taskFindingsProvenMissing(projectUID, t) {
 			continue
 		}
 		entry := stageEntry("task", t.Name, string(t.UID))
@@ -346,7 +391,7 @@ func triggerArtifactPush(
 	if err != nil {
 		return fmt.Errorf("collect stage envelopes for %s artifact push: %w", level, err)
 	}
-	envelopes = ensureTaskEntries(envelopes, ensure)
+	envelopes = ensureTaskEntries(envelopes, string(project.UID), ensure)
 	if len(envelopes) == 0 {
 		// Nothing planner-completed yet — no artifacts to stage.
 		return nil

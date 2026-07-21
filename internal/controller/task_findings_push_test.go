@@ -276,6 +276,27 @@ func TestVerifyHaltedTerminal_RequeueBounded(t *testing.T) {
 		}
 	})
 
+	t.Run("findings.json observably missing (image skew / write failure): no requeue, no push Job", func(t *testing.T) {
+		root := withWorkspacesRoot(t)
+		project := findingsPushTestProject()
+		task := labeledTaskCR("t-skew-halt", "uid-skew-halt", tideprojectv1alpha3.LevelPhaseVerifyHalted, true, project)
+		// The envelope dir exists (the executor/verifier ran) but findings.json
+		// was never written — WR-05's poison shape. Staging it would hard-fail
+		// every cumulative push, so the trigger must report ineligible.
+		mkEnvelopeDir(t, root, string(project.UID), "uid-skew-halt", false)
+		c := fake.NewClientBuilder().WithScheme(s).WithObjects(project, task).Build()
+		r := findingsTaskReconciler(c, s)
+
+		res := r.handleVerifyHaltedTerminal(context.Background(), task)
+		if res.result.RequeueAfter != 0 {
+			t.Errorf("RequeueAfter=%v want 0 — the file will never appear, retrying cannot help (WR-05)", res.result.RequeueAfter)
+		}
+		var job batchv1.Job
+		if err := c.Get(context.Background(), pushJobFor(project), &job); err == nil {
+			t.Error("a proven-missing-findings task must never trigger a push Job (WR-05)")
+		}
+	})
+
 	t.Run("git-less project: no requeue", func(t *testing.T) {
 		project := findingsPushTestProject()
 		project.Spec.Git = nil

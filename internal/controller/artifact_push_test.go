@@ -15,6 +15,8 @@ package controller
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -223,6 +225,107 @@ func TestCollectStageEnvelopes(t *testing.T) {
 // containsEntry reports whether entries contains the exact string want.
 func containsEntry(entries []string, want string) bool {
 	return slices.Contains(entries, want)
+}
+
+// ---------- WR-05: findings.json image-skew / write-failure guard ----------
+
+// withWorkspacesRoot points the WR-05 disk check at a temp dir for the test's
+// duration and restores the production mount point afterwards.
+func withWorkspacesRoot(t *testing.T) string {
+	t.Helper()
+	prev := workspacesRoot
+	root := t.TempDir()
+	workspacesRoot = root
+	t.Cleanup(func() { workspacesRoot = prev })
+	return root
+}
+
+// mkEnvelopeDir creates <root>/<projectUID>/workspace/envelopes/<taskUID>
+// (the manager-side view of a verifier Job's envelope dir), optionally with
+// a findings.json inside.
+func mkEnvelopeDir(t *testing.T, root, projectUID, taskUID string, withFindings bool) {
+	t.Helper()
+	dir := filepath.Join(root, projectUID, "workspace", "envelopes", taskUID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir envelope dir: %v", err)
+	}
+	if withFindings {
+		if err := os.WriteFile(filepath.Join(dir, "findings.json"), []byte(`{"verdict":"BLOCKED"}`), 0o644); err != nil {
+			t.Fatalf("write findings.json: %v", err)
+		}
+	}
+}
+
+// TestArtifactPush_FindingsSkewGuard pins WR-05 (Phase 53 code review): a
+// stageable Task whose envelope dir OBSERVABLY lacks findings.json (a
+// verifier image predating the 53-11 writer, or the tolerated
+// write_findings OSError swallow) must never be staged — tide-push stays
+// fail-closed and a single such entry hard-fails the ENTIRE cumulative
+// push, boundary pushes included, with no self-heal (the verifier Job is
+// complete; the file will never appear). When the manager cannot observe
+// the dir at all (no PVC mount — envtest), the Status-only predicate
+// stands unchanged.
+func TestArtifactPush_FindingsSkewGuard(t *testing.T) {
+	s := fakeSchemeWithAll(t)
+
+	t.Run("dir exists without findings.json: excluded from the collector", func(t *testing.T) {
+		root := withWorkspacesRoot(t)
+		project := artifactTestProject()
+		task := taskCR("t-skew", "uid-skew", tideprojectv1alpha3.LevelPhaseVerifyHalted, true)
+		mkEnvelopeDir(t, root, string(project.UID), "uid-skew", false)
+
+		c := fake.NewClientBuilder().WithScheme(s).WithObjects(project, task).Build()
+		got, err := collectStageEnvelopes(context.Background(), c, project)
+		if err != nil {
+			t.Fatalf("collectStageEnvelopes: %v", err)
+		}
+		if containsEntry(got, "uid-skew:task/t-skew") {
+			t.Fatalf("entries=%v must NOT contain the proven-missing task — it would hard-fail the whole cumulative push (WR-05)", got)
+		}
+	})
+
+	t.Run("dir exists with findings.json: staged", func(t *testing.T) {
+		root := withWorkspacesRoot(t)
+		project := artifactTestProject()
+		task := taskCR("t-ok", "uid-ok", tideprojectv1alpha3.LevelPhaseVerifyHalted, true)
+		mkEnvelopeDir(t, root, string(project.UID), "uid-ok", true)
+
+		c := fake.NewClientBuilder().WithScheme(s).WithObjects(project, task).Build()
+		got, err := collectStageEnvelopes(context.Background(), c, project)
+		if err != nil {
+			t.Fatalf("collectStageEnvelopes: %v", err)
+		}
+		if !containsEntry(got, "uid-ok:task/t-ok") {
+			t.Fatalf("entries=%v want to contain the findings-backed task", got)
+		}
+	})
+
+	t.Run("dir unobservable (no PVC visibility): status proxy stands", func(t *testing.T) {
+		withWorkspacesRoot(t) // empty temp root — no envelope dirs at all
+		project := artifactTestProject()
+		task := taskCR("t-unobservable", "uid-unob", tideprojectv1alpha3.LevelPhaseVerifyHalted, true)
+
+		c := fake.NewClientBuilder().WithScheme(s).WithObjects(project, task).Build()
+		got, err := collectStageEnvelopes(context.Background(), c, project)
+		if err != nil {
+			t.Fatalf("collectStageEnvelopes: %v", err)
+		}
+		if !containsEntry(got, "uid-unob:task/t-unobservable") {
+			t.Fatalf("entries=%v want the status-proxy fallback to stage the task when the PVC is unobservable", got)
+		}
+	})
+
+	t.Run("ensure-entry union applies the same guard", func(t *testing.T) {
+		root := withWorkspacesRoot(t)
+		project := artifactTestProject()
+		skewed := taskCR("t-skew-ensure", "uid-skew-e", tideprojectv1alpha3.LevelPhaseVerifyHalted, true)
+		mkEnvelopeDir(t, root, string(project.UID), "uid-skew-e", false)
+
+		got := ensureTaskEntries(nil, string(project.UID), []*tideprojectv1alpha3.Task{skewed})
+		if len(got) != 0 {
+			t.Fatalf("ensureTaskEntries=%v must not union a proven-missing task entry (WR-05)", got)
+		}
+	})
 }
 
 // ---------- Test 2: triggerArtifactPush creates a Job with --stage-envelopes ----------

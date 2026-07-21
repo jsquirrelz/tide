@@ -2729,6 +2729,18 @@ func (r *TaskReconciler) maybeTriggerTaskFindingsPush(ctx context.Context, task 
 	if project == nil || !taskFindingsStageable(task) {
 		return findingsPushIneligible, nil
 	}
+	if taskFindingsProvenMissing(string(project.UID), task) {
+		// WR-05: the envelope dir is observable on the PVC and lacks
+		// findings.json (a verifier image predating the 53-11 writer, or the
+		// tolerated write_findings OSError swallow). tide-push stays
+		// fail-closed and would hard-fail the ENTIRE cumulative push on this
+		// entry — boundary pushes included — so never stage it. Ineligible,
+		// not retryable: the verifier Job is complete, the file will never
+		// appear.
+		logf.FromContext(ctx).Info("skipping findings push: findings.json observably missing from the task's envelope dir (verifier image predates the writer, or the write failed)",
+			"task", task.Name, "project", project.Name)
+		return findingsPushIneligible, nil
+	}
 	if project.Spec.Git == nil || project.Spec.Git.RepoURL == "" {
 		// No git remote — there is no run branch to push findings onto, ever.
 		return findingsPushIneligible, nil
