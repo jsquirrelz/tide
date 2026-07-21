@@ -12,7 +12,7 @@ import ExecutionDAGView from "./components/ExecutionDAGView";
 import GlobalExecutionDAGView, {
   type ProjectExecutionDAGData,
 } from "./components/GlobalExecutionDAGView";
-import TaskDetailDrawer from "./components/TaskDetailDrawer";
+import TaskDetailDrawer, { VERDICT_COLOR } from "./components/TaskDetailDrawer";
 import PodLogStreamer from "./components/PodLogStreamer";
 import ProjectPicker from "./components/ProjectPicker";
 import EmptyState from "./components/EmptyState";
@@ -30,7 +30,13 @@ import PhoenixTraceLink from "./components/PhoenixTraceLink";
 import { ResizeHandle, usePersistedSize } from "./components/ResizeHandle";
 import { useProjects } from "./lib/projects";
 import { useTaskDetail, useTasks } from "./lib/tasks";
-import { fetchProject, type ProjectDetail, type DashboardConfig } from "./lib/api";
+import {
+  fetchProject,
+  fetchPlan,
+  type ProjectDetail,
+  type DashboardConfig,
+  type PlanDetail,
+} from "./lib/api";
 import type { SSEState } from "./lib/sse";
 import type { TideNodeKind } from "./components/TideNodeShell";
 import { STATUS_TABLE, type StatusValue } from "./components/StatusBadge";
@@ -275,6 +281,31 @@ export default function App() {
     selectedNamespace,
     selectedTask,
   );
+
+  // Plan 53-08 (Contract 3): the Planning-DAG plan node's one-line
+  // plan-check mirror needs loopIteration/verifyMaxIterations/loopDecision —
+  // executionPlan (useTasks above) folds PlanDetail into ExecutionPlanData
+  // for the execution-DAG pane and drops those fields in the process, so
+  // this is a small targeted fetch of the SAME existing GET plan endpoint
+  // (53-04 already landed the payload; no new endpoint, no shape change).
+  const [planCheckDetail, setPlanCheckDetail] = useState<PlanDetail | null>(null);
+  useEffect(() => {
+    if (!selectedNode || selectedNode.kind !== "plan") {
+      setPlanCheckDetail(null);
+      return;
+    }
+    let cancelled = false;
+    fetchPlan(selectedNode.name, selectedNamespace ?? undefined)
+      .then((detail) => {
+        if (!cancelled) setPlanCheckDetail(detail);
+      })
+      .catch(() => {
+        if (!cancelled) setPlanCheckDetail(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedNode, selectedNamespace]);
 
   // Plan 26-04 (D-07): fetch the project-scoped global execution DAG when
   // showGlobalDAG is active. Mirrors the fetchPlan hook pattern in lib/tasks.ts.
@@ -676,6 +707,15 @@ export default function App() {
             : projectDetail?.plans;
       const nodeRef = refs?.find((r) => r.name === selectedNode.name);
       const gateParked = nodeRef?.phase === "AwaitingApproval";
+      // Plan 53-08 (Contract 3): eligibility is all-three-or-nothing — the
+      // server emits loopIteration/verifyMaxIterations/loopDecision as an
+      // omitempty trio, so any one being undefined means the plan-check
+      // loop hasn't run yet (absence renders nothing, D-08 minimal shape).
+      const planCheckEligible =
+        selectedNode.kind === "plan" &&
+        planCheckDetail?.loopIteration !== undefined &&
+        planCheckDetail?.verifyMaxIterations !== undefined &&
+        planCheckDetail?.loopDecision !== undefined;
       nodePanelContent = (
         <>
           {/* Plan 46-05 (OBS-04), UI-SPEC mount 1: first child inside the
@@ -686,6 +726,32 @@ export default function App() {
             spanId={nodeRef?.traceSpanId}
             edge="bottom"
           />
+          {planCheckEligible && planCheckDetail && (
+            <div className="px-6 pt-4" data-testid="plan-check-mirror">
+              <div
+                className="text-[var(--color-text-muted)]"
+                style={{
+                  fontSize: "11px",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                }}
+              >
+                Plan check
+              </div>
+              <div className="mt-0.5" style={{ fontSize: "13px" }}>
+                iteration {planCheckDetail.loopIteration} of{" "}
+                {planCheckDetail.verifyMaxIterations} ·{" "}
+                <span
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    color: VERDICT_COLOR[planCheckDetail.loopDecision as string],
+                  }}
+                >
+                  {planCheckDetail.loopDecision}
+                </span>
+              </div>
+            </div>
+          )}
           <div className="min-h-0 flex-1">
             <ArtifactViewer
               kind={selectedNode.kind}
