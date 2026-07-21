@@ -385,51 +385,18 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 	// ConditionVerifyHalt (checkDispatchHolds/gateChecks); this Task simply
 	// halts here with no additional failure propagation. Recovery is
 	// `tide resume` (clears ConditionVerifyHalt), never `--retry-failed`.
-	//
-	// Plan 53-10 terminal-arm retry: mirrors the Failed branch's
-	// setFailureHaltIfNeeded-at-terminal precedent directly below — re-run
-	// the findings-push trigger on every reconcile of an already-halted Task
-	// so the carried-entry edge gate converges even if haltVerify's own
-	// verdict-final call raced a busy push Job. Converts the empty
-	// ctrl.Result{} into a 5s RequeueAfter ONLY while the entry is not yet
-	// carried by any push Job; once carried, steady state — no further
-	// requeue, no churn (T-53-23). Project resolution is best-effort, same
-	// posture as the Failed branch below: an unresolvable project just skips
-	// this reconcile's retry and tries again next time.
+	// See handleVerifyHaltedTerminal for the Plan 53-10 terminal-arm retry
+	// detail (extracted from here to keep gateChecks under the D-10 gocyclo
+	// threshold — no behavior change).
 	if task.Status.Phase == tideprojectv1alpha3.LevelPhaseVerifyHalted {
-		result := ctrl.Result{}
-		if project, pErr := r.resolveProject(ctx, task); pErr == nil && project != nil {
-			carried, pushErr := r.maybeTriggerTaskFindingsPush(ctx, task, project)
-			if pushErr != nil {
-				logf.FromContext(ctx).Error(pushErr, "verdict-final findings push trigger failed at VerifyHalted terminal (non-fatal)", "task", task.Name)
-			}
-			if !carried {
-				result = ctrl.Result{RequeueAfter: 5 * time.Second}
-			}
-		}
-		return taskGateResult{shouldHalt: true, result: result}, nil
+		return r.handleVerifyHaltedTerminal(ctx, task), nil
 	}
 	if task.Status.Phase == tideprojectv1alpha3.LevelPhaseFailed {
 		// Phase 25 D-02b: conservative failure halt check at terminal short-circuit.
-		// A Failed task re-triggers the reconciler on every status change; this
-		// hook stamps ConditionFailureHalt on the Project when
-		// FailureProfile==conservative. Idempotent: setFailureHaltIfNeeded is a no-op
-		// if the condition is already True. Project resolution is best-effort here;
-		// if the project is unresolvable (transient), the halt fires when the task
-		// is next reconciled. Non-fatal: dispatch for this task has already halted.
-		if project, pErr := r.resolveProject(ctx, task); pErr == nil && project != nil {
-			// CR-02 resume time-fence: pass the task's CompletedAt so a pre-resume
-			// straggler reconciling after `tide resume --retry-failed` does not
-			// re-stamp the halt. Zero when CompletedAt is unset (fail-closed: stamp).
-			var taskCompletedAt time.Time
-			if task.Status.CompletedAt != nil {
-				taskCompletedAt = task.Status.CompletedAt.Time
-			}
-			if hErr := setFailureHaltIfNeeded(ctx, r.Client, project, taskCompletedAt); hErr != nil {
-				logf.FromContext(ctx).Error(hErr, "setFailureHaltIfNeeded at terminal short-circuit failed (non-fatal)", "task", task.Name)
-			}
-		}
-		return taskGateResult{shouldHalt: true, result: ctrl.Result{}}, nil
+		// See handleFailedTerminal (extracted from here for the same D-10
+		// gocyclo reason as handleVerifyHaltedTerminal above — no behavior
+		// change).
+		return r.handleFailedTerminal(ctx, task), nil
 	}
 
 	// Step 1b (Phase 52 D-08): a Task parked at AwaitingApproval via
@@ -609,6 +576,61 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 
 	// Step 5: Indegree + wave-pause + gate-policy — delegate to checkReadinessGates.
 	return r.checkReadinessGates(ctx, task, project)
+}
+
+// handleVerifyHaltedTerminal handles gateChecks' Step 1a VerifyHalted
+// terminal short-circuit (Phase 51 ESC-03/HI-01). Extracted from gateChecks
+// (Plan 53-09 D-10) to keep its cyclomatic complexity under the gocyclo
+// threshold — a pure refactor, no behavior change.
+//
+// Plan 53-10 terminal-arm retry: re-runs the findings-push trigger on every
+// reconcile of an already-halted Task so the carried-entry edge gate
+// converges even if haltVerify's own verdict-final call raced a busy push
+// Job. Converts the empty ctrl.Result{} into a 5s RequeueAfter ONLY while
+// the entry is not yet carried by any push Job; once carried, steady state
+// — no further requeue, no churn (T-53-23). Project resolution is
+// best-effort, same posture as handleFailedTerminal: an unresolvable
+// project just skips this reconcile's retry and tries again next time.
+func (r *TaskReconciler) handleVerifyHaltedTerminal(ctx context.Context, task *tideprojectv1alpha3.Task) taskGateResult {
+	result := ctrl.Result{}
+	if project, pErr := r.resolveProject(ctx, task); pErr == nil && project != nil {
+		carried, pushErr := r.maybeTriggerTaskFindingsPush(ctx, task, project)
+		if pushErr != nil {
+			logf.FromContext(ctx).Error(pushErr, "verdict-final findings push trigger failed at VerifyHalted terminal (non-fatal)", "task", task.Name)
+		}
+		if !carried {
+			result = ctrl.Result{RequeueAfter: 5 * time.Second}
+		}
+	}
+	return taskGateResult{shouldHalt: true, result: result}
+}
+
+// handleFailedTerminal handles gateChecks' Step 1 Failed terminal
+// short-circuit (Phase 25 D-02b conservative failure halt). Extracted from
+// gateChecks (Plan 53-09 D-10) for the same gocyclo reason as
+// handleVerifyHaltedTerminal — no behavior change.
+//
+// A Failed task re-triggers the reconciler on every status change; this
+// hook stamps ConditionFailureHalt on the Project when
+// FailureProfile==conservative. Idempotent: setFailureHaltIfNeeded is a
+// no-op if the condition is already True. Project resolution is
+// best-effort here; if the project is unresolvable (transient), the halt
+// fires when the task is next reconciled. Non-fatal: dispatch for this
+// task has already halted.
+func (r *TaskReconciler) handleFailedTerminal(ctx context.Context, task *tideprojectv1alpha3.Task) taskGateResult {
+	if project, pErr := r.resolveProject(ctx, task); pErr == nil && project != nil {
+		// CR-02 resume time-fence: pass the task's CompletedAt so a pre-resume
+		// straggler reconciling after `tide resume --retry-failed` does not
+		// re-stamp the halt. Zero when CompletedAt is unset (fail-closed: stamp).
+		var taskCompletedAt time.Time
+		if task.Status.CompletedAt != nil {
+			taskCompletedAt = task.Status.CompletedAt.Time
+		}
+		if hErr := setFailureHaltIfNeeded(ctx, r.Client, project, taskCompletedAt); hErr != nil {
+			logf.FromContext(ctx).Error(hErr, "setFailureHaltIfNeeded at terminal short-circuit failed (non-fatal)", "task", task.Name)
+		}
+	}
+	return taskGateResult{shouldHalt: true, result: ctrl.Result{}}
 }
 
 // checkReadinessGates runs the indegree compute (FAIL-01/FAIL-02), wave-pause

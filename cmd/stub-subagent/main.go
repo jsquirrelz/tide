@@ -75,6 +75,11 @@ var workspaceRoot = "/workspace"
 // exceed-output-paths test mode (HARN-05). Shared with main_test.go.
 const leakEscapePath = "/workspace/escape/leak.txt"
 
+// testModeSuccess is both the Dev.TestMode dispatch value and the
+// EnvelopeOut.Result value for the success path (goconst: 1 literal, not 2
+// coincidentally-identical ones).
+const testModeSuccess = "success"
+
 // wait-for-signal polling cadence (D-D3) is locked at 500ms per CONTEXT.md /
 // RESEARCH §"Open Questions Q4 RESOLVED". The literal is inlined at
 // time.NewTicker call sites so the plan-acceptance grep
@@ -157,7 +162,7 @@ func run(ctx context.Context, envelopePath string, stdout, stderr io.Writer) int
 	}
 
 	switch testMode {
-	case "", "success":
+	case "", testModeSuccess:
 		return dispatchSuccess(ctx, env, outPath, stderr)
 
 	case "fail-exit-1":
@@ -436,7 +441,7 @@ func dispatchPlannerSuccess(_ context.Context, env pkgdispatch.EnvelopeIn, outPa
 			FilesTouched:        []string{"stub-output.txt"},
 			DeclaredOutputPaths: []string{"/workspace/artifacts/stub"},
 			DependsOn:           []string{},
-			Dev:                 devSpec{TestMode: "success"},
+			Dev:                 devSpec{TestMode: testModeSuccess},
 		})
 		if err != nil {
 			fmt.Fprintf(stderr, "stub-subagent: dispatchPlannerSuccess: marshal Task spec: %v\n", err)
@@ -550,7 +555,7 @@ func dispatchPlannerSuccess(_ context.Context, env pkgdispatch.EnvelopeIn, outPa
 		Kind:           pkgdispatch.KindTaskEnvelopeOut,
 		TaskUID:        env.TaskUID,
 		ExitCode:       0,
-		Result:         "success",
+		Result:         testModeSuccess,
 		Reason:         "planner stub success",
 		ChildCRDs:      children,
 		CompletedAt:    time.Now().UTC(),
@@ -642,7 +647,7 @@ func dispatchSuccess(ctx context.Context, env pkgdispatch.EnvelopeIn, outPath st
 		Kind:       pkgdispatch.KindTaskEnvelopeOut,
 		TaskUID:    env.TaskUID,
 		ExitCode:   0,
-		Result:     "success",
+		Result:     testModeSuccess,
 		Reason:     "stub testMode=success",
 		Usage: pkgdispatch.Usage{
 			InputTokens:        100,

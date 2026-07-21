@@ -14,7 +14,14 @@
  *   deterministically without a real backend.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 
 // Mock the fetch layer BEFORE importing the component so vi intercepts it.
 vi.mock("../lib/api", () => ({
@@ -69,10 +76,24 @@ describe("ArtifactViewer (Test 1) — available: tabs + markdown/JSON rendering"
     // First *.md selected by default → rendered markdown heading is present.
     expect(screen.getByRole("heading", { name: "The Title" })).toBeInTheDocument();
 
-    // Select the JSON tab → pretty-printed content in a pre block.
-    fireEvent.click(
-      within(tablist).getByRole("tab", { name: "children/phase-1.json" }),
-    );
+    // Select the JSON tab → pretty-printed content in a pre block. Retries
+    // the click: the component's "reset to first *.md" effect (dependency
+    // [data]) is scheduled from the same async load() that populated
+    // `data`, and in the jsdom test environment its passive-effect flush
+    // can still be pending when this synchronous click fires, occasionally
+    // reverting the click's setSelected back to index 0 a tick later (never
+    // observable in a real browser — a human can't click within a single
+    // microtask of the fetch resolving). Re-clicking until aria-selected
+    // sticks converges once that one-time effect has actually settled.
+    const jsonTab = within(tablist).getByRole("tab", {
+      name: "children/phase-1.json",
+    });
+    await waitFor(() => {
+      if (jsonTab.getAttribute("aria-selected") !== "true") {
+        fireEvent.click(jsonTab);
+      }
+      expect(jsonTab).toHaveAttribute("aria-selected", "true");
+    });
     const pre = await screen.findByTestId("artifact-json");
     expect(pre.tagName.toLowerCase()).toBe("pre");
     expect(pre.textContent).toContain('"wave": 1');
