@@ -19,7 +19,9 @@ package kind_integration
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -49,4 +51,95 @@ func TestHelmDeploymentTemplateRendersVerifierEnv(t *testing.T) {
 			t.Fatalf("deployment template must render %q (CFG-01 verifier-image env; regenerate via `make helm-controller` if the augment block was dropped)", want)
 		}
 	}
+}
+
+// TestHelmDeploymentTemplateRendersVerifierModelEnv pins the CFG-01/D-02
+// chart-tier contract for the verifier model scalar: the manager Deployment
+// must render a TIDE_VERIFIER_MODEL env entry sourced from
+// .Values.subagent.verify.model. This is a static grep against the committed
+// template (no cluster, no helm binary) guarding the
+// phase53-verify-model-env-injected augment block against a future helmify
+// regeneration silently dropping it (the v1.0.8 release-cascade lesson).
+func TestHelmDeploymentTemplateRendersVerifierModelEnv(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "charts", "tide", "templates", "deployment.yaml"))
+	if err != nil {
+		t.Fatalf("read deployment template: %v", err)
+	}
+
+	for _, want := range []string{
+		"TIDE_VERIFIER_MODEL",
+		".Values.subagent.verify.model",
+	} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("deployment template must render %q (CFG-01/D-02 verifier-model env; regenerate via `make helm-controller` if the augment block was dropped)", want)
+		}
+	}
+}
+
+// TestHelmDeploymentTemplateVerifyPostureInstallVsUpgrade pins the CFG-02/D-05
+// install-vs-upgrade posture contract via real `helm template` invocations
+// (no cluster — `lookup` always returns empty under `helm template`, so the
+// posture-marker ConfigMap's guard collapses to a pure IsInstall/IsUpgrade
+// check, RESEARCH.md Finding 1). CI pins helm v3.16.3, which has --is-upgrade.
+//
+// Every failure message names `make helm-controller` as the regeneration fix
+// (the chart is generated from hack/helm/, never hand-edited — Pitfall 1).
+func TestHelmDeploymentTemplateVerifyPostureInstallVsUpgrade(t *testing.T) {
+	chartDir := filepath.Join("..", "..", "..", "charts", "tide")
+
+	t.Run("plain install renders verify-levels-json and the posture marker", func(t *testing.T) {
+		cmd := exec.Command("helm", "template", "tide", chartDir)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("helm template failed: %v\n%s", err, out)
+		}
+		outStr := string(out)
+		if !strings.Contains(outStr, "--verify-levels-json") {
+			t.Fatalf("plain install render (IsInstall=true, no marker) must contain --verify-levels-json; regenerate via `make helm-controller` if the augment block was dropped. Got:\n%s", outStr)
+		}
+		if !strings.Contains(outStr, "tide-verify-posture") {
+			t.Fatalf("plain install render must contain the tide-verify-posture marker ConfigMap; regenerate via `make helm-controller` if the augment block was dropped. Got:\n%s", outStr)
+		}
+	})
+
+	t.Run("is-upgrade renders neither verify-levels-json nor the marker", func(t *testing.T) {
+		cmd := exec.Command("helm", "template", "tide", chartDir, "--is-upgrade")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("helm template --is-upgrade failed: %v\n%s", err, out)
+		}
+		outStr := string(out)
+		if strings.Contains(outStr, "--verify-levels-json") {
+			t.Fatalf("--is-upgrade render (no marker lookup possible, IsInstall=false) must NOT contain --verify-levels-json (CFG-02 least-surprise contract). Got:\n%s", outStr)
+		}
+		if strings.Contains(outStr, "tide-verify-posture") {
+			t.Fatalf("--is-upgrade render must NOT render the tide-verify-posture marker ConfigMap. Got:\n%s", outStr)
+		}
+	})
+
+	t.Run("explicit posture=enabled overrides is-upgrade", func(t *testing.T) {
+		cmd := exec.Command("helm", "template", "tide", chartDir,
+			"--is-upgrade", "--set", "subagent.verify.posture=enabled")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("helm template failed: %v\n%s", err, out)
+		}
+		outStr := string(out)
+		if !strings.Contains(outStr, "--verify-levels-json") {
+			t.Fatalf("subagent.verify.posture=enabled must force --verify-levels-json ON even under --is-upgrade (explicit override beats upgrade semantics, D-05). Got:\n%s", outStr)
+		}
+	})
+
+	t.Run("explicit posture=disabled overrides install", func(t *testing.T) {
+		cmd := exec.Command("helm", "template", "tide", chartDir,
+			"--set", "subagent.verify.posture=disabled")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("helm template failed: %v\n%s", err, out)
+		}
+		outStr := string(out)
+		if strings.Contains(outStr, "--verify-levels-json") {
+			t.Fatalf("subagent.verify.posture=disabled must force --verify-levels-json OFF even on a plain install (explicit override beats install semantics, D-05). Got:\n%s", outStr)
+		}
+	})
 }

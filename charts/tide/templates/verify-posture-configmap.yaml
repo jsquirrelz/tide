@@ -1,0 +1,43 @@
+{{- /* Sticky install-time verify-tier posture marker (Phase 53 CFG-02/D-05).
+Mirrors signing-secret.yaml's lookup + if-not + resource-policy: keep idiom
+verbatim (Secret -> ConfigMap): a plain values default cannot satisfy CFG-02
+(one default is either on-for-both install-and-upgrade or off-for-both), and
+a bare .Release.IsInstall check flips a fresh install's posture OFF the
+moment it sees its first helm upgrade. This ConfigMap records fresh-install
+lineage the FIRST time it is ever created and never again — subsequent helm
+upgrades find it via lookup and the recorded "enabled" posture sticks, while
+a pre-existing (pre-v1.0.9) install upgrading in place never had this
+template render, so lookup finds nothing and the tier defaults OFF (see the
+level-defaults arg computation in charts/tide/templates/deployment.yaml,
+the ARGS53 block).
+
+The guard below is deliberately NOT conditioned on
+.Values.subagent.verify.posture: an install with posture=disabled still
+creates this marker recording "enabled" lineage. This is intentional — the
+explicit values override always outranks the marker (D-05), so the marker's
+recorded value only matters if the operator later returns posture to "auto".
+
+T-53-10 (accepted): an operator with namespace write access could hand-edit
+this ConfigMap's data.posture to flip auto-resolved installs. This requires
+the same RBAC as editing any other in-cluster resource, and the supported
+subagent.verify.posture=enabled|disabled override removes any incentive to
+do so.
+
+This comment is a Go-template comment (not a YAML "#" comment) — it is
+stripped from every render, guarded or not, so it can never leak the
+literal flag/ConfigMap-name strings into helm template output and
+contaminate a grep-based render assertion (the NOTES.txt precedent). */ -}}
+{{- $verifyMarker := lookup "v1" "ConfigMap" .Release.Namespace "tide-verify-posture" }}
+{{- if and (not $verifyMarker) .Release.IsInstall }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tide-verify-posture
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
+  labels:
+    {{- include "tide.labels" . | nindent 4 }}
+data:
+  posture: "enabled"
+{{- end }}

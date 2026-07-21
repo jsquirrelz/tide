@@ -36,6 +36,21 @@ spec:
           - --pricing-overrides-json={{ .Values.pricing.overrides | toJson }}
           {{- end }}
           # phase2-args-injected
+          {{- $verifyPosture := .Values.subagent.verify.posture | default "auto" }}
+          {{- $verifyMarker := lookup "v1" "ConfigMap" .Release.Namespace "tide-verify-posture" }}
+          {{- $verifyMarkerOn := and $verifyMarker (eq $verifyMarker.data.posture "enabled") }}
+          {{- $verifyOn := false }}
+          {{- if eq $verifyPosture "enabled" }}
+          {{- $verifyOn = true }}
+          {{- else if eq $verifyPosture "disabled" }}
+          {{- $verifyOn = false }}
+          {{- else if or $verifyMarkerOn .Release.IsInstall }}
+          {{- $verifyOn = true }}
+          {{- end }}
+          {{- if $verifyOn }}
+          - --verify-levels-json={{ .Values.subagent.verify.levels | toJson }}
+          {{- end }}
+          # phase53-verify-args-injected
         command:
         - /manager
         env:
@@ -108,6 +123,11 @@ spec:
         - name: TIDE_VERIFIER_IMAGE
           value: "{{ .Values.images.tideLanggraphVerifier.repository }}:{{ .Values.images.tideLanggraphVerifier.tag | default .Chart.AppVersion }}"
         # phase53-verifier-image-env-injected
+        {{- if .Values.subagent.verify.model }}
+        - name: TIDE_VERIFIER_MODEL
+          value: {{ .Values.subagent.verify.model | quote }}
+        {{- end }}
+        # phase53-verify-model-env-injected
         - name: TIDE_REPORTER_IMAGE
           value: "{{ .Values.images.tideReporter.repository }}:{{ .Values.images.tideReporter.tag | default .Chart.AppVersion }}"
         # phase9-reporter-env-injected

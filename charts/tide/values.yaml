@@ -271,6 +271,49 @@ subagent:
       model: claude-sonnet-4-6
     task:
       model: claude-haiku-4-5
+  # Phase 53 (CFG-01/CFG-02/D-01/D-02/D-04/D-05): verify-tier (the Task loop's
+  # independent-evaluator dispatch) chart config. Resolution chains (D-02/D-04,
+  # applied at the shared verificationEnabledForLevel/resolveImage-style
+  # helpers in internal/controller/dispatch_helpers.go, never per-dispatch-site):
+  #   Evaluator image/model: authored Project.Spec.Verification.<level>.Evaluator
+  #     (reserved name-ref, unconsumed today — Phase 53 D-02 scope amendment)
+  #     > subagent.verify.model (this value, via TIDE_VERIFIER_MODEL env)
+  #     > compiled default (borrows the task-level executor model).
+  #   Per-level enabled/maxIterations/onExhaustion: authored
+  #     Project.Spec.Verification.<level> (explicit CR config always wins)
+  #     > subagent.verify.levels.<level> (this block, via --verify-levels-json)
+  #     > off.
+  #   Posture tri-state (subagent.verify.posture, D-05): "enabled" forces the
+  #     whole tier ON regardless of install/upgrade; "disabled" forces it OFF;
+  #     "auto" (default) follows the sticky install-time posture marker
+  #     (ConfigMap tide-verify-posture — see verify-posture-configmap.yaml) —
+  #     ON on a fresh install (recorded + kept across every later upgrade),
+  #     OFF for a pre-existing install upgrading in place (CFG-02's
+  #     least-surprise contract). ALWAYS a string enum, never a boolean —
+  #     Sprig's `default` silently coerces boolean false to empty.
+  #   phase/milestone/project deliberately omit maxIterations: ResolveLoopPolicy
+  #     clamps them to 0 regardless (D-07 Phase 52) — listing a value here
+  #     would imply a configurability that does not exist.
+  verify:
+    model: ""
+    posture: auto
+    levels:
+      task:
+        enabled: true
+        maxIterations: 3
+        onExhaustion: requireApproval
+      plan:
+        enabled: false
+        maxIterations: 1
+        onExhaustion: requireApproval
+      phase:
+        enabled: false
+      milestone:
+        enabled: true
+        onExhaustion: requireApproval
+      project:
+        enabled: true
+        onExhaustion: requireApproval
 
 # Phase 3 plan 03-09 (D-B3): optional cluster-wide gitleaks override.
 # Empty (default) → push Job uses the compiled-in gitleaks v8 ruleset.
