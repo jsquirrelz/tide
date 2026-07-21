@@ -93,6 +93,39 @@ type taskDetail struct {
 	// with no traceId to anchor it is not a usable Phoenix link).
 	TraceID     string `json:"traceId,omitempty"`
 	TraceSpanID string `json:"traceSpanId,omitempty"`
+
+	// HasVerification/LoopIteration/VerifyMaxIterations/LoopExitReason/
+	// LastEvaluation/LoopRunID/AttemptID (Phase 53 D-07 / OBS-04) project the
+	// Task loop's current-iteration summary the CRD already holds — never an
+	// iteration-history array (LOOP-03; api/v1alpha3.LoopStatus is
+	// structurally guaranteed to hold none).
+	//
+	// HasVerification mirrors hasVerificationContract's semantics
+	// (GateCommand set AND Phase=="Locked") — the drawer's Verification
+	// section only renders when true. VerifyMaxIterations reads
+	// Spec.Verification.MaxIterations — a DIFFERENT field from AttemptMax
+	// above (which stays sourced from Caps.Iterations; the Phase-51
+	// infra-vs-quality firewall holds on the wire). LoopRunID/AttemptID are
+	// re-derived by the controller's exact task_controller.go:2088-2089
+	// formula, never persisted, and only emitted when HasVerification is
+	// true (they anchor the Verification section, not the Attempt row).
+	HasVerification     bool                `json:"hasVerification,omitempty"`
+	LoopIteration       int32               `json:"loopIteration,omitempty"`
+	VerifyMaxIterations int32               `json:"verifyMaxIterations,omitempty"`
+	LoopExitReason      string              `json:"loopExitReason,omitempty"`
+	LastEvaluation      *taskLoopEvaluation `json:"lastEvaluation,omitempty"`
+	LoopRunID           string              `json:"loopRunId,omitempty"`
+	AttemptID           string              `json:"attemptId,omitempty"`
+}
+
+// taskLoopEvaluation is the JSON shape of taskDetail.LastEvaluation — the
+// bounded current-iteration verdict summary, mirroring
+// api/v1alpha3.EvaluationSummary's Decision/FindingsCount/HighSeverityCount
+// trio (CompletedAt is omitted; the drawer has no use for it per UI-SPEC).
+type taskLoopEvaluation struct {
+	Decision          string `json:"decision"`
+	FindingsCount     int32  `json:"findingsCount"`
+	HighSeverityCount int32  `json:"highSeverityCount"`
 }
 
 // Get implements GET /api/v1/tasks/{name}[?namespace=foo]. Returns the
@@ -170,23 +203,50 @@ func (h *TasksHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// degradation contract, never a 500.
 	traceID, traceSpanID := h.resolveTaskTraceIdentity(ctx, &tk, projectName)
 
+	// hasVerification mirrors hasVerificationContract's semantics
+	// (internal/controller/task_controller.go:2138) inline — this package
+	// does not import internal/controller. LoopRunID/AttemptID use the
+	// controller's exact derivation formula (task_controller.go:2088-2089)
+	// and are only emitted alongside a real verification contract.
+	hasVerification := tk.Spec.Verification.GateCommand != "" && tk.Spec.Verification.Phase == "Locked"
+	var loopRunID, attemptID string
+	if hasVerification {
+		loopRunID = string(tk.UID)
+		attemptID = fmt.Sprintf("%s-%d", tk.UID, tk.Status.Attempt)
+	}
+	var lastEvaluation *taskLoopEvaluation
+	if le := tk.Status.LoopStatus.LastEvaluation; le != nil {
+		lastEvaluation = &taskLoopEvaluation{
+			Decision:          le.Decision,
+			FindingsCount:     le.FindingsCount,
+			HighSeverityCount: le.HighSeverityCount,
+		}
+	}
+
 	writeJSON(w, http.StatusOK, taskDetail{
-		Name:         tk.Name,
-		ProjectName:  projectName,
-		PlanName:     planName,
-		Status:       status,
-		Namespace:    tk.Namespace,
-		Attempt:      tk.Status.Attempt,
-		AttemptMax:   attemptMax,
-		PodName:      podName,
-		ExitCode:     tk.Status.ExitCode,
-		WaveIndex:    waveIndex,
-		ScheduledAt:  scheduledAt,
-		EnvelopePath: fmt.Sprintf("/workspace/envelopes/%s/result.json", string(tk.UID)),
-		ElapsedText:  elapsedText,
-		Conditions:   conds,
-		TraceID:      traceID,
-		TraceSpanID:  traceSpanID,
+		Name:                tk.Name,
+		ProjectName:         projectName,
+		PlanName:            planName,
+		Status:              status,
+		Namespace:           tk.Namespace,
+		Attempt:             tk.Status.Attempt,
+		AttemptMax:          attemptMax,
+		PodName:             podName,
+		ExitCode:            tk.Status.ExitCode,
+		WaveIndex:           waveIndex,
+		ScheduledAt:         scheduledAt,
+		EnvelopePath:        fmt.Sprintf("/workspace/envelopes/%s/result.json", string(tk.UID)),
+		ElapsedText:         elapsedText,
+		Conditions:          conds,
+		TraceID:             traceID,
+		TraceSpanID:         traceSpanID,
+		HasVerification:     hasVerification,
+		LoopIteration:       tk.Status.LoopStatus.Iteration,
+		VerifyMaxIterations: tk.Spec.Verification.MaxIterations,
+		LoopExitReason:      string(tk.Status.LoopStatus.ExitReason),
+		LastEvaluation:      lastEvaluation,
+		LoopRunID:           loopRunID,
+		AttemptID:           attemptID,
 	})
 }
 

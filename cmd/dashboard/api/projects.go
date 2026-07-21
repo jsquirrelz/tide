@@ -361,12 +361,14 @@ func (h *ProjectsHandler) countActiveMilestones(ctx context.Context, p *tidev1al
 // has met or exceeded it. Zero cap = no enforcement = always within.
 //
 // BlockingConditions is populated by iterating p.Status.Conditions and
-// keeping only entries where Type is ConditionBudgetBlocked or
-// ConditionBillingHalt AND Status == ConditionTrue. Pre-allocated with
-// make([]projectCondition, 0, 2) so zero matches serialize as [] not null
-// (D-UI-SPEC empty-array contract). Age uses the same formatAge helper from
-// tasks.go (same package). Whitelist limits exposure to exactly 2 types
-// per T-14-06-01/02/03.
+// keeping only entries where Type is ConditionBudgetBlocked,
+// ConditionBillingHalt, or ConditionVerifyHalt (Phase 53 D-09) AND
+// Status == ConditionTrue. Pre-allocated to bound payload size so zero
+// matches serialize as [] not null (D-UI-SPEC empty-array contract). Age
+// uses the same formatAge helper from tasks.go (same package). Whitelist
+// limits exposure to exactly these 3 types per T-14-06-01/02/03 + T-53-09 —
+// the analogous failure-halt condition is a deliberately deferred gap (not
+// OBS-04 scope), not folded in here.
 func summarize(p *tidev1alpha3.Project, activeMilestoneCount int) projectSummary {
 	cap := p.Spec.Budget.AbsoluteCapCents
 	spent := p.Status.Budget.CostSpentCents
@@ -375,15 +377,18 @@ func summarize(p *tidev1alpha3.Project, activeMilestoneCount int) projectSummary
 		within = spent < cap
 	}
 
-	// Whitelist: only BudgetBlocked and BillingHalt, Status==True only.
-	// Pre-allocate to 2 to bound payload and ensure []-not-null serialization.
+	// Whitelist: BudgetBlocked, BillingHalt, and VerifyHalt, Status==True
+	// only. Pre-allocate to 3 to bound payload and ensure []-not-null
+	// serialization.
 	now := time.Now()
-	blocking := make([]projectCondition, 0, 2)
+	blocking := make([]projectCondition, 0, 3)
 	for _, c := range p.Status.Conditions {
 		if c.Status != metav1.ConditionTrue {
 			continue
 		}
-		if c.Type != tidev1alpha3.ConditionBudgetBlocked && c.Type != tidev1alpha3.ConditionBillingHalt {
+		if c.Type != tidev1alpha3.ConditionBudgetBlocked &&
+			c.Type != tidev1alpha3.ConditionBillingHalt &&
+			c.Type != tidev1alpha3.ConditionVerifyHalt {
 			continue
 		}
 		blocking = append(blocking, projectCondition{

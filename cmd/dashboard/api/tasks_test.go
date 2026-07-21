@@ -11,7 +11,9 @@ You may obtain a copy of the License at
 package api
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -485,6 +487,146 @@ func TestTasksHandlerElapsedText(t *testing.T) {
 				t.Errorf("ElapsedText=%q want substring %q", body.ElapsedText, tc.wantSubstr)
 			}
 		})
+	}
+}
+
+// TestTasksHandlerLoopProvenance covers Phase 53 D-07/OBS-04: a Task with a
+// Locked verification contract + a populated LoopStatus surfaces the full
+// loop-provenance summary — hasVerification, loopIteration,
+// verifyMaxIterations (from Spec.Verification.MaxIterations, NOT
+// Caps.Iterations), the unchanged attemptMax (from Caps.Iterations),
+// lastEvaluation's three sub-fields, and derived loopRunId/attemptId. Also
+// pins LOOP-03 at the wire level: the raw JSON body never carries an
+// iteration-history array or a key matching "history".
+func TestTasksHandlerLoopProvenance(t *testing.T) {
+	caps := &tidev1alpha3.Caps{Iterations: 5}
+	tk := &tidev1alpha3.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "task-loop",
+			Namespace: "default",
+			UID:       types.UID("task-loop-uid"),
+		},
+		Spec: tidev1alpha3.TaskSpec{
+			PlanRef:             "missing",
+			FilesTouched:        []string{"a.go"},
+			DeclaredOutputPaths: []string{"/workspace/a"},
+			Caps:                caps,
+			Verification: tidev1alpha3.VerificationSpec{
+				Phase:         "Locked",
+				GateCommand:   "make test",
+				MaxIterations: 2,
+			},
+		},
+		Status: tidev1alpha3.TaskStatus{
+			Phase:   "Repairing",
+			Attempt: 1,
+			LoopStatus: tidev1alpha3.LoopStatus{
+				Iteration:  2,
+				ExitReason: "verify_exhausted",
+				LastEvaluation: &tidev1alpha3.EvaluationSummary{
+					Decision:          "REPAIRABLE",
+					FindingsCount:     3,
+					HighSeverityCount: 1,
+				},
+			},
+		},
+	}
+	_, router := newTasksHandler(t, nil, tk)
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/tasks/task-loop")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	rawBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+
+	var body taskDetail
+	if err := json.Unmarshal(rawBody, &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !body.HasVerification {
+		t.Errorf("HasVerification=false want true")
+	}
+	if body.LoopIteration != 2 {
+		t.Errorf("LoopIteration=%d want 2", body.LoopIteration)
+	}
+	if body.VerifyMaxIterations != 2 {
+		t.Errorf("VerifyMaxIterations=%d want 2", body.VerifyMaxIterations)
+	}
+	if body.AttemptMax != 5 {
+		t.Errorf("AttemptMax=%d want 5 (unchanged Caps.Iterations source)", body.AttemptMax)
+	}
+	if body.LoopExitReason != "verify_exhausted" {
+		t.Errorf("LoopExitReason=%q want verify_exhausted", body.LoopExitReason)
+	}
+	if body.LastEvaluation == nil {
+		t.Fatalf("LastEvaluation is nil, want populated")
+	}
+	if body.LastEvaluation.Decision != "REPAIRABLE" || body.LastEvaluation.FindingsCount != 3 || body.LastEvaluation.HighSeverityCount != 1 {
+		t.Errorf("LastEvaluation=%+v", body.LastEvaluation)
+	}
+	if body.LoopRunID != "task-loop-uid" {
+		t.Errorf("LoopRunID=%q want task-loop-uid", body.LoopRunID)
+	}
+	if body.AttemptID != "task-loop-uid-1" {
+		t.Errorf("AttemptID=%q want task-loop-uid-1", body.AttemptID)
+	}
+
+	// LOOP-03 wire-level pin: no key matching "history" and no array of
+	// iterations anywhere in the raw body.
+	if bytes.Contains(bytes.ToLower(rawBody), []byte("history")) {
+		t.Errorf("response body contains a \"history\" token, want none (LOOP-03): %s", rawBody)
+	}
+}
+
+// TestTasksHandlerLoopProvenanceAbsentWithoutContract covers the omitempty +
+// gating half of D-07: a Task with no verification contract (zero-value
+// Spec.Verification, zero-value Status.LoopStatus) emits none of the new
+// loop-provenance keys in the JSON body.
+func TestTasksHandlerLoopProvenanceAbsentWithoutContract(t *testing.T) {
+	tk := &tidev1alpha3.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "task-nocontract",
+			Namespace: "default",
+			UID:       types.UID("task-nocontract-uid"),
+		},
+		Spec: tidev1alpha3.TaskSpec{
+			PlanRef:             "missing",
+			FilesTouched:        []string{"a.go"},
+			DeclaredOutputPaths: []string{"/workspace/a"},
+		},
+		Status: tidev1alpha3.TaskStatus{Phase: "Running"},
+	}
+	_, router := newTasksHandler(t, nil, tk)
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/tasks/task-nocontract")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	rawBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal(rawBody, &m); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, key := range []string{
+		"hasVerification", "loopIteration", "verifyMaxIterations",
+		"loopExitReason", "lastEvaluation", "loopRunId", "attemptId",
+	} {
+		if _, present := m[key]; present {
+			t.Errorf("key %q present in body, want absent (omitempty on zero-value loop state): %s", key, rawBody)
+		}
 	}
 }
 
