@@ -222,7 +222,7 @@ Plans:
   2. A fresh install gets Task-loop auto-repair + Plan/Milestone/Project escalation enabled at milestone+project scope by default; an in-place `helm upgrade` on an existing install leaves the verify/loop tier off — proven by an upgrade-path test.
   3. The dashboard shows nested loop provenance (Project run → Task iteration → Execution attempt/tool spans) and renders `VerifyHalt` as a visually distinct state from `Failed`, with staged findings browsable through the existing gitfetch/artifacts API (no new endpoint).
 
-**Plans**: 10 plans
+**Plans**: 11 plans
 **UI hint**: yes (53-UI-SPEC.md approved — locks the OBS-04 dashboard contract)
 
 Plans:
@@ -243,6 +243,7 @@ Plans:
 
 - [ ] 53-08-PLAN.md — TaskDetailDrawer Verification section + findings disclosure + action arms + plan-check mirror line + embed regen
 - [ ] 53-10-PLAN.md — Task verdict-final findings-push trigger (haltVerify/markVerifiedSucceeded seam + VerifyHalted retry arm, TidePushImage on TaskReconcilerDeps)
+- [ ] 53-11-PLAN.md — Verifier-side findings.json writer (verdict-aligned artifact beside out.json + pytest proof — closes the 53-03-surfaced cumulative-push poison)
 
 **Wave 4** *(blocked on Wave 3)*
 
@@ -269,4 +270,4 @@ Phases execute in numeric order: 48 → 49 → 50 → 51 → 52 → 53
 | 50. Execution-Loop Hardening + Loop-Native Observability | v1.0.9 | 7/7 | Complete    | 2026-07-19 |
 | 51. The Task Loop | v1.0.9 | 8/8 | Complete    | 2026-07-20 |
 | 52. Per-Level LoopPolicy Parameterization | v1.0.9 | 11/11 | Complete    | 2026-07-21 |
-| 53. Chart Config + Dashboard Provenance Surfacing | v1.0.9 | 4/10 | In Progress|  |
+| 53. Chart Config + Dashboard Provenance Surfacing | v1.0.9 | 4/11 | In Progress|  |

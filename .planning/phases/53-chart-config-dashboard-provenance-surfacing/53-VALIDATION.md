@@ -17,10 +17,10 @@ created: 2026-07-21
 
 | Property | Value |
 |----------|-------|
-| **Framework** | go test (envtest via Ginkgo, helm-template contract tests, kind suite) + vitest (dashboard SPA) |
-| **Config file** | Makefile targets (`test`, `test-int`, `lint`, `verify-dashboard-freshness`, `verify-chart-reproducible`) / `dashboard/web/vitest` config |
+| **Framework** | go test (envtest via Ginkgo, helm-template contract tests, kind suite) + vitest (dashboard SPA) + pytest (langgraph verifier) |
+| **Config file** | Makefile targets (`test`, `test-int`, `lint`, `verify-dashboard-freshness`, `verify-chart-reproducible`, `test-langgraph-verifier`) / `dashboard/web/vitest` config |
 | **Quick run command** | `go test ./internal/controller/... ./cmd/dashboard/... ./pkg/dispatch/... && (cd dashboard/web && npx vitest run)` |
-| **Full suite command** | `make test && make lint && make verify-chart-reproducible && make verify-dashboard-freshness && (cd dashboard/web && npm test) && make test-int` |
+| **Full suite command** | `make test && make lint && make verify-chart-reproducible && make verify-dashboard-freshness && (cd dashboard/web && npm test) && make test-langgraph-verifier && make test-int` |
 | **Estimated runtime** | quick ~90s · full ~15-25 min (kind suite dominates) |
 
 ---
@@ -28,7 +28,7 @@ created: 2026-07-21
 ## Sampling Rate
 
 - **After every task commit:** Run the quick command scoped to the packages touched (the narrowest command in the map below)
-- **After every plan wave:** Run `make test && make lint` (+ `verify-dashboard-freshness` when SPA files changed; + `make verify-chart-reproducible` + helm-template go tests when `hack/helm/` changed)
+- **After every plan wave:** Run `make test && make lint` (+ `verify-dashboard-freshness` when SPA files changed; + `make verify-chart-reproducible` + helm-template go tests when `hack/helm/` changed; + `make test-langgraph-verifier` when `cmd/tide-langgraph-verifier/` changed)
 - **Before `/gsd:verify-work`:** Full suite must be green — MAKE_EXIT read explicitly, `grep -nE '^--- FAIL|^FAIL\s'` on the test-int log (CLAUDE.md discipline)
 - **Max feedback latency:** 120 seconds
 
@@ -56,6 +56,8 @@ created: 2026-07-21
 | 53-08-T2 | 53-08 | 3 | OBS-04 | — | plan mirror; absence renders nothing; embed fresh | tsc + vitest + freshness gate | `cd dashboard/web && npx tsc --noEmit -p . && npx vitest run && cd ../.. && make verify-dashboard-freshness` | ✓ | ⬜ pending |
 | 53-10-T1 | 53-10 | 3 | OBS-04 | T-53-23/24/25 | verdict-final trigger ungated by dispatch holds; ensure-entry union; non-fatal errors; existing 4 callers unchanged | go build + go unit | `go build ./... && go test ./internal/controller/... -run TestArtifactPush -count=1` | ✓ extend | ⬜ pending |
 | 53-10-T2 | 53-10 | 3 | OBS-04 | T-53-23/25 | push Job created WHILE ConditionVerifyHalt=True; annotation edge-gate (no churn); busy-race retry; nil-evaluation poison guard | go unit (own file, own Test entry) | `go test ./internal/controller/... -run TestTaskFindingsPush -count=1` | ❌ Wave 0 (new file) | ⬜ pending |
+| 53-11-T1 | 53-11 | 3 | OBS-04 | T-53-26/28 | every parseable-verdict path (incl. dominance rewrites + empty-commands BLOCKED) writes schema-valid findings.json beside out.json | pytest (TDD) | `make test-langgraph-verifier` | ❌ Wave 0 (new file) | ⬜ pending |
+| 53-11-T2 | 53-11 | 3 | OBS-04 | T-53-27/28 | degraded/no-verdict paths write NO findings.json; OSError never masks the out.json/stub relay; golden fixture round-trip | pytest | `make test-langgraph-verifier` | ✓ extend (T1's file) | ⬜ pending |
 | 53-09-T1 | 53-09 | 4 | CFG-02 | T-53-21/22 | sticky posture proven live, isolated from shared release | kind (Ginkgo Label kind, Serial) | `go test ./test/integration/kind/... -run TestIntegrationKind --ginkgo.focus='sticky posture' -count=1` | ❌ Wave 0 (new file) | ⬜ pending |
 | 53-09-T2 | 53-09 | 4 | CFG-01, CFG-02, OBS-04 | — | D-10 ci.yaml-only gates green in-phase | full gates | `make lint && make verify-chart-reproducible && make verify-dashboard-freshness && (cd dashboard/web && npm test) && make test-int` (MAKE_EXIT + FAIL-grep) | ✓ | ⬜ pending |
 
@@ -72,9 +74,10 @@ Created by the plan that needs them (each plan's first verify writes its own tes
 - [ ] `internal/controller/verification_enabled_unit_test.go` — 53-02 T2 (own Test entry, never a TestControllers filter — Phase 51-03 lesson)
 - [ ] `dashboard/web/src/components/TaskDetailDrawer.test.tsx` — 53-08 T1 (confirmed absent 2026-07-21)
 - [ ] `internal/controller/task_findings_push_test.go` — 53-10 T2 (own Test entries — the frozen-halt push proof)
+- [ ] `cmd/tide-langgraph-verifier/verifier/tests/test_findings_artifact.py` — 53-11 T1 creates (TDD RED first); T2 extends
 - [ ] `test/integration/kind/verify_posture_sticky_test.go` — 53-09 T1
 
-*Existing infrastructure (envtest suite, kind suite, vitest, helm-template contract tests, artifact_push/artifacts/tasks/plans/projects test files, StatusBadge/ConditionBadge test files) covers the remainder — verified present 2026-07-21.*
+*Existing infrastructure (envtest suite, kind suite, vitest, helm-template contract tests, pytest verifier suite + conftest fixtures, artifact_push/artifacts/tasks/plans/projects test files, StatusBadge/ConditionBadge test files) covers the remainder — verified present 2026-07-21.*
 
 ---
 
@@ -95,4 +98,4 @@ Created by the plan that needs them (each plan's first verify writes its own tes
 - [x] Feedback latency < 120s (narrowest-command discipline per task)
 - [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** planned 2026-07-21 (planner-filled from 53-01..53-10 PLAN.md tasks; revised 2026-07-21 — plan-check BLOCKER closure added 53-10)
+**Approval:** planned 2026-07-21 (planner-filled from 53-01..53-10 PLAN.md tasks; revised 2026-07-21 — plan-check BLOCKER closure added 53-10; revised again 2026-07-21 — execution-surfaced 53-03 gap (verifier never writes findings.json) added 53-11)
