@@ -8,6 +8,19 @@ A Kubernetes-native orchestrator that runs hierarchical agentic coding work as a
 
 **The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.** If everything else fails, TIDE-on-TIDE must work — that's what proves the paradigm and the implementation simultaneously, and it's the bar for "v1 ships."
 
+## Current Milestone: v1.0.10 — King Tide: Five Loops, One Successor Runtime, Dynamic Workflows (SCOPING 2026-07-21)
+
+**Goal:** TIDE's authoring stack completes the evidence-gated migration to the LangGraph runtime (through the CLI-deprecation decision and the multi-provider `init_chat_model` endgame), all five loops of the [five-loop model](notes/five-loop-model.md) run live (Product, System, Oversight join Execution and Task), and the three dynamic-workflow patterns operate at the stage-dispatch seams.
+
+**Target features:**
+- **Full authoring ladder (evidence-gated, planner-first → executor-last):** planner roles migrate to a LangGraph authoring image behind the unchanged `pkg/dispatch.Subagent` seam, each rung gated on eval evidence vs the CLI baseline; the task executor follows; closes with the **CLI-deprecation decision** + **multi-provider via `init_chat_model`** (the dissolved-OpenAI-backend endgame — retargets dogfood run #2).
+- **Product loop (full):** outcome-level feedback closes into re-planning — the artifact tree is judged against the Project's outcome prompt, not just per-task specs.
+- **System loop (full):** `internal/eval` grows into a real regression/eval loop — template and runtime changes gate on eval evidence.
+- **Oversight loop (full):** gate policy resolves from **level + risk + confidence + history** (not level alone) — the deferred `LoopPolicy.Autonomy` field is finally consumed.
+- **Dynamic workflows:** adversarial verification (N independent refuters at verify seams), generate-and-filter (N candidates judged at planner seams), tournament (cost-gated bracket) — all inside the locked constraint: waves stay derived, cycles stay bugs, NO runtime DAG mutation.
+
+**Scope honesty (2026-07-21):** ~3× v1.0.9's scope (which ran 6 phases / 46 plans for one loop + the contract) — plausibly 12–18 phases. Evidence-gated rungs give natural mid-milestone ship points if a split becomes wise. Carried-in rails: the shared `LoopPolicy`/`LoopStatus` contract, verify-tier chart posture, ESC-04 concurrency/budget accounting (fan-out patterns multiply cost — the ReservationStore and caps are the rails), the Phase-18 eval harness as the evidence baseline. Phase numbering continues from 53.
+
 ## Last Released Milestone: v1.0.9 — Slack Tide: The Task Loop (SHIPPED 2026-07-21, tag `v1.0.9`)
 
 **Outcome (complete 2026-07-21):** Delivered across 6 phases / 46 plans (48–53); all 28 requirements met. The Task loop runs live (independent LangGraph evaluator, evidence-seeded fresh attempts, `ConditionVerifyHalt` exhaustion — proven by billable red/green runs on kind); one `ResolveLoopPolicy` resolver parameterizes the same contract at every level (plan-check re-plan with stall detection; Phase/Milestone/Project escalate-only); the verify tier configures chart-first with a sticky install-ON/upgrade-OFF posture (render-pair + live kind upgrade proofs); and the dashboard surfaces nested loop provenance with `VerifyHalt` distinct from `Failed`, findings browsable through the existing artifacts API. Fail-closed doctrine held throughout (verdicts, terminal reasons, config parsing, posture). Milestone archive: [milestones/v1.0.9-ROADMAP.md](milestones/v1.0.9-ROADMAP.md).
@@ -217,4 +230,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-21 — v1.0.9 "Slack Tide" RELEASED (tag `v1.0.9` @ `97dcc5d9`, rc-gated via rc.1; 9 images + 2 OCI charts + 5 binaries, anon-verified). Next milestone unscoped — `/gsd:new-milestone`. Prior: v1.0.8 Phoenix Rising 2026-07-17.*
+*Last updated: 2026-07-21 — started milestone v1.0.10 "King Tide": full LangGraph authoring ladder + endgame, full Product/System/Oversight loops, all three dynamic-workflow patterns. Requirements + roadmap pending. Prior: v1.0.9 Slack Tide RELEASED 2026-07-21.*
