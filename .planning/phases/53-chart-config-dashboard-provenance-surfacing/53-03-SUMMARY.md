@@ -118,6 +118,10 @@ None - no external service configuration required.
 - The `findings.json`-writer gap in `cmd/tide-langgraph-verifier/verifier/__main__.py` is a real, verified blocker to the FULL end-to-end "findings browsable through gitfetch" claim (D-07/OBS-04) — a task-kind entry will hard-fail tide-push's cumulative push today because nothing writes `findings.json`. This must be resolved (likely alongside or before 53-10's trigger lands) or explicitly deferred with an owner.
 - Dashboard-side `kind=task` requests now succeed end-to-end against the gitfetch path once a real `findings.json` exists on the run branch — verified with a synthetic fixture in `TestArtifactsTaskFindingsAvailable`.
 
+## Self-Check: PASSED
+
+All 5 files verified present (4 declared + this SUMMARY.md); all 4 commit hashes (20b6fd52, 7bf3e5dc, 4ddde943, d4736214) verified in git log.
+
 ---
 *Phase: 53-chart-config-dashboard-provenance-surfacing*
 *Completed: 2026-07-21*
