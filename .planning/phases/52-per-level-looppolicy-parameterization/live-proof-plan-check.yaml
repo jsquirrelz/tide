@@ -1,0 +1,39 @@
+# Phase 52 live proof — PLAN-CHECK re-plan loop (52-07/52-09) in tide-lv4.
+#
+# Same bare-cascade recipe as live-proof-bare-cascade.yaml (namespace resources
+# + secrets + PVC prewarm all provisioned FIRST; see that file), but the
+# verification contract is PLAN-level only: the stub-authored Plan enters
+# Verifying after its child Tasks materialize (holding all Task dispatch),
+# dispatches tide-verifier-plan-<uid>-1 whose gate `test -f VERIFIED.md` is red
+# against the seed (no VERIFIED.md) → deterministic failure forces REPAIRABLE →
+# dispatchPlanRepair deletes the child Tasks, stamps the replan-findings
+# annotation, and re-dispatches tide-plan-<uid>-2 carrying the findings block →
+# the fresh attempt's own Verifying/plan-check cycle → still red → exhaustion →
+# onExhaustion requireApproval park → `tide approve` resolves it; the approved
+# Plan releases its child Tasks and the cascade completes.
+#
+# The seed must land between Status.Git.BranchName being minted and the FIRST
+# plan-check verifier's worktree-checkout init container — the driving session
+# scripts the branch-wait + seed as one step (the plan-check seam fires ~40s
+# after apply, much earlier than level-verify's post-execution seam).
+apiVersion: tideproject.k8s/v1alpha3
+kind: Project
+metadata: {name: tide-lv4-project, namespace: tide-lv4}
+spec:
+  schemaRevision: v1alpha3
+  targetRepo: "https://git.example.internal/stub/tide-lv4.git"
+  providerSecretRef: tide-provider-secret
+  # Tight safety ceiling ($5) — hard backstop, not a target. This loop makes
+  # up to TWO real verifier calls (attempt 1 + the re-planned attempt 2).
+  budget: {absoluteCapCents: 500}
+  subagent: {model: claude-sonnet-4-6}
+  gates: {milestone: auto, phase: auto, plan: auto, task: auto, pauseBetweenWaves: false}
+  # Plan-level contract ONLY — Phase/Task carry none, isolating the plan-check
+  # loop. maxIterations 1 = exactly one findings-seeded re-plan (D-04 default).
+  verification:
+    plan:
+      phase: Locked
+      version: 1
+      gateCommand: "test -f VERIFIED.md"
+      maxIterations: 1
+      onExhaustion: requireApproval

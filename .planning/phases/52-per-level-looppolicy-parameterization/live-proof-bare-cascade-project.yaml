@@ -1,0 +1,40 @@
+# Phase 52 live proof — the bare Project (apply ONLY after every resource in
+# live-proof-bare-cascade.yaml + both secrets exist in tide-lv2; see that file's
+# header for the ordering lesson).
+#
+# No spec.git → no clone/push Jobs (the D-04 guard); the bare repo the
+# level-verify worktree-checkout init container reads is seeded manually at
+# /workspace/repo.git (live-proof-bare-repo-seed.yaml, templated) once
+# Status.Git.BranchName is set.
+#
+# subagent.model is the REAL model: the level verifier inherits the task-level
+# model (ResolveProvider(project,"task")) and makes a real Anthropic call
+# ("stub" 404s, haiku spirals — Phase-51 lesson). Every planner/executor Job
+# still runs the stub IMAGE (CLAUDE_SUBAGENT_IMAGE helm override), so the
+# hierarchy cascade itself stays free; only the verifier bills.
+apiVersion: tideproject.k8s/v1alpha3
+kind: Project
+metadata: {name: tide-lv2-project, namespace: tide-lv2}
+spec:
+  schemaRevision: v1alpha3
+  # RFC 2606 sentinel — stub planners ignore targetRepo; https:// passes the CEL
+  # rule rejecting file:// URLs.
+  targetRepo: "https://git.example.internal/stub/tide-lv2.git"
+  providerSecretRef: tide-provider-secret
+  # Tight safety ceiling ($5). A targeted loop proof realistically costs a few
+  # cents; this is a hard backstop against a runaway loop, NOT a target.
+  budget: {absoluteCapCents: 500}
+  subagent: {model: claude-sonnet-4-6}
+  gates: {milestone: auto, phase: auto, plan: auto, task: auto, pauseBetweenWaves: false}
+  # Phase-level verification contract ONLY — Plan/Task carry no contract so
+  # neither plan-check nor the Task loop fires; this fixture isolates level-verify.
+  # Gate `test -f VERIFIED.md` is red against the seed (no VERIFIED.md) →
+  # non-APPROVED at maxIterations:0 → onExhaustion requireApproval → the Phase
+  # parks at AwaitingApproval; `tide approve` resumes it to Succeeded.
+  verification:
+    phase:
+      phase: Locked
+      version: 1
+      gateCommand: "test -f VERIFIED.md"
+      maxIterations: 0
+      onExhaustion: requireApproval

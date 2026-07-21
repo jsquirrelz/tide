@@ -1,0 +1,73 @@
+# Phase 52 live proof — LEVEL-VERIFY via the BARE-PROJECT cascade (attempt 2).
+#
+# Lesson from the first fixture (live-proof-level-verify.yaml): a directly-applied
+# Project→…→Task hierarchy does not drive Plan→Phase succession — the succession
+# machinery is fed by the planner-authored materialization path (reporter creates
+# child CRs after each planner Job). And the first attempt's reporter RBAC was
+# created AFTER the project planner had already spawned its reporter (spawn-once
+# guard keyed on planner UID), so the tree stalled at AuthoringPlanner forever.
+#
+# This fixture mirrors test/integration/kind/testdata/bare-project.yaml (the
+# proven $0 full-cascade spec): apply ONLY a Project; stub planners author
+# Milestone→Phase→Plan→Task; the phase-level verification contract resolves from
+# Project.Spec.Verification.Phase (Phase 52 per-level defaults). Only the
+# verifier bills (real model; the stub image serves every planner/executor Job).
+#
+# ORDER MATTERS: everything in this file (namespace, SAs, RBAC, PVC) plus the
+# two secrets (tide-signing-key copied from tide-system, tide-provider-secret
+# with the real key — created by the driving session, never committed here)
+# must exist BEFORE the Project is applied. The Project is deliberately in a
+# separate file: live-proof-bare-cascade-project.yaml.
+#
+# The PVC's storage class is WaitForFirstConsumer: the ProjectReconciler
+# requeues on "shared PVC not yet Bound" but never mounts it itself, so a
+# throwaway prewarm pod must mount the PVC once to bind it (the harness's
+# pvcPrewarmPod equivalent) or the cascade deadlocks before the init Job.
+apiVersion: v1
+kind: Namespace
+metadata: {name: tide-lv2}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tide-subagent
+  namespace: tide-lv2
+automountServiceAccountToken: true
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tide-reporter
+  namespace: tide-lv2
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tide-reporter
+  namespace: tide-lv2
+rules:
+  - apiGroups: ["tideproject.k8s"]
+    resources: ["milestones", "phases", "plans", "tasks", "waves"]
+    verbs: ["create", "get", "list"]
+  - apiGroups: ["tideproject.k8s"]
+    resources: ["projects"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tide-reporter
+  namespace: tide-lv2
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tide-reporter
+subjects:
+  - kind: ServiceAccount
+    name: tide-reporter
+    namespace: tide-lv2
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: tide-projects, namespace: tide-lv2}
+spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 1Gi}}}

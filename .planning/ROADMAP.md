@@ -30,7 +30,7 @@ Phase numbering continues from v1.0.8 (last phase was 47); v1.0.9 starts at Phas
 - [x] **Phase 49: Common Loop Contract + Verdict/Envelope/Persistence Schema** - `LoopPolicy`/`LoopStatus` + `gate_decision` schema + findings size×locality persistence, locked before any consumer logic (completed 2026-07-18)
 - [x] **Phase 50: Execution-Loop Hardening + Loop-Native Observability** - `loopRunID`/terminal reasons/run-evidence envelope + `loop.*`/`evaluation.*` spans the Task loop will consume (completed 2026-07-19)
 - [x] **Phase 51: The Task Loop** - Independent-evaluator-driven verification contract, fresh-attempt-with-evidence-packet, three-tier escalation, concurrency/tracing safety wired at the same dispatch sites (completed 2026-07-20)
-- [ ] **Phase 52: Per-Level LoopPolicy Parameterization** - The same verification contract runs at every level as a `LoopPolicy` parameterization — plan-check re-plan, Phase/Milestone/Project escalation
+- [x] **Phase 52: Per-Level LoopPolicy Parameterization** - The same verification contract runs at every level as a `LoopPolicy` parameterization — plan-check re-plan, Phase/Milestone/Project escalation (completed 2026-07-21)
 - [ ] **Phase 53: Chart Config + Dashboard Provenance Surfacing** - Chart-first per-level defaults (safe on upgrade) + nested loop provenance on the dashboard
 
 ## Phase Details
@@ -179,7 +179,7 @@ Plans:
   2. Phase/Milestone/Project run with `maxIterations:0` — any verify finding at these levels escalates straight to `requireApproval` rather than auto-repairing, because these levels close on their observable outcome, not task-completion.
   3. Gate policy is resolved from the loop-level field on `LoopPolicy`, not from CRD kind/hierarchy position — one resolver function serves all levels.
 
-**Plans:** 10/11 plans executed
+**Plans:** 11/11 plans complete
 
 Plans:
 **Wave 1**
@@ -209,7 +209,7 @@ Plans:
 
 **Wave 6** *(blocked on Wave 5)*
 
-- [ ] 52-11-PLAN.md — kind worktree live proof (non-billable) + operator-gated billable loop checkpoint (51-08 precedent)
+- [x] 52-11-PLAN.md — kind worktree live proof (non-billable) + operator-gated billable loop checkpoint (51-08 precedent)
 
 ### Phase 53: Chart Config + Dashboard Provenance Surfacing
 
@@ -245,5 +245,5 @@ Phases execute in numeric order: 48 → 49 → 50 → 51 → 52 → 53
 | 49. Common Loop Contract + Verdict/Envelope/Persistence Schema | v1.0.9 | 4/4 | Complete    | 2026-07-18 |
 | 50. Execution-Loop Hardening + Loop-Native Observability | v1.0.9 | 7/7 | Complete    | 2026-07-19 |
 | 51. The Task Loop | v1.0.9 | 8/8 | Complete    | 2026-07-20 |
-| 52. Per-Level LoopPolicy Parameterization | v1.0.9 | 10/11 | In Progress|  |
+| 52. Per-Level LoopPolicy Parameterization | v1.0.9 | 11/11 | Complete    | 2026-07-21 |
 | 53. Chart Config + Dashboard Provenance Surfacing | v1.0.9 | 0/TBD | Not started | - |

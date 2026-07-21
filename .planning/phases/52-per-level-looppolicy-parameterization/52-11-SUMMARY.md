@@ -6,12 +6,20 @@ tags: [kind, worktree-provisioning, ESC-01, live-proof, checkpoint]
 key-files:
   created:
     - test/integration/kind/level_verify_worktree_test.go
-  modified: []
+    - .planning/phases/52-per-level-looppolicy-parameterization/live-proof-bare-cascade.yaml
+    - .planning/phases/52-per-level-looppolicy-parameterization/live-proof-bare-cascade-project.yaml
+    - .planning/phases/52-per-level-looppolicy-parameterization/live-proof-plan-check.yaml
+  modified:
+    - internal/controller/reporter_jobspec.go
+    - internal/controller/plan_controller.go
+    - internal/controller/reporter_spawn_idempotency_test.go
+    - internal/controller/plan_verify_dispatch_test.go
+    - api/v1alpha3/task_types.go
 metrics:
   tasks_total: 2
-  tasks_complete: 1
-  tasks_checkpoint: 1
-status: checkpoint
+  tasks_complete: 2
+  tasks_checkpoint: 0
+status: complete
 ---
 
 # Plan 52-11 Summary — Live Worktree Proof + Operator-Gated Billable Checkpoint
@@ -130,6 +138,114 @@ init container → gate → non-APPROVED → AwaitingApproval park → `tide app
 Succeeded; and the plan-check REPAIRABLE→re-plan loop. Cluster `tide-test` is left
 UP (deployed dev-head + real-key secrets + DEFECT-A's CRD fix applied) for a
 follow-up session to resume from.
+
+## Task 2 — COMPLETE (resumed session, 2026-07-20/21): both loops proven live; TWO more shipped defects surfaced + root-fixed
+
+The resume session shipped DEFECT-A's Go change into the pod (rebuilt
+`controller:test`, kind-loaded, rolled out), then closed the previous session's
+succession blocker and drove BOTH loops end-to-end with real Anthropic calls.
+**The live gate caught two more real shipped defects the green suites missed
+(the 51-08 pattern, now at 3 for this checkpoint alone), both root-fixed with
+RED-first regression specs and re-proven live.**
+
+### Succession blocker resolved (fixture, not product)
+The direct-applied hierarchy stalls because succession is fed by the
+planner-authored materialization path; and the first fixture's reporter RBAC
+was created AFTER the project planner spawned its reporter (spawn-once marker
+already stamped → never retried). The proven recipe is the bare-Project
+cascade (`live-proof-bare-cascade*.yaml`, mirroring `testdata/bare-project.yaml`):
+provision namespace + SAs + reporter RBAC + PVC (+ a prewarm pod — the
+WaitForFirstConsumer PVC never binds otherwise; the ProjectReconciler requeues
+but never mounts) + secrets FIRST, then apply ONLY a Project; stub planners
+author Milestone→Phase→Plan→Task ($0), and the level contract resolves from
+`Project.Spec.Verification.<level>`. Seed the bare repo (templated seed pod)
+between `Status.Git.BranchName` minting and the verifier dispatch.
+
+### Level-verify proof (phase level) — PASSED, both legs
+- **Red leg (`tide-lv2`):** cascade → all children Succeeded → Phase
+  `Verifying` ("All children succeeded; dispatching an independent verifier
+  against the locked verification contract") → `tide-verifier-phase-<uid>-1`
+  (init containers `envelope-writer`/`worktree-checkout`/`tide-credproxy` all
+  exit 0; checkout log: `worktree-checkout: provisioned <uid> @
+  tide/run-tide-lv2-project-1784596833 -> /workspace/worktrees/<uid>`) → real
+  Sonnet call, gate `test -f VERIFIED.md` red → termination stub
+  `{"gateDecision": "REPAIRABLE", "findingsCount": 1, "highSeverityCount": 1}`
+  → `maxIterations:0` exhaustion → `loopStatus {exitReason: escalated,
+  iteration: 1, lastEvaluation: REPAIRABLE}` → **AwaitingApproval park** →
+  `tide approve` → **Succeeded with exactly one verifier Job**; Milestone
+  Succeeded, Project Complete.
+- **Green leg (`tide-lv3`):** seed includes VERIFIED.md → verifier stub
+  `{"gateDecision": "APPROVED", "findingsCount": 0}` → `loopStatus
+  {exitReason: approved}` → **Succeeded with no park**, Project Complete.
+
+### DEFECT-B (FIXED + committed `1d09e049`) — re-plan loop dead-stall: attempt-blind reporter Job name
+First plan-check drive (`tide-lv4`): REPAIRABLE → `dispatchPlanRepair` deleted
+the rejected child + re-dispatched `tide-plan-<uid>-2` — and then the loop
+froze in `Running` with zero errors. Root cause: the materialization reporter's
+Job name was `tide-reporter-<planUID>` (attempt-blind); attempt 2's spawn found
+attempt 1's completed reporter Job by name (still inside its 300s TTL — a stub
+planner attempt takes ~20s), skipped the Create as T-09-13 idempotency, stamped
+`PlanReporterSpawnedUID` (proven: the marker held job-2's UID while the only
+reporter pod predated job-2's existence), and **the re-planned attempt's
+children were never materialized**. Invisible to envtest: the plan inline arm
+was the one spawn site without its own idempotency spec. Fix:
+`ReporterJobNameFor(parentUID, attempt)` — single name source for
+BuildReporterJob + the controller Get; attempts >1 get `-<attempt>` (plan is
+the only re-dispatching level; every other level byte-identical). RED-first
+plan-level spec added to `reporter_spawn_idempotency_test.go`.
+
+### DEFECT-C (FIXED + committed `5d2c299f`) — operator approval of an exhausted plan-check loop silently swallowed
+Second plan-check drive (`tide-lv5`, fixed manager): the full loop ran
+(attempt-1 REPAIRABLE → repair → **`tide-reporter-<uid>-2` spawned, fresh child
+materialized** → attempt-2 Verifying → REPAIRABLE → **D-05 stall detection
+fired live**: "re-plan loop stalled: the new plan-check verdict did not
+strictly improve on the prior iteration" → AwaitingApproval park). But `tide
+approve` bounced: the WaveOrLevelPaused transition advanced 01:44:58→01:45:26
+with the same message — the resume returned the Plan to Running, BOTH Verifying
+entry sites re-fired against the SAME consumed verdict, and the Plan re-parked
+~30s later, an endless approve→re-verify→re-park cycle. The P/M/P levels are
+immune (level_verify.go's T-52-25 ExitReason-convergence guard); the plan
+controller had no analog. Fix: `planVerifyResolvedByOperator`
+(ExitReason==escalated AND the ApprovedByUser/ResumedByUser record) guards both
+entry sites — deliberately narrower than T-52-25 so a descent-gate approval
+still verifies and a mid-loop repair still re-enters. RED-first spec (f) added
+to `plan_verify_dispatch_test.go`.
+
+### Plan-check proof — PASSED end-to-end on the fixed manager (`tide-lv5`)
+Verifying → `tide-verifier-plan-<uid>-1` (child Task held un-dispatched, D-03)
+→ REPAIRABLE (1 finding, 1 high-severity) → child-Task deletion + wave prune
+(manager log: "deleted rejected plan-check attempt's child tasks ahead of
+re-plan") → `tide-plan-<uid>-2` findings-seeded planner → attempt-suffixed
+reporter → fresh child → second Verifying → `tide-verifier-plan-<uid>-2` →
+REPAIRABLE → stall exhaustion → AwaitingApproval → `tide approve` → resume
+STUCK (no re-verify/re-park across the entire post-approve window) → held Task
+dispatched → **Task/Plan/Phase/Milestone Succeeded, Project Complete; exactly
+2 verifier Jobs ever** (no third dispatch after operator resolution). This is
+the UAT's "resolved escalation" arm, with the re-plan machinery (findings
+annotation → `EnvelopeIn.RepairFindings`), stall detection, and both defects'
+fixes all observed live.
+
+### ESC-04 rails
+`kubectl get jobs --all-namespaces -l tideproject.k8s/role=verifier` peaked at
+2 cluster-wide (one Complete + one Running); concurrently-Running never
+exceeded 1; cap (2) never exceeded. (The adversarial 3-vs-cap-2 case is pinned
+live by `verifier_concurrency_test.go`, green in this phase's `make test-int`
+28/28 run.)
+
+### Spend
+Five real Sonnet (claude-sonnet-4-6) verifier calls total (lv2 red, lv3 green,
+lv4 attempt-1, lv5 attempts 1+2); every fixture project's rolled-up
+`costSpentCents` reads 1. Aggregate for the entire proof ≈ well under $0.25,
+against $5-per-project `absoluteCapCents: 500` backstops. Cumulative with the
+prior session: still under $0.30.
+
+### Cluster state at close
+`tide-test` left UP. Fixture namespaces `tide-lv2/3/5` hold the completed
+proof hierarchies (evidence); `tide-lv-proof` (superseded first fixture, Project
+parked mid-planner) and `tide-lv4` (pre-DEFECT-B-fix stall evidence) are
+inert — no billable path remains in any of them (planners are stub; no verifier
+can dispatch). Manager pod runs `controller:test` at `5d2c299f` (DEFECT-A+B+C
+all compiled in).
 
 ## Deviations
 

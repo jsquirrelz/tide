@@ -1,13 +1,14 @@
 ---
 phase: 52-per-level-looppolicy-parameterization
 verified: 2026-07-20T10:58:08Z
-status: human_needed
+status: passed
 score: 3/3 must-haves verified
 overrides_applied: 0
 human_verification:
   - test: "Operator-gated billable live-loop proof (52-11 Task 2, checkpoint:human-verify gate=blocking)"
     expected: "Plan-check loop: Verifying -> tide-verifier-plan-*-1 -> REPAIRABLE -> child-Task deletion -> tide-plan-*-2 with findings block -> APPROVED or resolved escalation. Level-verify: phase-level contract -> worktree init container provisions -> real gate command runs -> non-APPROVED parks at AwaitingApproval -> `tide approve` -> Succeeded with exactly one verifier Job. Verifier Job count stays within the concurrency cap throughout."
     why_human: "Requires real Anthropic API spend on the kind-tide-test cluster (real key at ~/.tide/anthropic.key). Deliberately not executed under --auto per the 51-08 precedent — billable spend needs explicit operator authorization. The full billable end-to-end loop is the class of live gate Phase 51 used to catch five stacked latent defects the green suites missed."
+    resolution: "PASSED 2026-07-20/21 (operator-approved billable run). Level-verify red+green legs on tide-lv2/lv3 (park -> tide approve -> Succeeded, exactly one verifier Job; APPROVED -> Succeeded no park). Plan-check full loop on tide-lv5 incl. findings-seeded re-plan, D-05 stall exhaustion, and resolved escalation to Project Complete with exactly 2 verifier Jobs. ESC-04 counts <= cap throughout. Surfaced + root-fixed DEFECT-B (1d09e049) and DEFECT-C (5d2c299f). Record: 52-HUMAN-UAT.md + 52-11-SUMMARY.md."
 warnings:
   - concern: "Flaky Phase-52 envtest spec: level_verify_dispatch_test.go:682 (Project-level LevelVerify APPROVE fall-through)"
     detail: "Failed 1 of 4 verifier-run invocations under Ginkgo's randomized spec ordering; passed deterministically in isolation and in the full `-short` unit tier (86.9s green). Product code (level_verify.go handleLevelVerifierCompletion) is correct — APPROVED without deterministic failure stamps ExitApproved and returns handled=false for same-reconcile fall-through. Root cause is test synchronization: the second `checkProjectComplete` call is not wrapped in Eventually(), so it can race the completed-Job status propagation and observe the machine still in the running->requeue (handled=true) branch. Not a goal blocker; surfaced because it can intermittently red the unit gate."
