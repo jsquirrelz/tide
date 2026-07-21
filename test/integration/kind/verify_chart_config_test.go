@@ -142,6 +142,26 @@ func TestHelmDeploymentTemplateVerifyPostureInstallVsUpgrade(t *testing.T) {
 			t.Fatalf("subagent.verify.posture=disabled must force --verify-levels-json OFF even on a plain install (explicit override beats install semantics, D-05). Got:\n%s", outStr)
 		}
 	})
+
+	// WR-06 (Phase 53 code review): every posture value outside the
+	// auto|enabled|disabled enum used to silently resolve to "auto" — a
+	// "disable"/"Disabled"/"off" typo turned the spend-bearing verifier tier
+	// ON, the opposite of the operator's intent. The template now render-fails
+	// loudly (`fail`), mirroring ParseVerifyLevelDefaults' reject-unknown-
+	// loudly discipline one layer down (T-53-03).
+	t.Run("posture typo render-fails loudly instead of failing open to auto", func(t *testing.T) {
+		for _, typo := range []string{"disable", "Disabled", "off"} {
+			cmd := exec.Command("helm", "template", "tide", chartDir,
+				"--set-string", "subagent.verify.posture="+typo)
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("subagent.verify.posture=%q must render-fail (fail-closed, WR-06), but the render succeeded", typo)
+			}
+			if !strings.Contains(string(out), "subagent.verify.posture must be auto|enabled|disabled") {
+				t.Fatalf("posture=%q render failure must carry the enum message; got:\n%s", typo, out)
+			}
+		}
+	})
 }
 
 // TestHelmDeploymentTemplateMarkerDerefIsNilSafe pins the WR-03 (Phase 53

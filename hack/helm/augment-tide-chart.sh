@@ -251,6 +251,15 @@ if ARGS_MARKER not in content:
 # helper).
 ARGS53_MARKER = "# phase53-verify-args-injected"
 ARGS53_BLOCK = """          {{- $verifyPosture := .Values.subagent.verify.posture | default "auto" }}
+          {{- /* Fail-closed posture validation (WR-06): every value outside the
+               enum used to silently resolve to "auto" — a "disable"/"off"/
+               "Disabled" typo turned the spend-bearing verifier tier ON, the
+               opposite of the operator's intent. Render-fail loudly instead,
+               mirroring ParseVerifyLevelDefaults' reject-unknown-loudly
+               discipline one layer down (T-53-03). */}}
+          {{- if not (has $verifyPosture (list "auto" "enabled" "disabled")) }}
+          {{- fail (printf "subagent.verify.posture must be auto|enabled|disabled, got %q" $verifyPosture) }}
+          {{- end }}
           {{- $verifyMarker := lookup "v1" "ConfigMap" .Release.Namespace "tide-verify-posture" }}
           {{- /* dig, not a direct .data.posture deref: a hand-recreated/patched
                marker ConfigMap with no `data` map (T-53-10 anticipates operators
