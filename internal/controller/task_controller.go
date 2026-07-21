@@ -583,23 +583,27 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 // (Plan 53-09 D-10) to keep its cyclomatic complexity under the gocyclo
 // threshold — a pure refactor, no behavior change.
 //
-// Plan 53-10 terminal-arm retry: re-runs the findings-push trigger on every
-// reconcile of an already-halted Task so the carried-entry edge gate
-// converges even if haltVerify's own verdict-final call raced a busy push
-// Job. Converts the empty ctrl.Result{} into a 5s RequeueAfter ONLY while
-// the entry is not yet carried by any push Job; once carried, steady state
-// — no further requeue, no churn (T-53-23). Project resolution is
-// best-effort, same posture as handleFailedTerminal: an unresolvable
+// Plan 53-10 terminal-arm retry, bounded per WR-02 (Phase 53 code review):
+// re-runs the findings-push trigger on every reconcile of an already-halted
+// Task so the carried-entry edge gate converges even if haltVerify's own
+// verdict-final call raced a busy push Job. Requeues ONLY while the outcome
+// is genuinely retryable (busy push Job, run branch not yet provisioned) —
+// on the established 30s parked-arm cadence, never a hot 5s loop. Both
+// terminal outcomes end the retry: carried (steady state, T-53-23) AND
+// never-eligible (nil LastEvaluation poison-guard shape, git-less project,
+// empty TidePushImage — states a requeue can never change; a Spec/Status
+// edit re-triggers reconcile through the watch anyway). Project resolution
+// is best-effort, same posture as handleFailedTerminal: an unresolvable
 // project just skips this reconcile's retry and tries again next time.
 func (r *TaskReconciler) handleVerifyHaltedTerminal(ctx context.Context, task *tideprojectv1alpha3.Task) taskGateResult {
 	result := ctrl.Result{}
 	if project, pErr := r.resolveProject(ctx, task); pErr == nil && project != nil {
-		carried, pushErr := r.maybeTriggerTaskFindingsPush(ctx, task, project)
+		outcome, pushErr := r.maybeTriggerTaskFindingsPush(ctx, task, project)
 		if pushErr != nil {
 			logf.FromContext(ctx).Error(pushErr, "verdict-final findings push trigger failed at VerifyHalted terminal (non-fatal)", "task", task.Name)
 		}
-		if !carried {
-			result = ctrl.Result{RequeueAfter: 5 * time.Second}
+		if pushErr != nil || outcome == findingsPushRetryable {
+			result = ctrl.Result{RequeueAfter: 30 * time.Second}
 		}
 	}
 	return taskGateResult{shouldHalt: true, result: result}
@@ -2659,6 +2663,30 @@ func (r *TaskReconciler) finishVerifierTerminal(ctx context.Context, task *tidep
 	}
 }
 
+// findingsPushOutcome classifies a maybeTriggerTaskFindingsPush result so
+// the VerifyHalted terminal-arm retry (handleVerifyHaltedTerminal) can
+// distinguish "retry later" from "retrying can never help" (WR-02, Phase 53
+// code review — the prior boolean collapsed both into an unbounded 5s
+// requeue loop for permanently-ineligible Tasks).
+type findingsPushOutcome int
+
+const (
+	// findingsPushCarried: a push Job's carried-entry set includes this
+	// Task's own entry — steady state, no retry (T-53-23 no-churn).
+	findingsPushCarried findingsPushOutcome = iota
+	// findingsPushRetryable: not carried yet, but a later retry can
+	// converge — an in-flight push Job snapshotted before this Task's
+	// status patch, a run branch not yet provisioned, or a fresh push Job
+	// just created (the next reconcile observes its annotation).
+	findingsPushRetryable
+	// findingsPushIneligible: no retry can ever carry the entry from this
+	// state — the Task is not stageable (nil LastEvaluation poison-guard
+	// shape), or the Project can structurally never push (no git remote,
+	// empty TidePushImage). A Spec/Status change re-enqueues the Task
+	// through the watch, so dropping the requeue loses nothing.
+	findingsPushIneligible
+)
+
 // maybeTriggerTaskFindingsPush implements the Task verdict-final findings-push
 // trigger (Plan 53-10 / OBS-04): stages and pushes a Task's verifier findings
 // through the EXISTING artifact-push machinery (triggerArtifactPush) at the
@@ -2672,27 +2700,47 @@ func (r *TaskReconciler) finishVerifierTerminal(ctx context.Context, task *tidep
 // SAME named predicate the collector applies — so the trigger and the
 // collector never diverge on which Tasks are push-eligible; a Task with a nil
 // LoopStatus.LastEvaluation (verifier crashed before a verdict) is never
-// pushed (T-53-25 poison guard).
+// pushed (T-53-25 poison guard) and reports findingsPushIneligible.
+//
+// The never-pushable Project shapes (no spec.git / empty TidePushImage) are
+// pre-gated HERE rather than left to triggerArtifactPush's silent-skip
+// contract (WR-02): they also report findingsPushIneligible so the
+// VerifyHalted terminal arm stops requeueing (and stops re-emitting the
+// image-not-configured Info log every cadence tick for a state that cannot
+// change without a config edit — which re-enqueues through the watch).
 //
 // Edge-gated on stagedEnvelopesAnnotation (Defect E / DASH-02): once a push
 // Job's carried-entry set includes this Task's own <uid>:task/<name> entry,
-// carried=true — callers stop retrying (T-53-23 no-churn). While a push Job
-// exists but has not YET carried the entry (a race with an in-flight push
-// snapshotted before this Task's status patch landed), returns
-// carried=false, err=nil — the ProjectReconciler's isStaleArtifactPush
-// supersede path independently heals this once the in-flight Job completes.
-// While no push Job exists, dispatches a fresh one via triggerArtifactPush,
-// passing this Task as the ensure-entry so the just-patched Task rides the
-// push even though the informer cache backing collectStageEnvelopes' List may
-// not yet have observed the patch.
+// findingsPushCarried — callers stop retrying (T-53-23 no-churn). While a
+// push Job exists but has not YET carried the entry (a race with an
+// in-flight push snapshotted before this Task's status patch landed),
+// returns findingsPushRetryable, err=nil — the ProjectReconciler's
+// isStaleArtifactPush supersede path independently heals this once the
+// in-flight Job completes. While no push Job exists, dispatches a fresh one
+// via triggerArtifactPush, passing this Task as the ensure-entry so the
+// just-patched Task rides the push even though the informer cache backing
+// collectStageEnvelopes' List may not yet have observed the patch.
 //
 // Errors ARE returned to the caller (never swallowed here), but every call
 // site treats them as non-fatal — logged and continued, never failing the
 // verdict-final Status patch (mirrors setVerifyHaltIfNeeded's tolerated-error
 // posture, level_status.go:228-230).
-func (r *TaskReconciler) maybeTriggerTaskFindingsPush(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project) (carried bool, err error) {
+func (r *TaskReconciler) maybeTriggerTaskFindingsPush(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project) (findingsPushOutcome, error) {
 	if project == nil || !taskFindingsStageable(task) {
-		return false, nil
+		return findingsPushIneligible, nil
+	}
+	if project.Spec.Git == nil || project.Spec.Git.RepoURL == "" {
+		// No git remote — there is no run branch to push findings onto, ever.
+		return findingsPushIneligible, nil
+	}
+	if r.Deps.TidePushImage == "" {
+		logf.FromContext(ctx).Info("skipping findings push: TidePushImage not configured", "task", task.Name, "project", project.Name)
+		return findingsPushIneligible, nil
+	}
+	if project.Status.Git.BranchName == "" {
+		// Transient: EnsureRunBranch has not stamped the run branch yet —
+		// the terminal-arm cadence retries until it lands.
+		return findingsPushRetryable, nil
 	}
 
 	pushJobName := fmt.Sprintf("tide-push-%s", project.UID)
@@ -2704,20 +2752,20 @@ func (r *TaskReconciler) maybeTriggerTaskFindingsPush(ctx context.Context, task 
 	case getErr == nil:
 		for e := range strings.SplitSeq(existing.Annotations[stagedEnvelopesAnnotation], ",") {
 			if e == entry {
-				return true, nil
+				return findingsPushCarried, nil
 			}
 		}
 		// Busy but not yet carrying this Task's entry: isStaleArtifactPush
 		// (project_controller.go) independently heals this once the
 		// in-flight Job completes — nothing more to do here.
-		return false, nil
+		return findingsPushRetryable, nil
 	case apierrors.IsNotFound(getErr):
 		if tErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "task", r.Deps.TidePushImage, r.sharedPVCName(), r.Deps.HelmProviderDefaults, task); tErr != nil {
-			return false, tErr
+			return findingsPushRetryable, tErr
 		}
-		return false, nil
+		return findingsPushRetryable, nil
 	default:
-		return false, getErr
+		return findingsPushRetryable, getErr
 	}
 }
 

@@ -33,6 +33,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -43,6 +44,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
+	"github.com/jsquirrelz/tide/internal/owner"
 )
 
 // findingsPushTestProject returns a git-configured, run-branch-provisioned
@@ -140,12 +142,12 @@ func TestTaskFindingsPush_EdgeGate_NoChurnOnceCarried(t *testing.T) {
 		t.Fatalf("get first job: %v", err)
 	}
 
-	carried, err := r.maybeTriggerTaskFindingsPush(context.Background(), task, project)
+	outcome, err := r.maybeTriggerTaskFindingsPush(context.Background(), task, project)
 	if err != nil {
 		t.Fatalf("second trigger: %v", err)
 	}
-	if !carried {
-		t.Error("expected carried=true once the push Job's annotation contains this Task's entry")
+	if outcome != findingsPushCarried {
+		t.Errorf("outcome=%d want findingsPushCarried once the push Job's annotation contains this Task's entry", outcome)
 	}
 
 	var jobs batchv1.JobList
@@ -179,12 +181,12 @@ func TestTaskFindingsPush_BusyRace_RetriesThenCarries(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(project, task, busy).Build()
 	r := findingsTaskReconciler(c, s)
 
-	carried, err := r.maybeTriggerTaskFindingsPush(context.Background(), task, project)
+	outcome, err := r.maybeTriggerTaskFindingsPush(context.Background(), task, project)
 	if err != nil {
 		t.Fatalf("trigger during busy race: %v", err)
 	}
-	if carried {
-		t.Error("expected carried=false while the busy Job's annotation lacks this Task's entry")
+	if outcome != findingsPushRetryable {
+		t.Errorf("outcome=%d want findingsPushRetryable while the busy Job's annotation lacks this Task's entry (WR-02: the terminal arm keeps its 30s cadence)", outcome)
 	}
 
 	var jobs batchv1.JobList
@@ -228,16 +230,131 @@ func TestTaskFindingsPush_PoisonGuard_NilEvaluationNeverTriggers(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(project, task).Build()
 	r := findingsTaskReconciler(c, s)
 
-	carried, err := r.maybeTriggerTaskFindingsPush(context.Background(), task, project)
+	outcome, err := r.maybeTriggerTaskFindingsPush(context.Background(), task, project)
 	if err != nil {
 		t.Fatalf("maybeTriggerTaskFindingsPush: %v", err)
 	}
-	if carried {
-		t.Error("a nil-evaluation halt must never report carried=true")
+	if outcome != findingsPushIneligible {
+		t.Errorf("outcome=%d want findingsPushIneligible — a nil-evaluation halt can never be carried, so the terminal arm must not requeue for it (WR-02)", outcome)
 	}
 
 	var job batchv1.Job
 	if err := c.Get(context.Background(), pushJobFor(project), &job); err == nil {
 		t.Error("a VerifyHalted Task with nil LoopStatus.LastEvaluation must never trigger a push Job (T-53-25 poison guard)")
 	}
+}
+
+// ---------- (e) WR-02: bounded terminal-arm requeue ----------
+
+// labeledTaskCR is taskCR plus the tideproject.k8s/project label so
+// handleVerifyHaltedTerminal's resolveProject label fast-path finds project.
+func labeledTaskCR(name, uid, phase string, withEvaluation bool, project *tideprojectv1alpha3.Project) *tideprojectv1alpha3.Task {
+	task := taskCR(name, uid, phase, withEvaluation)
+	task.Labels = map[string]string{owner.LabelProject: project.Name}
+	return task
+}
+
+// TestVerifyHaltedTerminal_RequeueBounded pins WR-02 (Phase 53 code review):
+// handleVerifyHaltedTerminal's retry arm requeues ONLY for genuinely
+// retryable outcomes (busy push Job not yet carrying the entry, run branch
+// not provisioned) — on the 30s parked-arm cadence, never 5s — and returns
+// NO requeue for both terminal outcomes: carried (T-53-23 steady state) and
+// never-eligible (nil-evaluation poison guard, git-less project, empty
+// TidePushImage), which previously hot-looped every 5s until `tide resume`.
+func TestVerifyHaltedTerminal_RequeueBounded(t *testing.T) {
+	s := fakeSchemeWithAll(t)
+
+	t.Run("poison guard (nil evaluation): no requeue", func(t *testing.T) {
+		project := findingsPushTestProject()
+		task := labeledTaskCR("t-noeval", "uid-noeval", tideprojectv1alpha3.LevelPhaseVerifyHalted, false, project)
+		c := fake.NewClientBuilder().WithScheme(s).WithObjects(project, task).Build()
+		r := findingsTaskReconciler(c, s)
+
+		res := r.handleVerifyHaltedTerminal(context.Background(), task)
+		if res.result.RequeueAfter != 0 {
+			t.Errorf("RequeueAfter=%v want 0 — a never-stageable Task must not requeue forever (WR-02)", res.result.RequeueAfter)
+		}
+	})
+
+	t.Run("git-less project: no requeue", func(t *testing.T) {
+		project := findingsPushTestProject()
+		project.Spec.Git = nil
+		task := labeledTaskCR("t-gitless", "uid-gitless", tideprojectv1alpha3.LevelPhaseVerifyHalted, true, project)
+		c := fake.NewClientBuilder().WithScheme(s).WithObjects(project, task).Build()
+		r := findingsTaskReconciler(c, s)
+
+		res := r.handleVerifyHaltedTerminal(context.Background(), task)
+		if res.result.RequeueAfter != 0 {
+			t.Errorf("RequeueAfter=%v want 0 — a git-less project can never carry the entry (WR-02)", res.result.RequeueAfter)
+		}
+	})
+
+	t.Run("empty TidePushImage: no requeue", func(t *testing.T) {
+		project := findingsPushTestProject()
+		task := labeledTaskCR("t-noimg", "uid-noimg", tideprojectv1alpha3.LevelPhaseVerifyHalted, true, project)
+		c := fake.NewClientBuilder().WithScheme(s).WithObjects(project, task).Build()
+		r := &TaskReconciler{Client: c, Scheme: s, Deps: TaskReconcilerDeps{TidePushImage: ""}}
+
+		res := r.handleVerifyHaltedTerminal(context.Background(), task)
+		if res.result.RequeueAfter != 0 {
+			t.Errorf("RequeueAfter=%v want 0 — an image-less install can never create the push Job (WR-02)", res.result.RequeueAfter)
+		}
+	})
+
+	t.Run("run branch not yet provisioned: 30s cadence", func(t *testing.T) {
+		project := findingsPushTestProject()
+		project.Status.Git.BranchName = ""
+		task := labeledTaskCR("t-nobranch", "uid-nobranch", tideprojectv1alpha3.LevelPhaseVerifyHalted, true, project)
+		c := fake.NewClientBuilder().WithScheme(s).WithObjects(project, task).Build()
+		r := findingsTaskReconciler(c, s)
+
+		res := r.handleVerifyHaltedTerminal(context.Background(), task)
+		if res.result.RequeueAfter != 30*time.Second {
+			t.Errorf("RequeueAfter=%v want 30s — EnsureRunBranch will stamp the branch, retry until it lands", res.result.RequeueAfter)
+		}
+	})
+
+	t.Run("busy push Job not carrying the entry: 30s cadence", func(t *testing.T) {
+		project := findingsPushTestProject()
+		task := labeledTaskCR("t-busy", "uid-busy", tideprojectv1alpha3.LevelPhaseVerifyHalted, true, project)
+		busy := &batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "tide-push-" + string(project.UID),
+				Namespace:   project.Namespace,
+				Annotations: map[string]string{stagedEnvelopesAnnotation: "uid-other:milestone/m-other"},
+			},
+		}
+		c := fake.NewClientBuilder().WithScheme(s).WithObjects(project, task, busy).Build()
+		r := findingsTaskReconciler(c, s)
+
+		res := r.handleVerifyHaltedTerminal(context.Background(), task)
+		if res.result.RequeueAfter != 30*time.Second {
+			t.Errorf("RequeueAfter=%v want 30s (transient busy race — never the old hot 5s)", res.result.RequeueAfter)
+		}
+	})
+
+	t.Run("carried: no requeue (frozen-halt push guarantee holds, then steady state)", func(t *testing.T) {
+		project := findingsPushTestProject()
+		task := labeledTaskCR("t-carried", "uid-carried", tideprojectv1alpha3.LevelPhaseVerifyHalted, true, project)
+		c := fake.NewClientBuilder().WithScheme(s).WithObjects(project, task).Build()
+		r := findingsTaskReconciler(c, s)
+
+		// First terminal reconcile creates the carrying push Job (the
+		// frozen-halt push guarantee) and retries on the cadence until the
+		// annotation is observed.
+		res := r.handleVerifyHaltedTerminal(context.Background(), task)
+		if res.result.RequeueAfter != 30*time.Second {
+			t.Fatalf("first pass RequeueAfter=%v want 30s (Job just created, entry not yet observed carried)", res.result.RequeueAfter)
+		}
+		var job batchv1.Job
+		if err := c.Get(context.Background(), pushJobFor(project), &job); err != nil {
+			t.Fatalf("expected the carrying push Job created while halted: %v", err)
+		}
+
+		// Second pass observes the carried entry: steady state, no requeue.
+		res = r.handleVerifyHaltedTerminal(context.Background(), task)
+		if res.result.RequeueAfter != 0 {
+			t.Errorf("RequeueAfter=%v want 0 once carried (T-53-23 no-churn steady state)", res.result.RequeueAfter)
+		}
+	})
 }
