@@ -470,6 +470,31 @@ func verificationEnabledForLevel(project *tideprojectv1alpha3.Project, level str
 	return chartDefaults.Levels[level].Enabled
 }
 
+// resolveVerifierModel resolves the model identifier a verifier dispatch
+// (Task/plan-check/level-verify) uses, per D-02's two-REAL-tier precedence
+// (RESEARCH Finding 6 (a)):
+//
+//	chartDefaults.Model (subagent.verify.model, chart-tier) ->
+//	ResolveProvider(project, level, helmDefaults).Model (today's borrow of
+//	the level executor's own resolved model)
+//
+// The FULL intended precedence, per Finding 6, is authored
+// VerificationSpec.Evaluator (a name-ref) -> chart -> compiled/borrow —
+// but Evaluator carries no registry today: it is carried onto
+// LoopPolicy.EvaluatorRef and never resolved to an image/model anywhere.
+// This phase deliberately implements only the two REAL tiers below it (a
+// registry is future work) so a future Evaluator registry slots in ABOVE
+// the chart tier without restructuring this function.
+//
+// When chartDefaults.Model is empty, behavior is byte-identical to every
+// pre-Phase-53 call site's inline ResolveProvider(...).Model borrow.
+func resolveVerifierModel(project *tideprojectv1alpha3.Project, level string, chartDefaults VerifyDefaults, helmDefaults ProviderDefaults) string {
+	if chartDefaults.Model != "" {
+		return chartDefaults.Model
+	}
+	return ResolveProvider(project, level, helmDefaults).Model
+}
+
 // ResolveLoopPolicy is the phase's centerpiece (SC3): the ONE resolver
 // function, keyed on level (not CRD kind), that every reconciler calls to
 // decide gate policy — none of the five reconcilers may switch on CRD kind
@@ -477,26 +502,39 @@ func verificationEnabledForLevel(project *tideprojectv1alpha3.Project, level str
 //
 // It walks the same Task > Plan > Project precedence chain as
 // ResolveVerificationSpec (resolveAuthoredVerification), then layers on
-// level-default parameterization (D-02):
+// level-default parameterization (D-02), with the Phase 53 chart tier
+// (chartDefaults, subagent.verify.levels) sitting BELOW authored values and
+// ABOVE the compiled fallbacks below:
 //
-//   - task:  MaxIterations resolves exactly as authored (behavior-preserving
-//     — this is how the Phase 51 Task loop already worked).
+//   - task:  MaxIterations resolves exactly as authored when set
+//     (behavior-preserving — this is how the Phase 51 Task loop already
+//     worked). When unset (0 — 0-at-repair-levels has always meant "unset",
+//     never a legitimate authored zero), the chart's Levels["task"].
+//     MaxIterations feeds in when > 0; otherwise MaxIterations stays 0 (the
+//     pre-Phase-53 compiled default — no floor at task level).
 //   - plan:  MaxIterations defaults to 1 when the authored spec leaves it
 //     unset (an authored value still wins) — plan-check gets exactly one
-//     re-plan by default.
+//     re-plan by default. The chart tier slots in BETWEEN those two: when
+//     unset AND the chart's Levels["plan"].MaxIterations > 0, the chart
+//     value applies instead of the floor-to-1 compiled default.
 //   - phase/milestone/project: MaxIterations is CLAMPED to 0
-//     UNCONDITIONALLY, even when an authored contract sets it higher. D-07:
-//     there is no repair branch at these levels (REQUIREMENTS' Out-of-Scope
-//     explicitly excludes auto-repair at Phase/Milestone/Project) — the
-//     resolver encodes that as a structural clamp here, not as a
-//     level-specific if-statement repeated at every dispatch call site.
+//     UNCONDITIONALLY, even when an authored contract OR the chart sets it
+//     higher. D-07: there is no repair branch at these levels (REQUIREMENTS'
+//     Out-of-Scope explicitly excludes auto-repair at Phase/Milestone/
+//     Project) — the resolver encodes that as a structural clamp here, not
+//     as a level-specific if-statement repeated at every dispatch call
+//     site. The chart must not be able to re-open this clamp at any level.
 //
 // EscalationPolicy: an authored OnExhaustion always wins when set. When
-// unset, the default differs by level — task/plan default to
-// EscalationEscalate (preserves Phase 51's uniform Task-loop behavior at
-// defaults, D-02's no-regression bar); phase/milestone/project default to
-// EscalationRequireApproval (ROADMAP SC2: these levels "escalate straight to
-// requireApproval").
+// unset, the chart's Levels[level].OnExhaustion applies (any level — unlike
+// MaxIterations, the escalation POLICY is a legitimate chart-configurable
+// knob even at the MaxIterations:0 levels, since it still decides
+// requireApproval vs. escalate on the single always-immediate exhaustion).
+// When BOTH are unset, the compiled default differs by level — task/plan
+// default to EscalationEscalate (preserves Phase 51's uniform Task-loop
+// behavior at defaults, D-02's no-regression bar); phase/milestone/project
+// default to EscalationRequireApproval (ROADMAP SC2: these levels "escalate
+// straight to requireApproval").
 //
 // Level is stamped unconditionally from the level parameter (SC3's
 // "loop-level field on LoopPolicy" is exactly this stamp — the authored
@@ -507,22 +545,35 @@ func verificationEnabledForLevel(project *tideprojectv1alpha3.Project, level str
 // MaxIterations/EscalationPolicy values — callers gate dispatch on
 // ResolveVerificationSpec(...).GateCommand != "" (the "stage is off" signal),
 // not on this function's return value alone.
-func ResolveLoopPolicy(project *tideprojectv1alpha3.Project, plan *tideprojectv1alpha3.Plan, task *tideprojectv1alpha3.Task, level string) tideprojectv1alpha3.LoopPolicy {
+//
+// chartDefaults with a nil/empty Levels map (no chart config) is
+// byte-identical to every pre-Phase-53 caller's behavior.
+func ResolveLoopPolicy(project *tideprojectv1alpha3.Project, plan *tideprojectv1alpha3.Plan, task *tideprojectv1alpha3.Task, level string, chartDefaults VerifyDefaults) tideprojectv1alpha3.LoopPolicy {
 	spec := resolveAuthoredVerification(project, plan, task, level)
+	chartLevel := chartDefaults.Levels[level]
 
 	maxIter := spec.MaxIterations
 	switch level {
+	case "task":
+		if maxIter == 0 && chartLevel.MaxIterations > 0 {
+			maxIter = chartLevel.MaxIterations
+		}
 	case "plan":
-		if maxIter == 0 {
+		if maxIter == 0 && chartLevel.MaxIterations > 0 {
+			maxIter = chartLevel.MaxIterations
+		} else if maxIter == 0 {
 			maxIter = 1
 		}
 	case "phase", "milestone", "project":
 		// D-07: no repair branch at these levels — clamp unconditionally,
-		// even when an authored contract set MaxIterations > 0.
+		// even when an authored contract OR the chart set MaxIterations > 0.
 		maxIter = 0
 	}
 
 	escalation := tideprojectv1alpha3.EscalationPolicy(spec.OnExhaustion)
+	if escalation == "" && chartLevel.OnExhaustion != "" {
+		escalation = tideprojectv1alpha3.EscalationPolicy(chartLevel.OnExhaustion)
+	}
 	if escalation == "" {
 		switch level {
 		case "phase", "milestone", "project":

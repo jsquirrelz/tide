@@ -170,6 +170,17 @@ func TestVerifierInFlightCount(t *testing.T) {
 // newTaskReconciler but adds the Phase 51 fields dispatchVerifier needs
 // (VerifierImage, a fresh ReservationStore + a positive ReserveEstimateCents
 // so the D-05/Pitfall-6 no-leak assertions are meaningful).
+//
+// Phase 53 D-04: VerifyDefaults carries a task-level chart Enabled:true
+// default, mirroring the real fresh-install posture (53-CONTEXT D-03: task
+// ON by default) — this whole test suite's fixtures author task.Spec.
+// Verification directly (a Task-level authored contract), never
+// Project.Spec.Verification.Task (the Project-scope entry
+// verificationEnabledForLevel's OWN authored tier checks), so without a
+// chart default here every Locked contract would silently fall through to
+// the no-contract Succeeded path pre-existing behavioral assertions rely on
+// NOT happening (D-04's own instruction: give existing fixtures a chart
+// default so behavior keeps passing on its original terms).
 func newVerifyDispatchTaskReconciler(envReader podjob.EnvelopeReader) *TaskReconciler {
 	return &TaskReconciler{
 		Client: mgrClient,
@@ -187,6 +198,9 @@ func newVerifyDispatchTaskReconciler(envReader podjob.EnvelopeReader) *TaskRecon
 			VerifierImage:        "tide-langgraph-verifier:test",
 			Reservations:         budget.NewReservationStore(),
 			ReserveEstimateCents: 500,
+			VerifyDefaults: VerifyDefaults{Levels: map[string]pkgdispatch.LevelVerifyDefault{
+				"task": {Enabled: true},
+			}},
 		},
 	}
 }

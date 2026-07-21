@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
+	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
 // ---------- ResolveLoopPolicy / ResolveVerificationSpec tests (pure function — no envtest) ----------
@@ -39,7 +40,7 @@ func TestResolveLoopPolicy(t *testing.T) {
 		task := &tideprojectv1alpha3.Task{Spec: tideprojectv1alpha3.TaskSpec{
 			Verification: lockedVerification("go test ./...", 3, ""),
 		}}
-		policy := ResolveLoopPolicy(nil, nil, task, "task")
+		policy := ResolveLoopPolicy(nil, nil, task, "task", VerifyDefaults{})
 		if policy.Level != tideprojectv1alpha3.LoopLevelTask {
 			t.Errorf("Level = %q, want %q", policy.Level, tideprojectv1alpha3.LoopLevelTask)
 		}
@@ -55,7 +56,7 @@ func TestResolveLoopPolicy(t *testing.T) {
 		plan := &tideprojectv1alpha3.Plan{Spec: tideprojectv1alpha3.PlanSpec{
 			Verification: lockedVerification("make plan-check", 0, ""),
 		}}
-		policy := ResolveLoopPolicy(nil, plan, nil, "plan")
+		policy := ResolveLoopPolicy(nil, plan, nil, "plan", VerifyDefaults{})
 		if policy.Level != tideprojectv1alpha3.LoopLevelPlan {
 			t.Errorf("Level = %q, want %q", policy.Level, tideprojectv1alpha3.LoopLevelPlan)
 		}
@@ -76,7 +77,7 @@ func TestResolveLoopPolicy(t *testing.T) {
 				}(),
 			},
 		}}
-		policy := ResolveLoopPolicy(project, nil, nil, "phase")
+		policy := ResolveLoopPolicy(project, nil, nil, "phase", VerifyDefaults{})
 		if policy.Level != tideprojectv1alpha3.LoopLevelPhase {
 			t.Errorf("Level = %q, want %q", policy.Level, tideprojectv1alpha3.LoopLevelPhase)
 		}
@@ -97,7 +98,7 @@ func TestResolveLoopPolicy(t *testing.T) {
 				}(),
 			},
 		}}
-		policy := ResolveLoopPolicy(project, nil, nil, "phase")
+		policy := ResolveLoopPolicy(project, nil, nil, "phase", VerifyDefaults{})
 		if policy.MaxIterations != 0 {
 			t.Errorf("MaxIterations = %d, want 0 (D-07: no repair branch at phase level — unconditional clamp)", policy.MaxIterations)
 		}
@@ -118,7 +119,7 @@ func TestResolveLoopPolicy(t *testing.T) {
 						Verification: tideprojectv1alpha3.VerificationDefaults{Project: &v},
 					}}
 				}
-				policy := ResolveLoopPolicy(project, nil, nil, level)
+				policy := ResolveLoopPolicy(project, nil, nil, level, VerifyDefaults{})
 				if policy.EscalationPolicy != tideprojectv1alpha3.EscalationEscalate {
 					t.Errorf("EscalationPolicy = %q, want %q (authored value wins)", policy.EscalationPolicy, tideprojectv1alpha3.EscalationEscalate)
 				}
@@ -139,7 +140,7 @@ func TestResolveLoopPolicy(t *testing.T) {
 			},
 		}}
 		task := &tideprojectv1alpha3.Task{} // empty Verification — falls through
-		policy := ResolveLoopPolicy(project, nil, task, "task")
+		policy := ResolveLoopPolicy(project, nil, task, "task", VerifyDefaults{})
 		if policy.MaxIterations != 5 {
 			t.Errorf("MaxIterations = %d, want 5 (Project Task default applies)", policy.MaxIterations)
 		}
@@ -150,7 +151,7 @@ func TestResolveLoopPolicy(t *testing.T) {
 	})
 
 	t.Run("no authored contract anywhere -> empty GateCommand (stage off), Level still stamped", func(t *testing.T) {
-		policy := ResolveLoopPolicy(nil, nil, nil, "phase")
+		policy := ResolveLoopPolicy(nil, nil, nil, "phase", VerifyDefaults{})
 		if policy.Level != tideprojectv1alpha3.LoopLevelPhase {
 			t.Errorf("Level = %q, want %q (stamped even with no contract)", policy.Level, tideprojectv1alpha3.LoopLevelPhase)
 		}
@@ -175,6 +176,87 @@ func TestResolveLoopPolicy(t *testing.T) {
 		spec := ResolveVerificationSpec(project, plan, nil, "plan")
 		if spec.GateCommand != "plan-own-command" {
 			t.Errorf("GateCommand = %q, want %q (plan's own spec wins over Project default)", spec.GateCommand, "plan-own-command")
+		}
+	})
+
+	// ---------- Phase 53 D-04/CFG-02 chart-tier layering (53-06-PLAN.md Task 2) ----------
+
+	t.Run("(a) task level, spec MaxIterations 0, chart task.MaxIterations 3 -> policy 3", func(t *testing.T) {
+		task := &tideprojectv1alpha3.Task{Spec: tideprojectv1alpha3.TaskSpec{
+			Verification: lockedVerification("go test ./...", 0, ""),
+		}}
+		chart := VerifyDefaults{Levels: map[string]pkgdispatch.LevelVerifyDefault{
+			"task": {MaxIterations: 3},
+		}}
+		policy := ResolveLoopPolicy(nil, nil, task, "task", chart)
+		if policy.MaxIterations != 3 {
+			t.Errorf("MaxIterations = %d, want 3 (chart default feeds an unset authored value)", policy.MaxIterations)
+		}
+	})
+
+	t.Run("(b) task level, authored MaxIterations 2, chart task.MaxIterations 5 -> policy 2 (authored wins)", func(t *testing.T) {
+		task := &tideprojectv1alpha3.Task{Spec: tideprojectv1alpha3.TaskSpec{
+			Verification: lockedVerification("go test ./...", 2, ""),
+		}}
+		chart := VerifyDefaults{Levels: map[string]pkgdispatch.LevelVerifyDefault{
+			"task": {MaxIterations: 5},
+		}}
+		policy := ResolveLoopPolicy(nil, nil, task, "task", chart)
+		if policy.MaxIterations != 2 {
+			t.Errorf("MaxIterations = %d, want 2 (an authored value always wins over the chart default)", policy.MaxIterations)
+		}
+	})
+
+	t.Run("(c) phase/milestone/project levels: chart MaxIterations 5 never reopens the D-07 clamp -> policy 0", func(t *testing.T) {
+		for _, level := range []string{"phase", "milestone", "project"} {
+			t.Run(level, func(t *testing.T) {
+				v := lockedVerification("make e2e", 0, "")
+				project := &tideprojectv1alpha3.Project{Spec: tideprojectv1alpha3.ProjectSpec{Verification: tideprojectv1alpha3.VerificationDefaults{}}}
+				switch level {
+				case "phase":
+					project.Spec.Verification.Phase = &v
+				case "milestone":
+					project.Spec.Verification.Milestone = &v
+				case "project":
+					project.Spec.Verification.Project = &v
+				}
+				chart := VerifyDefaults{Levels: map[string]pkgdispatch.LevelVerifyDefault{
+					level: {MaxIterations: 5},
+				}}
+				policy := ResolveLoopPolicy(project, nil, nil, level, chart)
+				if policy.MaxIterations != 0 {
+					t.Errorf("MaxIterations = %d, want 0 (the chart must not be able to re-open D-07's clamp)", policy.MaxIterations)
+				}
+			})
+		}
+	})
+
+	t.Run("(d) plan level, spec OnExhaustion unset, chart plan.OnExhaustion requireApproval -> requireApproval", func(t *testing.T) {
+		plan := &tideprojectv1alpha3.Plan{Spec: tideprojectv1alpha3.PlanSpec{
+			Verification: lockedVerification("make plan-check", 0, ""),
+		}}
+		chart := VerifyDefaults{Levels: map[string]pkgdispatch.LevelVerifyDefault{
+			"plan": {OnExhaustion: "requireApproval"},
+		}}
+		policy := ResolveLoopPolicy(nil, plan, nil, "plan", chart)
+		if policy.EscalationPolicy != tideprojectv1alpha3.EscalationRequireApproval {
+			t.Errorf("EscalationPolicy = %q, want %q (chart default feeds an unset authored onExhaustion)", policy.EscalationPolicy, tideprojectv1alpha3.EscalationRequireApproval)
+		}
+	})
+
+	t.Run("(e) no chart entry for the level -> prior subtests' behavior unchanged (regression)", func(t *testing.T) {
+		task := &tideprojectv1alpha3.Task{Spec: tideprojectv1alpha3.TaskSpec{
+			Verification: lockedVerification("go test ./...", 3, ""),
+		}}
+		chart := VerifyDefaults{Levels: map[string]pkgdispatch.LevelVerifyDefault{
+			"plan": {MaxIterations: 9}, // present for a DIFFERENT level only
+		}}
+		policy := ResolveLoopPolicy(nil, nil, task, "task", chart)
+		if policy.MaxIterations != 3 {
+			t.Errorf("MaxIterations = %d, want 3 (no chart entry for \"task\" — authored value unaffected)", policy.MaxIterations)
+		}
+		if policy.EscalationPolicy != tideprojectv1alpha3.EscalationEscalate {
+			t.Errorf("EscalationPolicy = %q, want %q (no chart entry for \"task\" — compiled default unaffected)", policy.EscalationPolicy, tideprojectv1alpha3.EscalationEscalate)
 		}
 	})
 }

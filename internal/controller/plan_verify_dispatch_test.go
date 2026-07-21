@@ -53,6 +53,12 @@ import (
 // dispatchPlanVerifier needs (VerifierImage, a FRESH ReservationStore + a
 // positive ReserveEstimateCents so the D-10/Pitfall-6 no-leak assertions are
 // meaningful and isolated per spec).
+//
+// Phase 53 D-04: VerifyDefaults carries a plan-level chart Enabled:true
+// default — this suite's fixtures author plan.Spec.Verification directly (a
+// Plan-level authored contract), never Project.Spec.Verification.Plan (the
+// Project-scope entry verificationEnabledForLevel's authored tier checks),
+// mirroring newVerifyDispatchTaskReconciler's own reasoning one level down.
 func newVerifyDispatchPlanReconciler(envReader podjob.EnvelopeReader) *PlanReconciler {
 	return &PlanReconciler{
 		Client: mgrClient,
@@ -68,6 +74,9 @@ func newVerifyDispatchPlanReconciler(envReader podjob.EnvelopeReader) *PlanRecon
 			VerifierImage:        "tide-langgraph-verifier:test",
 			Reservations:         budget.NewReservationStore(),
 			ReserveEstimateCents: 500,
+			VerifyDefaults: VerifyDefaults{Levels: map[string]pkgdispatch.LevelVerifyDefault{
+				"plan": {Enabled: true},
+			}},
 		},
 	}
 }

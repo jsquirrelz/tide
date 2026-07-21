@@ -53,6 +53,17 @@ func lockedVerificationSpec() tideprojectv1alpha3.VerificationSpec {
 	}
 }
 
+// chartEnabledPhase is the shared "chart-enabled at phase level" fixture the
+// decision-table subtests below pass so the D-04 enablement AND-gate does
+// not itself gate the pre-existing inactive/converged/engaging assertions —
+// TestLevelVerifyDecision_Enablement below is what actually exercises the
+// enablement axis.
+func chartEnabledPhase() VerifyDefaults {
+	return VerifyDefaults{Levels: map[string]pkgdispatch.LevelVerifyDefault{
+		"phase": {Enabled: true},
+	}}
+}
+
 // TestLevelVerifyDecision covers the four mutually-exclusive branches
 // levelVerifyDecision's pure guard evaluates (inactive / converged /
 // engaging-needs-dispatch / engaging-already-verifying), matching the
@@ -60,7 +71,7 @@ func lockedVerificationSpec() tideprojectv1alpha3.VerificationSpec {
 func TestLevelVerifyDecision(t *testing.T) {
 	t.Run("inactive_no_gate_command", func(t *testing.T) {
 		spec := tideprojectv1alpha3.VerificationSpec{Phase: verificationPhaseLocked}
-		got := levelVerifyDecision(spec, nil, "")
+		got := levelVerifyDecision(spec, nil, "", nil, "phase", chartEnabledPhase())
 		if got != levelVerifyInactive {
 			t.Fatalf("levelVerifyDecision() = %v, want levelVerifyInactive", got)
 		}
@@ -68,7 +79,7 @@ func TestLevelVerifyDecision(t *testing.T) {
 
 	t.Run("inactive_not_locked", func(t *testing.T) {
 		spec := tideprojectv1alpha3.VerificationSpec{Phase: "Draft", GateCommand: "make test"}
-		got := levelVerifyDecision(spec, nil, "")
+		got := levelVerifyDecision(spec, nil, "", nil, "phase", chartEnabledPhase())
 		if got != levelVerifyInactive {
 			t.Fatalf("levelVerifyDecision() = %v, want levelVerifyInactive (Draft contract must never activate)", got)
 		}
@@ -77,7 +88,7 @@ func TestLevelVerifyDecision(t *testing.T) {
 	t.Run("converged", func(t *testing.T) {
 		spec := lockedVerificationSpec()
 		ls := &tideprojectv1alpha3.LoopStatus{ExitReason: tideprojectv1alpha3.ExitApproved}
-		got := levelVerifyDecision(spec, ls, tideprojectv1alpha3.LevelPhaseVerifying)
+		got := levelVerifyDecision(spec, ls, tideprojectv1alpha3.LevelPhaseVerifying, nil, "phase", chartEnabledPhase())
 		if got != levelVerifyConverged {
 			t.Fatalf("levelVerifyDecision() = %v, want levelVerifyConverged (post-approval convergence guard, T-52-25)", got)
 		}
@@ -86,7 +97,7 @@ func TestLevelVerifyDecision(t *testing.T) {
 	t.Run("converged_escalated_still_never_redispatches", func(t *testing.T) {
 		spec := lockedVerificationSpec()
 		ls := &tideprojectv1alpha3.LoopStatus{ExitReason: tideprojectv1alpha3.ExitEscalated}
-		got := levelVerifyDecision(spec, ls, tideprojectv1alpha3.LevelPhaseAwaitingApproval)
+		got := levelVerifyDecision(spec, ls, tideprojectv1alpha3.LevelPhaseAwaitingApproval, nil, "phase", chartEnabledPhase())
 		if got != levelVerifyConverged {
 			t.Fatalf("levelVerifyDecision() = %v, want levelVerifyConverged", got)
 		}
@@ -95,7 +106,7 @@ func TestLevelVerifyDecision(t *testing.T) {
 	t.Run("engaging_needs_dispatch", func(t *testing.T) {
 		spec := lockedVerificationSpec()
 		ls := &tideprojectv1alpha3.LoopStatus{} // ExitReason empty: loop not yet concluded
-		got := levelVerifyDecision(spec, ls, "")
+		got := levelVerifyDecision(spec, ls, "", nil, "phase", chartEnabledPhase())
 		if got != levelVerifyNeedsDispatch {
 			t.Fatalf("levelVerifyDecision() = %v, want levelVerifyNeedsDispatch", got)
 		}
@@ -104,7 +115,7 @@ func TestLevelVerifyDecision(t *testing.T) {
 	t.Run("engaging_already_verifying", func(t *testing.T) {
 		spec := lockedVerificationSpec()
 		ls := &tideprojectv1alpha3.LoopStatus{}
-		got := levelVerifyDecision(spec, ls, tideprojectv1alpha3.LevelPhaseVerifying)
+		got := levelVerifyDecision(spec, ls, tideprojectv1alpha3.LevelPhaseVerifying, nil, "phase", chartEnabledPhase())
 		if got != levelVerifyAlreadyVerifying {
 			t.Fatalf("levelVerifyDecision() = %v, want levelVerifyAlreadyVerifying", got)
 		}
@@ -112,9 +123,48 @@ func TestLevelVerifyDecision(t *testing.T) {
 
 	t.Run("engaging_nil_loop_status_is_not_converged", func(t *testing.T) {
 		spec := lockedVerificationSpec()
-		got := levelVerifyDecision(spec, nil, "")
+		got := levelVerifyDecision(spec, nil, "", nil, "phase", chartEnabledPhase())
 		if got != levelVerifyNeedsDispatch {
 			t.Fatalf("levelVerifyDecision() = %v, want levelVerifyNeedsDispatch (nil LoopStatus must not be treated as converged)", got)
+		}
+	})
+}
+
+// TestLevelVerifyDecision_Enablement covers the Phase 53 D-04 enablement
+// axis folded into levelVerifyDecision's FIRST early-return: a resolved,
+// Locked contract with no chart default and no authored Project-scope entry
+// is inactive (byte-identical to the no-contract off-switch); a chart
+// Enabled:true default activates it; an authored Project-scope entry
+// activates it even when the chart posture is disabled (operator intent on
+// the CR outranks the install default, D-04's own precedence).
+func TestLevelVerifyDecision_Enablement(t *testing.T) {
+	spec := lockedVerificationSpec()
+	ls := &tideprojectv1alpha3.LoopStatus{}
+
+	t.Run("locked contract, no chart default, no authored entry -> inactive", func(t *testing.T) {
+		got := levelVerifyDecision(spec, ls, "", nil, "phase", VerifyDefaults{})
+		if got != levelVerifyInactive {
+			t.Fatalf("levelVerifyDecision() = %v, want levelVerifyInactive (chart-disabled, no authored entry)", got)
+		}
+	})
+
+	t.Run("locked contract, chart Enabled:true -> needs dispatch", func(t *testing.T) {
+		got := levelVerifyDecision(spec, ls, "", nil, "phase", chartEnabledPhase())
+		if got != levelVerifyNeedsDispatch {
+			t.Fatalf("levelVerifyDecision() = %v, want levelVerifyNeedsDispatch (chart-enabled)", got)
+		}
+	})
+
+	t.Run("locked contract, chart disabled, authored Project-scope entry -> needs dispatch (authored outranks chart)", func(t *testing.T) {
+		project := &tideprojectv1alpha3.Project{Spec: tideprojectv1alpha3.ProjectSpec{
+			Verification: tideprojectv1alpha3.VerificationDefaults{
+				Phase: &tideprojectv1alpha3.VerificationSpec{GateCommand: "make test-phase-gate"},
+			},
+		}}
+		chartDisabled := VerifyDefaults{Levels: map[string]pkgdispatch.LevelVerifyDefault{"phase": {Enabled: false}}}
+		got := levelVerifyDecision(spec, ls, "", project, "phase", chartDisabled)
+		if got != levelVerifyNeedsDispatch {
+			t.Fatalf("levelVerifyDecision() = %v, want levelVerifyNeedsDispatch (authored entry outranks chart-disabled)", got)
 		}
 	})
 }
