@@ -169,6 +169,31 @@ type ProviderDefaults struct {
 	AgentEmail string
 }
 
+// VerifyDefaults carries the Helm-chart-supplied verify-tier defaults (D-01/
+// D-04): the evaluator image/model scalars and the per-level LoopPolicy
+// defaults (enabled/maxIterations/onExhaustion), all filled at Manager
+// startup from TIDE_VERIFIER_IMAGE / TIDE_VERIFIER_MODEL /
+// --verify-levels-json. Mirrors ProviderDefaults' shape and doc-comment
+// style — one small struct assigned onto both PlannerReconcilerDeps and
+// TaskReconcilerDeps from a single construction site in main.go, never a
+// per-reconciler read.
+type VerifyDefaults struct {
+	// Image is the chart-tier tide-langgraph-verifier image ref. Empty
+	// string means "no chart default" — mirrors ProviderDefaults.Image.
+	Image string
+
+	// Model is the chart-tier verifier model identifier. Empty string means
+	// "no chart default" — the resolver keeps today's borrow-the-level-
+	// executor-model fallback (D-02) when this is unset.
+	Model string
+
+	// Levels maps level name ("task"|"plan"|"phase"|"milestone"|"project")
+	// to its chart-supplied verify posture default. Missing key means "no
+	// chart default for that level" (treated as disabled by
+	// verificationEnabledForLevel).
+	Levels map[string]pkgdispatch.LevelVerifyDefault
+}
+
 // PlannerReconcilerDeps carries the dispatch-related dependencies shared by
 // the four planner-tier reconcilers (Milestone/Phase/Plan/Project). Mirrors
 // TaskReconcilerDeps (task_controller.go:90-119) for the up-stack
@@ -235,6 +260,14 @@ type PlannerReconcilerDeps struct {
 	// (TIDE_VERIFIER_IMAGE), same "empty = skip Job creation, park benignly
 	// in Verifying" semantics.
 	VerifierImage string
+
+	// VerifyDefaults carries the Helm-chart-supplied verify-tier defaults
+	// (D-01/D-04) — evaluator model + per-level enablement/LoopPolicy
+	// defaults — consumed by verificationEnabledForLevel and the Phase-52
+	// resolvers. Assigned from the same construction site in main.go as
+	// TaskReconcilerDeps.VerifyDefaults (RESEARCH Assumption A2 — if only
+	// one Deps gets it, one dispatch tier silently loses chart enablement).
+	VerifyDefaults VerifyDefaults
 
 	// Reservations is the in-process budget pre-charge store. MUST be the
 	// SAME *budget.ReservationStore instance TaskReconciler receives — D-10/
@@ -411,6 +444,30 @@ func resolveAuthoredVerification(project *tideprojectv1alpha3.Project, plan *tid
 // contract fields themselves.
 func ResolveVerificationSpec(project *tideprojectv1alpha3.Project, plan *tideprojectv1alpha3.Plan, task *tideprojectv1alpha3.Task, level string) tideprojectv1alpha3.VerificationSpec {
 	return resolveAuthoredVerification(project, plan, task, level)
+}
+
+// verificationEnabledForLevel is the SINGLE chokepoint (D-04) that decides
+// whether verification is enabled for a dispatch level, given the Project's
+// authored per-level default and the chart-supplied VerifyDefaults.
+// Precedence: an authored Project-scope entry
+// (projectLevelVerificationDefault != nil) is explicitly ON — operator
+// intent on the CR outranks the install default; otherwise the chart's
+// per-level Enabled flag applies; otherwise off.
+//
+// This phase deliberately has no authored-but-disabled knob (CONTEXT
+// Deferred: per-Project opt-out) — an authored entry always means ON. The
+// gate applies at dispatch (this helper), never at planner contract
+// authoring (D-04): planners keep authoring verification contracts
+// unconditionally, and flipping the chart posture on later activates
+// already-authored contracts without re-planning.
+func verificationEnabledForLevel(project *tideprojectv1alpha3.Project, level string, chartDefaults VerifyDefaults) bool {
+	if projectLevelVerificationDefault(project, level) != nil {
+		return true
+	}
+	if chartDefaults.Levels == nil {
+		return false
+	}
+	return chartDefaults.Levels[level].Enabled
 }
 
 // ResolveLoopPolicy is the phase's centerpiece (SC3): the ONE resolver

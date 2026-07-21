@@ -159,6 +159,14 @@ type TaskReconcilerDeps struct {
 	// wired at Manager startup; the chart-configurable surface (CFG-01) is
 	// Phase 53 — this field only needs to exist and reach BuildJobSpec today.
 	VerifierImage string
+
+	// VerifyDefaults carries the Helm-chart-supplied verify-tier defaults
+	// (D-01/D-04) — evaluator model + per-level enablement/LoopPolicy
+	// defaults — consumed by verificationEnabledForLevel and the Phase-52
+	// resolvers. Assigned from the same construction site in main.go as
+	// PlannerReconcilerDeps.VerifyDefaults; no dispatch-site behavior
+	// changes in this plan — the AND gates land in 53-06.
+	VerifyDefaults VerifyDefaults
 }
 
 // TaskReconciler reconciles a Task object at Standard depth (D-C1).
