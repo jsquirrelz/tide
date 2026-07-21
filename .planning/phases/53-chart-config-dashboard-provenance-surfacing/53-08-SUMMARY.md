@@ -108,3 +108,7 @@ None - no external service configuration required.
 ---
 *Phase: 53-chart-config-dashboard-provenance-surfacing*
 *Completed: 2026-07-21*
+
+## Self-Check: PASSED
+
+All 5 claimed paths verified present (TaskDetailDrawer.tsx, TaskDetailDrawer.test.tsx, App.tsx, cmd/dashboard/embed/dist, this SUMMARY.md); all 3 commit hashes (`35e3242d`, `1d1da70b`, `4f3cbec9`) verified present in git log.
