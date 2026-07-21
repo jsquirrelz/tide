@@ -122,10 +122,12 @@ func cleanupWave(waveName string, taskNames []string) {
 		}
 	}
 	for _, name := range taskNames {
-		t := &tideprojectv1alpha3.Task{}
-		if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, t); err == nil {
-			_ = k8sClient.Delete(context.Background(), t)
-		}
+		// Delegates to cleanupTask (task_controller_test.go), which clears
+		// taskFinalizer before deleting — a bare Delete on a
+		// finalizer-carrying Task only sets deletionTimestamp and leaves it
+		// listable (53-03 regression: a leaked verdict-final Task pollutes
+		// any other spec's collectStageEnvelopes namespace-wide List).
+		cleanupTask(name)
 	}
 }
 

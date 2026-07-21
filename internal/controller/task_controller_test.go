@@ -136,10 +136,28 @@ func makeProjectForTask(name string) *tideprojectv1alpha3.Project {
 	return p
 }
 
-// cleanupTask deletes a Task object by name.
+// cleanupTask deletes a Task object by name, clearing its finalizer first
+// (mirrors cleanupLevelVerifyObjects' idiom). Without this, a Task that went
+// through a real reconcile carries taskFinalizer
+// ("tideproject.k8s/task-cleanup", task_controller.go:71); Delete alone only
+// sets a deletionTimestamp and the object stays listable (Terminating, its
+// last-observed Status intact) until something actually processes the
+// finalizer removal — none of this suite's 68 cleanupTask call sites run a
+// reconcile afterward. A leaked verdict-final Task (e.g. VerifyHalted/
+// Succeeded with LastEvaluation set) then leaks across specs sharing the
+// "default" namespace and can be picked up by any OTHER spec's
+// collectStageEnvelopes call (53-03 regression: project_boundary_push_test.go
+// Test 9 failed under the full suite, passed in isolation, precisely because
+// of this stale-finalizer leak).
 func cleanupTask(name string) {
 	task := &tideprojectv1alpha3.Task{}
-	_ = k8sClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, task)
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, task); err != nil {
+		return
+	}
+	if len(task.Finalizers) > 0 {
+		task.Finalizers = nil
+		_ = k8sClient.Update(context.Background(), task)
+	}
 	_ = k8sClient.Delete(context.Background(), task)
 }
 

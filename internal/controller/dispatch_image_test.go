@@ -249,6 +249,8 @@ var _ = Describe("Dispatch image resolution (DISPATCH-01)", Label("envtest", "di
 		AfterEach(func() {
 			task := &tideprojectv1alpha3.Task{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: taskName, Namespace: "default"}, task); err == nil {
+				task.Finalizers = nil
+				_ = k8sClient.Update(ctx, task)
 				_ = k8sClient.Delete(ctx, task)
 			}
 			plan := &tideprojectv1alpha3.Plan{}

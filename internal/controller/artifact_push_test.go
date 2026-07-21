@@ -15,6 +15,7 @@ package controller
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -221,12 +222,7 @@ func TestCollectStageEnvelopes(t *testing.T) {
 
 // containsEntry reports whether entries contains the exact string want.
 func containsEntry(entries []string, want string) bool {
-	for _, e := range entries {
-		if e == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(entries, want)
 }
 
 // ---------- Test 2: triggerArtifactPush creates a Job with --stage-envelopes ----------
