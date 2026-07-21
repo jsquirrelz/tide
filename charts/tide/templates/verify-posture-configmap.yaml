@@ -23,6 +23,13 @@ the same RBAC as editing any other in-cluster resource, and the supported
 subagent.verify.posture=enabled|disabled override removes any incentive to
 do so.
 
+Scope (D-04 precedence): the posture — marker and values override alike —
+governs only the CHART-DEFAULT verify tier (whether --verify-levels-json is
+emitted to the manager). A level whose Project.Spec.Verification.<level>
+entry is authored is explicitly ON regardless of posture: operator intent on
+the CR outranks the install default, so posture=disabled is not a
+cluster-wide kill-switch for Projects carrying authored verification config.
+
 This comment is a Go-template comment (not a YAML "#" comment) — it is
 stripped from every render, guarded or not, so it can never leak the
 literal flag/ConfigMap-name strings into helm template output and

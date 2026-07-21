@@ -283,14 +283,23 @@ subagent:
   #     Project.Spec.Verification.<level> (explicit CR config always wins)
   #     > subagent.verify.levels.<level> (this block, via --verify-levels-json)
   #     > off.
-  #   Posture tri-state (subagent.verify.posture, D-05): "enabled" forces the
-  #     whole tier ON regardless of install/upgrade; "disabled" forces it OFF;
-  #     "auto" (default) follows the sticky install-time posture marker
+  #   Posture tri-state (subagent.verify.posture, D-05) — governs the
+  #     CHART-DEFAULT tier only (whether --verify-levels-json is emitted),
+  #     never authored Project CRs: a level whose
+  #     Project.Spec.Verification.<level> entry is authored is explicitly ON
+  #     regardless of posture (the D-04 precedence above — operator intent on
+  #     the CR outranks the install default; remove the CR entry to stop
+  #     those dispatches). "enabled" forces the chart-default tier ON
+  #     regardless of install/upgrade; "disabled" disables the chart-default
+  #     tier (per-Project authored config still wins — this is NOT a
+  #     cluster-wide kill-switch); "auto" (default) follows the sticky
+  #     install-time posture marker
   #     (ConfigMap tide-verify-posture — see verify-posture-configmap.yaml) —
   #     ON on a fresh install (recorded + kept across every later upgrade),
   #     OFF for a pre-existing install upgrading in place (CFG-02's
   #     least-surprise contract). ALWAYS a string enum, never a boolean —
-  #     Sprig's `default` silently coerces boolean false to empty.
+  #     Sprig's `default` silently coerces boolean false to empty; any value
+  #     outside the enum render-fails (fail-closed).
   #   phase/milestone/project deliberately omit maxIterations: ResolveLoopPolicy
   #     clamps them to 0 regardless (D-07 Phase 52) — listing a value here
   #     would imply a configurability that does not exist.
