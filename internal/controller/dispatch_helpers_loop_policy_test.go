@@ -20,6 +20,53 @@ import (
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
+// ---------- resolveVerifierModel tests (Phase 53 D-02, pure function — no envtest) ----------
+
+// TestResolveVerifierModel pins D-02's two-real-tier precedence (chart
+// default > borrow the level executor's model) at all three verifier
+// dispatch levels this phase wires it into — the must_haves truth "When
+// subagent.verify.model is set, all three verifier dispatch tiers use it
+// instead of borrowing the level executor's model; when empty, behavior is
+// byte-identical to today."
+func TestResolveVerifierModel(t *testing.T) {
+	t.Run("chart Model set -> chart value wins over the borrowed executor model", func(t *testing.T) {
+		for _, level := range []string{"task", "plan", "phase"} {
+			t.Run(level, func(t *testing.T) {
+				project := &tideprojectv1alpha3.Project{Spec: tideprojectv1alpha3.ProjectSpec{
+					Subagent: tideprojectv1alpha3.SubagentConfig{Model: "claude-sonnet-4-6"},
+				}}
+				chart := VerifyDefaults{Model: "claude-opus-4-7"}
+				got := resolveVerifierModel(project, level, chart, ProviderDefaults{})
+				if got != "claude-opus-4-7" {
+					t.Errorf("resolveVerifierModel() = %q, want %q (chart tier wins)", got, "claude-opus-4-7")
+				}
+			})
+		}
+	})
+
+	t.Run("chart Model empty -> byte-identical to the pre-Phase-53 ResolveProvider(...).Model borrow", func(t *testing.T) {
+		project := &tideprojectv1alpha3.Project{Spec: tideprojectv1alpha3.ProjectSpec{
+			Subagent: tideprojectv1alpha3.SubagentConfig{Model: "claude-sonnet-4-6"},
+		}}
+		want := ResolveProvider(project, "task", ProviderDefaults{}).Model
+		got := resolveVerifierModel(project, "task", VerifyDefaults{}, ProviderDefaults{})
+		if got != want {
+			t.Errorf("resolveVerifierModel() = %q, want %q (byte-identical borrow when chart is unset)", got, want)
+		}
+		if got != "claude-sonnet-4-6" {
+			t.Errorf("resolveVerifierModel() = %q, want %q", got, "claude-sonnet-4-6")
+		}
+	})
+
+	t.Run("chart Model empty, no project model either -> falls through to the Helm default", func(t *testing.T) {
+		helm := ProviderDefaults{Models: map[string]string{"task": "claude-haiku-4-5"}}
+		got := resolveVerifierModel(nil, "task", VerifyDefaults{}, helm)
+		if got != "claude-haiku-4-5" {
+			t.Errorf("resolveVerifierModel() = %q, want %q (compiled/Helm fallback tier)", got, "claude-haiku-4-5")
+		}
+	})
+}
+
 // ---------- ResolveLoopPolicy / ResolveVerificationSpec tests (pure function — no envtest) ----------
 //
 // Phase 52 SC3: ResolveLoopPolicy is THE resolver — one function keyed on
