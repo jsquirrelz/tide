@@ -53,8 +53,15 @@ def _default_termination_message_path() -> str:
     return os.environ.get(TERMINATION_MESSAGE_PATH_ENV, DEFAULT_TERMINATION_MESSAGE_PATH)
 
 
+FINDINGS_FILENAME = "findings.json"
+
+
 def _out_path_for(in_path: str | os.PathLike[str]) -> Path:
     return Path(in_path).parent / "out.json"
+
+
+def _findings_path_for(in_path: str | os.PathLike[str]) -> Path:
+    return Path(in_path).parent / FINDINGS_FILENAME
 
 
 def _one_line(text: str) -> str:
@@ -207,6 +214,21 @@ def main(
     if command_results is not None:
         assembled = _assemble_verdict(result_text, command_results)
         verdict_out = assembled.model_dump(by_alias=True)
+
+    # T-53-28: findings.json is written iff a parseable verdict was
+    # assembled — the EXACT condition applyLoopStatus's LastEvaluation
+    # predicate reads through the role-aware ReadVerifierOut relay
+    # (out.Verdict != nil), so disk presence tracks the controller's
+    # taskFindingsStageable predicate 1:1. A write failure here is the sole
+    # permitted divergence and must NEVER mask the out.json/stub relay below
+    # — it is exactly the case tide-push's fail-closed staging guard
+    # (cmd/tide-push/main.go:1242-1252) exists to catch, deliberately not
+    # softened.
+    if verdict_out is not None:
+        try:
+            envelope.write_findings(_findings_path_for(resolved_in_path), verdict=verdict_out)
+        except OSError as exc:
+            print(f"findings.json write failed: {exc}", file=sys.stderr)
 
     envelope.write_envelope_out(
         _out_path_for(resolved_in_path),
