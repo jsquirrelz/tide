@@ -1,7 +1,8 @@
 ---
 phase: 53
 slug: chart-config-dashboard-provenance-surfacing
-status: draft
+status: approved
+reviewed_at: 2026-07-21
 shadcn_initialized: false
 preset: none
 created: 2026-07-21
@@ -90,7 +91,7 @@ token overrides automatically:
 |------|-------|-------|
 | Dominant (60%) | `#0b0f14` (`--color-surface-base`) | Background |
 | Secondary (30%) | `#161b22` / `#1f2937` (`--color-surface-raised` / `-overlay`) | Drawer, cards, hover |
-| Accent (10%) | `#06b6d4` (`--color-accent`) | See reserved list — NOTHING in this phase uses accent |
+| Accent (10%) | `#06b6d4` (`--color-accent`) | See reserved list — sole accent use this phase is the primary `Resume` CTA (sanctioned: reserved-list item 1); nothing else new uses accent |
 | Destructive | `#f85149` (`--color-destructive`) | Destructive action buttons only (existing Cancel) |
 
 Accent reserved for (locked 6-item list, `index.css` header — unchanged): primary CTA button
