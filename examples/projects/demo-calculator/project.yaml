@@ -1,0 +1,141 @@
+# examples/projects/demo-calculator/project.yaml — ~$10 real-Claude demo sample.
+#
+# This sample lets operators run TIDE against real Claude (Sonnet 5) with a
+# hard $10 cap and a visually satisfying payoff: a working single-page web
+# calculator, built by real Claude and pushed to an in-cluster git remote.
+# No external repo dependency — the targetRepo is an in-cluster http:// git
+# remote served by the git-http-server Deployment (git http-backend CGI +
+# nginx), backed by calculator-remote-pvc seeded by the calculator-remote-init
+# Job. All controller-side git transport is pure-Go (go-git HTTP) — no git
+# binary in core images required.
+#
+# APPLY ORDER (do NOT apply this file alone — see README.md):
+#   1. Build + load the tide-git-http-server image (unpublished fixture)
+#   2. namespace.yaml
+#   3. calculator-remote-pvc.yaml
+#   4. per-namespace-resources.yaml      (tide-projects PVC + SAs + RBAC)
+#   5. Mirror tide-signing-key Secret from tide-system (see per-namespace-resources.yaml)
+#   6. seed-remote-job.yaml              (seed Job populates calculator.git on the PVC)
+#      kubectl wait --for=condition=Complete job/calculator-remote-init \
+#        -n tide-demo-calculator --timeout=2m
+#   7. git-http-server.yaml              (after seed Job completes — RWO PVC ordering)
+#      kubectl wait --for=condition=Available deployment/git-http-server \
+#        -n tide-demo-calculator --timeout=2m
+#   8. kubectl create secret generic tide-secrets ... (ANTHROPIC_API_KEY + empty GIT_PAT)
+#   9. project.yaml                      (THIS file)
+#  10. tide watch demo-calculator -n tide-demo-calculator
+#
+# Schema notes:
+#   - targetRepo uses an http:// in-cluster URL (file:// rejected by the CEL
+#     validator since Phase 8).
+#   - GIT_PAT can be empty — the tide-push push-mode GIT_PAT guard is
+#     scheme-conditional (Phase 8 08-05 Task 3): empty PAT is accepted for
+#     anonymous http:// remotes.
+---
+apiVersion: tideproject.k8s/v1alpha3
+kind: Project
+metadata:
+  name: demo-calculator
+  namespace: tide-demo-calculator
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: demo-calculator
+spec:
+  # Required as of Phase 40 Plan 40-03: v1alpha3 is the sole served version and
+  # the controller fail-closes any object lacking this explicit opt-in.
+  schemaRevision: v1alpha3
+  # In-cluster anonymous git remote served by git-http-server Deployment + ClusterIP Service.
+  # Transport: go-git HTTP (pure-Go, no git binary in tide-push or claude-subagent images).
+  # Short form (same namespace): http://git-http-server/calculator.git
+  targetRepo: http://git-http-server.tide-demo-calculator.svc.cluster.local/calculator.git
+
+  # Demo-calculator outcome prompt — a tightly scoped, dependency-free web
+  # calculator. Tight scope is the cost-control mechanism: ONE Phase, ONE
+  # Plan, target 3-5 tasks (same shape as the medium sample's prompt). The
+  # payoff is visual — clone the per-run branch and open index.html.
+  outcomePrompt: |
+    The targetRepo is a freshly seeded repository containing only a README.
+
+    Build a single-page web calculator consisting of EXACTLY three files:
+
+    1. index.html — the calculator markup (display plus a button grid).
+    2. style.css  — the calculator styling (a clean, centered layout).
+    3. app.js     — the calculator logic.
+
+    Functional requirements:
+    - Four operations: add, subtract, multiply, divide.
+    - A clear button (resets the display) and an equals button (evaluates).
+    - Keyboard support: digits, + - * /, Enter for equals, Escape for clear.
+
+    Constraints (tight scope — ONE Phase, ONE Plan, target 3-5 tasks):
+    - NO external dependencies, frameworks, or build step. Plain HTML/CSS/JS
+      only — the page must work when index.html is opened directly in a
+      browser from the local filesystem.
+    - Do not add any files beyond the three listed above.
+
+    Pass criterion: opening index.html in a browser yields a working
+    calculator — clicking or typing digits and operators produces correct
+    results on the display.
+
+  # Phase 2 D-C1..C4: credproxy reads ANTHROPIC_API_KEY from this Secret.
+  # The Secret is created BEFORE this CRD is applied (README.md step 8).
+  # Same Secret carries GIT_PAT="" (empty — anonymous in-cluster http:// push
+  # is accepted by the scheme-conditional guard in cmd/tide-push push mode).
+  providerSecretRef: tide-secrets
+
+  # $10 cap for the demo-calculator sample. If hit, dispatch halts with
+  # Phase=BudgetExceeded (Phase 2 D-D2 + Phase 04.1 P4.1 rolling-window
+  # infra). The tight outcome-prompt scope bounds expected spend well under
+  # this cap — the cap is a safety net, not the operating budget.
+  budget:
+    absoluteCapCents: 1000
+    rollingWindowCapCents: 1000
+    # 24h rolling window per Phase 04.1 P4.1. metav1.Duration parses Go
+    # duration strings; default would be 24h when unset; explicit per
+    # Pitfall 7.
+    rollingWindowDuration: 24h
+
+  # The image tag MUST equal the chart appVersion (1.0.9) — the dispatch
+  # envelope apiVersion validation in pkg/dispatch rejects every dispatch on
+  # a mismatch. Enforced repo-wide by
+  # TestExamplesSubagentImagePinsMatchChartAppVersion
+  # (test/integration/kind/examples_image_pin_test.go).
+  #
+  # Model: Sonnet — the calculator's UI quality is the payoff, and Sonnet
+  # produces a materially better layout/interaction pass than Haiku for a
+  # few dollars more; the $10 cap still bounds the worst case (the medium
+  # sample stays on Haiku for its plain function-addition outcome).
+  subagent:
+    image: ghcr.io/jsquirrelz/tide-claude-subagent:1.0.9
+    model: claude-sonnet-5
+
+  # Phase 3 D-B6 per-project git target. TIDE pushes per-Phase / per-Plan /
+  # per-Task / final-Project commits to a per-run branch on this remote.
+  # Branch shape: tide/run-demo-calculator-<unix-ts>. NEVER pushes to main.
+  #
+  # The same `tide-secrets` Secret carries GIT_PAT="" (empty, accepted for
+  # anonymous http:// remotes by the scheme-conditional guard in tide-push).
+  git:
+    repoURL: http://git-http-server.tide-demo-calculator.svc.cluster.local/calculator.git
+    credsSecretRef: tide-secrets
+
+  # All gates set to `auto` so the demo runs end-to-end without human
+  # interruption. Operators inspecting the run watch Project.Status.phase +
+  # the dashboard; gate-policy demos are a docs/ concern, not this sample's
+  # purpose.
+  gates:
+    milestone: auto
+    phase: auto
+    plan: auto
+    task: auto
+    pauseBetweenWaves: false
+
+  # Phase 2 D-E1: file-touch admission in strict mode. The PLAN.md the
+  # planner authors must declare its file touches precisely; admission
+  # rejects on mismatch.
+  planAdmission:
+    fileTouchMode: strict
+
+  # Phase 2 SUB-04 cap. 3 attempts per task is the v1 default.
+  maxAttemptsPerTask: 3
