@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-07-21)
 Phase: 54 of 65 (Runtime Selection Foundation + Observability Gap Closure) — 1st of 12 phases in v1.0.10
 Plan: — (not yet planned)
 Status: Ready to plan
-Last activity: 2026-07-21 — ROADMAP.md created for v1.0.10 (Phases 54–65, 30/30 requirements mapped, 0 orphans)
+Last activity: 2026-07-23 — Completed quick task 260722-ufe: demo-calculator web-calculator demo sample (examples/projects/demo-calculator/)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -85,6 +85,12 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - None currently blocking — v1.0.10 roadmap just created; no phase execution has started.
 - **Carried lesson from v1.0.8/v1.0.9 release cascades:** GSD per-phase verification never runs the `ci.yaml`-only gates (`make lint`, `verify-dashboard-freshness`, kind image-pin tests) — wire these into each v1.0.10 phase's verification, don't wait for release pre-flight to catch them.
 - **Cross-pod clock skew (Pitfall 5, v1.0.8) remains unverified** — single-node kind can't surface child-span-outside-parent-window rendering; relevant again for OBS-06's fan-out-sibling-group Phoenix queries in Phase 64.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260722-ufe | Add examples/projects/demo-calculator web-calculator demo sample for TIDE v1.0.9 | 2026-07-23 | 9258d988 | [260722-ufe-add-examples-projects-demo-calculator-we](./quick/260722-ufe-add-examples-projects-demo-calculator-we/) |
 
 ### Roadmap Evolution
 
