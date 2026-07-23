@@ -1,0 +1,114 @@
+# examples/projects/demo-calculator/seed-remote-job.yaml — seeds the in-cluster
+# calculator.git remote on calculator-remote-pvc.
+#
+# IMAGE REUSE: this Job runs the tide-git-http-server image itself (NOT the
+# medium sample's tide-demo-init fixture image). That image already carries
+# `sh` + a full git binary and runs as USER 1000 — everything an inline seed
+# script needs — so no separate init image is required. The demo-calculator
+# repo starts as a FRESH bare repo with a one-file seed commit; there is no
+# embedded Go fixture to bootstrap.
+#
+# NON-EMPTY REPO REQUIREMENT: the repo must NOT be left as a zero-commit bare
+# repo — cloning an empty repository is an edge case for the controller's
+# clone Job (unborn HEAD, no branch to base the per-run branch on). The script
+# below seeds one initial commit (a README describing the repo) on `main`
+# before the Project is ever applied. The file-path git transport used for the
+# seed push is internal to this pod — it is the ONLY place file-path git is
+# used (same rationale as medium's demo-remote-init: TIDE's core images speak
+# pure-Go go-git HTTP only).
+#
+# RWO ORDERING (Pitfall 3 mitigation): calculator-remote-pvc is ReadWriteOnce.
+# This Job and the git-http-server Deployment CANNOT hold the PVC mount
+# simultaneously on kind/minikube (local-path provisioner is node-local
+# exclusive). This Job must reach Complete — releasing the PVC mount — BEFORE
+# git-http-server.yaml is applied:
+#   kubectl wait --for=condition=Complete job/calculator-remote-init \
+#     -n tide-demo-calculator --timeout=2m
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: calculator-remote-init
+  namespace: tide-demo-calculator
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: demo-calculator
+    app.kubernetes.io/component: calculator-remote-init
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: calculator-remote-init
+        tideproject.k8s/sample: demo-calculator
+    spec:
+      restartPolicy: Never
+      securityContext:
+        # Matches the image's USER 1000 directive; the bare repo and all its
+        # objects end up owned by UID 1000 — the same UID the git-http-server
+        # Deployment runs as, so the server can read AND accept pushes.
+        runAsUser: 1000
+        runAsNonRoot: true
+      containers:
+        - name: calculator-remote-init
+          # Unpublished demo fixture image — build locally and load into the
+          # cluster (see README Apply Sequence step 1). IfNotPresent resolves
+          # the locally loaded image without a registry pull.
+          image: ghcr.io/jsquirrelz/tide-git-http-server:1.0.0
+          imagePullPolicy: IfNotPresent
+          # Command override: skip the image's nginx entrypoint entirely and
+          # run the seed script inline instead.
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+
+              # Idempotent-by-refusal: a re-run (Job re-apply, backoff retry
+              # after a partial failure past this point) must never touch an
+              # existing repo — refuse and exit clean.
+              if [ -e /workspace/calculator.git ]; then
+                echo "calculator.git already exists — leaving it untouched"
+                exit 0
+              fi
+
+              git init --bare --initial-branch=main /workspace/calculator.git
+              # Accept anonymous pushes over smart HTTP (git-http-backend
+              # honors http.receivepack; the ClusterIP Service keeps this
+              # in-cluster only).
+              git -C /workspace/calculator.git config http.receivepack true
+              git -C /workspace/calculator.git config core.sharedRepository group
+
+              # Seed an initial commit so the repo is never empty. Clone of an
+              # empty repo lands on an unborn branch — normalize the name to
+              # main explicitly before committing.
+              seed_dir=$(mktemp -d)
+              git clone /workspace/calculator.git "$seed_dir/seed"
+              cd "$seed_dir/seed"
+              git checkout -b main
+              cat > README.md <<'SEED'
+              # calculator
+
+              Seed repository for the TIDE demo-calculator sample.
+
+              TIDE clones this repo, plans a single-page web calculator
+              (index.html + style.css + app.js), builds it via real Claude,
+              and pushes the result back on a per-run branch
+              (tide/run-demo-calculator-<unix-ts>). main stays untouched.
+              SEED
+              git add README.md
+              # Inline identity flags — no writable global git config needed
+              # inside the nonroot container.
+              git -c user.name="tide-seed" -c user.email="tide-seed@localhost" \
+                commit -m "seed: initial README for the demo-calculator remote"
+              # File-path push internal to this pod — the only file-path git
+              # transport in the sample.
+              git push origin main
+              echo "calculator.git seeded with initial commit on main"
+          volumeMounts:
+            - name: calculator-remote
+              mountPath: /workspace
+      volumes:
+        - name: calculator-remote
+          persistentVolumeClaim:
+            claimName: calculator-remote-pvc

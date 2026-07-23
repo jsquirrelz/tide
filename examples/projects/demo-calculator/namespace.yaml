@@ -1,0 +1,16 @@
+# examples/projects/demo-calculator/namespace.yaml — demo-calculator sample namespace.
+#
+# Distinct from Phase 1's `tide-samples` (plural) kubebuilder fixture namespace
+# per Pitfall 9 — the two paths serve different audiences and never share
+# resources. This sample deliberately uses the `tide-demo-` prefix rather than
+# the `tide-sample-` prefix (tide-sample-small/medium/large): it is a demo
+# payoff sample — the deliverable is a working web calculator an operator can
+# open in a browser, not a cost-tier rung on the sample spectrum.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tide-demo-calculator
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: demo-calculator

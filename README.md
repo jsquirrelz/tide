@@ -165,6 +165,7 @@ Samples live under [examples/projects](examples/projects/):
 | --- | ---: | --- | --- |
 | [small](examples/projects/small/) | $0 | Stub-subagent smoke test for install and dispatch plumbing | None |
 | [medium](examples/projects/medium/) | about $5 | Real Claude run against an in-cluster HTTP git remote | Anthropic API key |
+| [demo-calculator](examples/projects/demo-calculator/) | about $10 | Real Claude builds a web calculator via in-cluster git remote | Anthropic API key |
 | [large](examples/projects/large/) | about $25 | Maintainer acceptance run against this TIDE repo | Anthropic API key and GitHub PAT |
 
 Start with `small`. Use `medium` only after the dashboard, signing key, namespace resources, and provider Secret path are clear. Treat `large` as a maintainer acceptance ritual, not a casual first run.
