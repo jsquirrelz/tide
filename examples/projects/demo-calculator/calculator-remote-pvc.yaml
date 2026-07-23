@@ -1,0 +1,30 @@
+# examples/projects/demo-calculator/calculator-remote-pvc.yaml — backing storage
+# for the in-cluster calculator.git remote.
+#
+# The demo-calculator sample's in-cluster git remote lives on this PVC. The
+# calculator-remote-init Job (`seed-remote-job.yaml`) seeds a bare repo at
+# /workspace/calculator.git; the git-http-server Deployment then mounts the
+# SAME PVC at /srv/git and serves it over HTTP. The in-cluster Job +
+# shared-PVC pattern keeps the entire dependency chain local to the cluster —
+# no external public repo required (same architecture as the medium sample).
+#
+# 100Mi is ample for the tiny seed commit (one README) plus the per-run-branch
+# commits TIDE pushes back (three small web files per run).
+# ReadWriteOnce is sufficient because the seed Job and the git-http server
+# never mount the PVC simultaneously — the apply order (README steps 6–7)
+# enforces seed-Job-Complete before the server Deployment is applied.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: calculator-remote-pvc
+  namespace: tide-demo-calculator
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: demo-calculator
+    app.kubernetes.io/component: calculator-remote
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 100Mi

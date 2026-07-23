@@ -1,0 +1,104 @@
+# examples/projects/demo-calculator/git-http-server.yaml — in-cluster git remote.
+#
+# The tide-git-http-server Deployment serves the bare calculator.git repository
+# on calculator-remote-pvc over HTTP (smart HTTP protocol via git http-backend
+# CGI + nginx + fcgiwrap). This gives TIDE an in-cluster http:// URL that
+# exercises the same pure-Go go-git transport as production HTTPS.
+#
+# T-08-05-01 (Tampering): Service type is ClusterIP — the server is NOT
+# reachable from outside the cluster. Anonymous push intentional for demo only.
+#
+# T-08-05-04 (EoP): Container runs as nonroot UID 1000 (matches the image's
+# USER 1000 directive + Deployment securityContext).
+#
+# RWO ORDERING (Pitfall 3 mitigation): calculator-remote-pvc is ReadWriteOnce.
+# The seed Job and this server Deployment CANNOT hold the PVC mount
+# simultaneously on kind/minikube (local-path provisioner is node-local
+# exclusive). Apply sequence:
+#   Step 6: kubectl wait --for=condition=Complete job/calculator-remote-init -n tide-demo-calculator --timeout=2m
+#   Step 7: kubectl apply -f examples/projects/demo-calculator/git-http-server.yaml
+# The seed Job's Pod terminates after completion, releasing the PVC mount.
+# Only THEN does the server Deployment Pod start and mount the PVC.
+#
+# PVC mount path: The seed Job populates the repo at /workspace/calculator.git.
+# The server Deployment mounts the same PVC at /srv/git/ (different mount path,
+# same storage), so the repo is served as /srv/git/calculator.git — matching
+# the GIT_PROJECT_ROOT in nginx.conf.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: git-http-server
+  namespace: tide-demo-calculator
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: demo-calculator
+    app.kubernetes.io/component: git-http-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: git-http-server
+  template:
+    metadata:
+      labels:
+        app: git-http-server
+        app.kubernetes.io/component: git-http-server
+        tideproject.k8s/sample: demo-calculator
+    spec:
+      containers:
+        - name: git-http-server
+          # Unpublished demo fixture image — build locally and load into the
+          # cluster (see README Apply Sequence step 1).
+          image: ghcr.io/jsquirrelz/tide-git-http-server:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            # nginx listens on 8080 (nonroot UID 1000 cannot bind privileged
+            # port 80). The Service maps port 80 → targetPort 8080, so the
+            # http://git-http-server/calculator.git URL is unchanged.
+            - containerPort: 8080
+              protocol: TCP
+          volumeMounts:
+            # Mount calculator-remote-pvc at /srv/git/ so the repo seeded by
+            # the init Job at /workspace/calculator.git is served at
+            # /srv/git/calculator.git.
+            # (GIT_PROJECT_ROOT in nginx.conf is /srv/git)
+            - name: calculator-remote
+              mountPath: /srv/git
+          securityContext:
+            # T-08-05-04: non-root enforcement at container level.
+            runAsUser: 1000
+            runAsNonRoot: true
+            # readOnlyRootFilesystem must be false — nginx writes pid/tmp files to
+            # /run/nginx/ and /var/lib/nginx/tmp/; fcgiwrap writes the Unix socket
+            # to /run/nginx/fcgi.sock (nonroot-owned; /run itself is root-owned).
+            # These are pre-created by the Dockerfile with nonroot ownership.
+            readOnlyRootFilesystem: false
+      volumes:
+        - name: calculator-remote
+          persistentVolumeClaim:
+            claimName: calculator-remote-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: git-http-server
+  namespace: tide-demo-calculator
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: demo-calculator
+    app.kubernetes.io/component: git-http-server
+spec:
+  # T-08-05-01 (Tampering) mitigation: ClusterIP (NOT NodePort or LoadBalancer).
+  # Only pods inside the cluster can reach this service. The anonymous push
+  # capability is intentional for this in-cluster demo context.
+  type: ClusterIP
+  selector:
+    app: git-http-server
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP
